@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -59,10 +60,22 @@ func resolveHookExecutable() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.IsDir() || info.Mode()&0o111 == 0 {
+	if !isHookExecutableFile(info, runtime.GOOS) {
 		return "", fmt.Errorf("监控端二进制不可执行: %s", executable)
 	}
 	return executable, nil
+}
+
+// isHookExecutableFile reports whether path info is a usable Claude hook binary.
+// Windows file modes usually lack Unix execute bits; existence of a regular file is enough.
+func isHookExecutableFile(info os.FileInfo, goos string) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	if goos == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func configureClaudeHooks(settingsPath, executable, monitorConfig string) (claudeInitResult, error) {
@@ -208,7 +221,16 @@ func isAgentStatusClaudeHook(command string) bool {
 	return strings.Contains(command, "agent-status-monitor") && strings.Contains(command, "claude-hook")
 }
 
+// shellQuote quotes a path/arg for the host shell used by Claude Code hooks.
 func shellQuote(value string) string {
+	return shellQuoteFor(runtime.GOOS, value)
+}
+
+// shellQuoteFor quotes for a specific GOOS (Unix: POSIX single quotes; Windows: cmd double quotes).
+func shellQuoteFor(goos, value string) string {
+	if goos == "windows" {
+		return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 

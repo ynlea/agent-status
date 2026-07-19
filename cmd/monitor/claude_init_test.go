@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -77,9 +78,52 @@ func TestConfigureClaudeHooksMergesAndUpdates(t *testing.T) {
 }
 
 func TestShellQuote(t *testing.T) {
-	got := shellQuote("/tmp/agent's monitor")
+	got := shellQuoteFor("linux", "/tmp/agent's monitor")
 	if got != "'/tmp/agent'\"'\"'s monitor'" {
-		t.Fatalf("quote=%q", got)
+		t.Fatalf("linux quote=%q", got)
+	}
+	got = shellQuoteFor("windows", `C:\agent's "monitor"`)
+	want := `"C:\agent's ""monitor"""`
+	if got != want {
+		t.Fatalf("windows quote=%q want=%q", got, want)
+	}
+	if shellQuote("x") != shellQuoteFor(runtime.GOOS, "x") {
+		t.Fatal("shellQuote should match host GOOS")
+	}
+}
+
+func TestIsHookExecutableFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent-status-monitor")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isHookExecutableFile(info, "windows") {
+		t.Fatal("windows should accept regular file without execute bits")
+	}
+	if isHookExecutableFile(info, "linux") {
+		t.Fatal("linux should reject file without execute bits")
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isHookExecutableFile(info, "linux") {
+		t.Fatal("linux should accept executable file")
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isHookExecutableFile(dirInfo, "windows") || isHookExecutableFile(dirInfo, "linux") {
+		t.Fatal("directory is never an executable")
 	}
 }
 
