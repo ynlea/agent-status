@@ -1,0 +1,226 @@
+package server
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/ynlea/agent-status/internal/auth"
+	"github.com/ynlea/agent-status/internal/store"
+	"github.com/ynlea/agent-status/pkg/apitypes"
+)
+
+type Server struct {
+	Key    string
+	Store  store.Store
+	Hub    *Hub
+	Logger *slog.Logger
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func (s *Server) log() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
+}
+
+func (s *Server) Routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/report", s.requireAuth(s.handleReport))
+	mux.HandleFunc("/api/v1/machines", s.requireAuth(s.handleMachines))
+	mux.HandleFunc("/api/v1/machines/", s.requireAuth(s.handleMachineSub))
+	mux.HandleFunc("/api/v1/history", s.requireAuth(s.handleHistory))
+	mux.HandleFunc("/api/v1/ws", s.handleWS)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	return mux
+}
+
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !auth.Check(r, s.Key) {
+			s.log().Warn("鉴权失败", "请求路径", r.URL.Path)
+			writeErr(w, http.StatusUnauthorized, "unauthorized", "invalid or missing key")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+		return
+	}
+	var req apitypes.ReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+		return
+	}
+	if req.MachineID == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "machine_id required")
+		return
+	}
+	for _, sess := range req.Sessions {
+		if sess.State != "" && !sess.State.Valid() {
+			writeErr(w, http.StatusBadRequest, "invalid_state", "state must be confirm|working|done|idle")
+			return
+		}
+	}
+
+	changed, wasOnline := s.Store.ApplyReport(req)
+	if !wasOnline {
+		s.log().Info("设备上线",
+			"设备标识", req.MachineID,
+			"设备名称", req.MachineName,
+			"平台", req.Platform,
+			"会话数", len(req.Sessions),
+		)
+		s.Hub.Broadcast(apitypes.WSEvent{
+			Type: apitypes.WSMachineOnline,
+			Payload: apitypes.Machine{
+				MachineID:   req.MachineID,
+				MachineName: req.MachineName,
+				Platform:    req.Platform,
+				Online:      true,
+				LastSeenAt:  time.Now().UTC(),
+			},
+		})
+	}
+	for _, sess := range changed {
+		// Only log real session changes (new or state transition); quiet heartbeats stay silent.
+		s.log().Info("会话状态已更新",
+			"设备标识", req.MachineID,
+			"设备名称", req.MachineName,
+			"来源", sess.Source,
+			"代理", sess.Agent,
+			"会话标识", sess.SessionID,
+			"显示名称", sess.DisplayName,
+			"状态", sess.State,
+			"颜色", sess.State.Color(),
+			"说明", sess.Message,
+		)
+		s.Hub.Broadcast(apitypes.WSEvent{Type: apitypes.WSSessionUpsert, Payload: sess})
+		s.Hub.Broadcast(apitypes.WSEvent{
+			Type: apitypes.WSNotification,
+			Payload: apitypes.NotificationPayload{
+				MachineID:   sess.MachineID,
+				MachineName: sess.MachineName,
+				Agent:       sess.Agent,
+				SessionID:   sess.SessionID,
+				DisplayName: sess.DisplayName,
+				State:       sess.State,
+				Color:       sess.State.Color(),
+				Message:     sess.Message,
+				At:          sess.UpdatedAt,
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"changed": len(changed),
+	})
+}
+
+func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"machines": s.Store.ListMachines(),
+	})
+}
+
+func (s *Server) handleMachineSub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/machines/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 || parts[1] != "sessions" || parts[0] == "" {
+		writeErr(w, http.StatusNotFound, "not_found", "use /api/v1/machines/{id}/sessions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"machine_id": parts[0],
+		"sessions":   s.Store.ListSessions(parts[0]),
+	})
+}
+
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	limit := 50
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"history": s.Store.ListHistory(limit),
+	})
+}
+
+func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	if !auth.Check(r, s.Key) {
+		writeErr(w, http.StatusUnauthorized, "unauthorized", "invalid or missing key")
+		return
+	}
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	s.Hub.Add(c)
+	defer s.Hub.Remove(c)
+	for {
+		if _, _, err := c.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+// RunCleanupLoop periodically cleans history and marks stale machines offline.
+func (s *Server) RunCleanupLoop(stop <-chan struct{}, every time.Duration, historyTTLSec int64, historyMax int, machineOfflineSec int64) {
+	if every <= 0 {
+		every = time.Minute
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			del, off := s.Store.Cleanup(historyTTLSec, historyMax, machineOfflineSec)
+			if del > 0 || off > 0 {
+				s.log().Info("历史记录清理完成", "删除记录数", del, "离线设备数", off)
+			}
+		}
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, apitypes.ErrorBody{
+		Error: apitypes.ErrorDetail{Code: code, Message: msg},
+	})
+}

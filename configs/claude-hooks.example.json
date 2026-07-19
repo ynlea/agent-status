@@ -1,0 +1,125 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agent-status-monitor claude-hook --config /path/to/monitor.json",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

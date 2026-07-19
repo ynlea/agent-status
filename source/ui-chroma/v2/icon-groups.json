@@ -1,0 +1,49 @@
+{
+  "boards": [
+    {
+      "file": "group-11-home-cats-v2.png",
+      "icons": [
+        "cat_hero_wink_v2.png",
+        "cat_brand_avatar_v2.png",
+        "cat_empty_sleep_v2.png",
+        "cat_detail_peek_v2.png"
+      ]
+    },
+    {
+      "file": "group-12-list-cats-v2.png",
+      "icons": [
+        "cat_white_bust_v2.png",
+        "cat_gray_tabby_bust_v2.png",
+        "cat_orange_tabby_bust_v2.png",
+        "cat_ragdoll_bust_v2.png"
+      ]
+    },
+    {
+      "file": "group-13-device-specific-v2.png",
+      "icons": [
+        "device_thinkpad_v2.png",
+        "device_macbook_v2.png",
+        "device_macmini_v2.png",
+        "device_ubuntu_server_v2.png"
+      ]
+    },
+    {
+      "file": "group-14-device-generic-v2.png",
+      "icons": [
+        "device_windows_pc_v2.png",
+        "device_laptop_v2.png",
+        "device_server_v2.png",
+        "device_unknown_v2.png"
+      ]
+    },
+    {
+      "file": "group-15-navigation-v2.png",
+      "icons": [
+        "ic_nav_home_paw_v2.png",
+        "ic_nav_devices_monitor_v2.png",
+        "ic_nav_settings_gear_v2.png",
+        "ic_refresh_v2.png"
+      ]
+    }
+  ]
+}

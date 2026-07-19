@@ -1,0 +1,13 @@
+{
+  "server_url": "http://127.0.0.1:8080",
+  "key": "change-me",
+  "machine_id": "desk-linux",
+  "machine_name": "desk-linux",
+  "platform": "linux",
+  "report_interval_sec": 15,
+  "codex_app_server": true,
+  "codex_file_watch": true,
+  "codex_sandbox_mode": "",
+  "codex_sessions_dir": "",
+  "state_file": ""
+}

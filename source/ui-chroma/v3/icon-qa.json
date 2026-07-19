@@ -1,0 +1,86 @@
+{
+  "boardCount": 2,
+  "iconCount": 8,
+  "boardSize": [
+    2048,
+    2048
+  ],
+  "iconSize": [
+    512,
+    512
+  ],
+  "icons": [
+    {
+      "board": "group-16-home-ragdoll-cartoon-v3.png",
+      "quadrant": "top-left",
+      "icon": "cat_hero_wink_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 105275,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-16-home-ragdoll-cartoon-v3.png",
+      "quadrant": "top-right",
+      "icon": "cat_brand_avatar_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 110555,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-16-home-ragdoll-cartoon-v3.png",
+      "quadrant": "bottom-left",
+      "icon": "cat_empty_sleep_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 87757,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-16-home-ragdoll-cartoon-v3.png",
+      "quadrant": "bottom-right",
+      "icon": "cat_detail_peek_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 97755,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-17-list-cats-cartoon-v3.png",
+      "quadrant": "top-left",
+      "icon": "cat_white_bust_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 93370,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-17-list-cats-cartoon-v3.png",
+      "quadrant": "top-right",
+      "icon": "cat_gray_tabby_bust_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 92680,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-17-list-cats-cartoon-v3.png",
+      "quadrant": "bottom-left",
+      "icon": "cat_orange_tabby_bust_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 92203,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-17-list-cats-cartoon-v3.png",
+      "quadrant": "bottom-right",
+      "icon": "cat_ragdoll_bust_v3.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 93792,
+      "greenResidue": 0
+    }
+  ]
+}

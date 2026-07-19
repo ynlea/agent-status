@@ -1,0 +1,374 @@
+{
+  "boardCount": 10,
+  "iconCount": 40,
+  "boardSize": [
+    2048,
+    2048
+  ],
+  "iconSize": [
+    512,
+    512
+  ],
+  "icons": [
+    {
+      "board": "group-01-cat-core.png",
+      "quadrant": "top-left",
+      "icon": "cat_avatar.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 115617,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-01-cat-core.png",
+      "quadrant": "top-right",
+      "icon": "cat_welcome.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 90469,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-01-cat-core.png",
+      "quadrant": "bottom-left",
+      "icon": "cat_empty_rest.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 66763,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-01-cat-core.png",
+      "quadrant": "bottom-right",
+      "icon": "cat_app_icon.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 121452,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-02-agent-marks.png",
+      "quadrant": "top-left",
+      "icon": "agent_claude.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 120437,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-02-agent-marks.png",
+      "quadrant": "top-right",
+      "icon": "agent_codex.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 70754,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-02-agent-marks.png",
+      "quadrant": "bottom-left",
+      "icon": "agent_unknown.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 118790,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-02-agent-marks.png",
+      "quadrant": "bottom-right",
+      "icon": "agent_generic.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 118638,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-03-cat-states.png",
+      "quadrant": "top-left",
+      "icon": "cat_empty_devices.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 118085,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-03-cat-states.png",
+      "quadrant": "top-right",
+      "icon": "cat_offline.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 73991,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-03-cat-states.png",
+      "quadrant": "bottom-left",
+      "icon": "cat_error.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 91816,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-03-cat-states.png",
+      "quadrant": "bottom-right",
+      "icon": "cat_working.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 74036,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-04-cat-emotions.png",
+      "quadrant": "top-left",
+      "icon": "cat_confirm.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 78941,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-04-cat-emotions.png",
+      "quadrant": "top-right",
+      "icon": "cat_done.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 91337,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-04-cat-emotions.png",
+      "quadrant": "bottom-left",
+      "icon": "cat_search_empty.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 85579,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-04-cat-emotions.png",
+      "quadrant": "bottom-right",
+      "icon": "cat_sleep_night.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 79596,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-05-device-types.png",
+      "quadrant": "top-left",
+      "icon": "device_laptop.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 89738,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-05-device-types.png",
+      "quadrant": "top-right",
+      "icon": "device_desktop.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 94893,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-05-device-types.png",
+      "quadrant": "bottom-left",
+      "icon": "device_server.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 105366,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-05-device-types.png",
+      "quadrant": "bottom-right",
+      "icon": "device_unknown.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 146963,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-06-nav-icons.png",
+      "quadrant": "top-left",
+      "icon": "ic_nav_home.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 111502,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-06-nav-icons.png",
+      "quadrant": "top-right",
+      "icon": "ic_nav_devices.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 130973,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-06-nav-icons.png",
+      "quadrant": "bottom-left",
+      "icon": "ic_nav_settings.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 95057,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-06-nav-icons.png",
+      "quadrant": "bottom-right",
+      "icon": "ic_bell.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 84712,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-07-settings-icons.png",
+      "quadrant": "top-left",
+      "icon": "ic_server_url.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 91328,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-07-settings-icons.png",
+      "quadrant": "top-right",
+      "icon": "ic_key.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 77933,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-07-settings-icons.png",
+      "quadrant": "bottom-left",
+      "icon": "ic_theme_system.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 101493,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-07-settings-icons.png",
+      "quadrant": "bottom-right",
+      "icon": "ic_visibility.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 76575,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-08-status-notify.png",
+      "quadrant": "top-left",
+      "icon": "ic_notify_confirm.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 88590,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-08-status-notify.png",
+      "quadrant": "top-right",
+      "icon": "ic_notify_working.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 81330,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-08-status-notify.png",
+      "quadrant": "bottom-left",
+      "icon": "ic_notify_done.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 89055,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-08-status-notify.png",
+      "quadrant": "bottom-right",
+      "icon": "ic_link_off.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 44669,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-09-utility-icons.png",
+      "quadrant": "top-left",
+      "icon": "ic_back.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 61106,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-09-utility-icons.png",
+      "quadrant": "top-right",
+      "icon": "ic_refresh.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 81983,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-09-utility-icons.png",
+      "quadrant": "bottom-left",
+      "icon": "ic_expand.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 47364,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-09-utility-icons.png",
+      "quadrant": "bottom-right",
+      "icon": "ic_link_ok.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 87548,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-10-extra-utils.png",
+      "quadrant": "top-left",
+      "icon": "ic_warning.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 89406,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-10-extra-utils.png",
+      "quadrant": "top-right",
+      "icon": "ic_chevron_right.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 44174,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-10-extra-utils.png",
+      "quadrant": "bottom-left",
+      "icon": "ic_collapse.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 46827,
+      "greenResidue": 0
+    },
+    {
+      "board": "group-10-extra-utils.png",
+      "quadrant": "bottom-right",
+      "icon": "ic_visibility_off.png",
+      "width": 512,
+      "height": 512,
+      "coverage": 79691,
+      "greenResidue": 0
+    }
+  ]
+}

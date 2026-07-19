@@ -1,0 +1,64 @@
+# --- secrets / local config ---
+.env
+.env.*
+!.env.example
+monitor.json
+projects.lnk
+.claude/settings.local.json
+
+# --- runtime data ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/logs/
+*.log
+
+# --- build / binaries ---
+/bin/
+/dist/
+/tmp/
+/monitor
+agent-status-mock
+agent-status-server
+agent-status-monitor
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- local agent / tooling state ---
+.mindfs/
+
+# --- Android (legacy) ---
+android/local.properties
+android/.gradle/
+android/**/build/
+android/captures/
+android/.cxx/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.keystore
+*.jks
+key.properties
+
+# --- Flutter intermediates (mobile/.gitignore also covers these) ---
+mobile/.dart_tool/
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/**/local.properties
+
+# --- source design intermediates (keep icons / flutter_assets / metadata) ---
+source/**/boards-generated/
+source/**/boards-normalized/

@@ -1,0 +1,17 @@
+services:
+  agent-status:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AGENT_STATUS_ADDR: ":8080"
+      AGENT_STATUS_KEY: ${AGENT_STATUS_KEY:-change-me}
+      AGENT_STATUS_DB: /data/agent-status.db
+    volumes:
+      - agent_status_data:/data
+    restart: unless-stopped
+
+volumes:
+  agent_status_data:

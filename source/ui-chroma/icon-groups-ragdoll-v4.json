@@ -1,0 +1,22 @@
+{
+  "boards": [
+    {
+      "file": "group-ragdoll-01-core-v4.png",
+      "icons": [
+        "cat_brand_avatar_v3.png",
+        "cat_hero_wink_v3.png",
+        "cat_empty_sleep_v3.png",
+        "cat_detail_peek_v3.png"
+      ]
+    },
+    {
+      "file": "group-ragdoll-02-busts-v4.png",
+      "icons": [
+        "cat_white_bust_v3.png",
+        "cat_gray_tabby_bust_v3.png",
+        "cat_orange_tabby_bust_v3.png",
+        "cat_ragdoll_bust_v3.png"
+      ]
+    }
+  ]
+}

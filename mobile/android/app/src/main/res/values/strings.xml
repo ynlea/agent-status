@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qingya_channel_name">会话状态提醒</string>
+    <string name="qingya_channel_desc">需确认 / 工作中 / 完成 等状态变化（含声音与震动）</string>
+    <string name="qingya_ongoing_channel_name">后台监听</string>
+    <string name="qingya_ongoing_channel_desc">保持 WebSocket 连接的前台服务通知</string>
+    <string name="qingya_ongoing_title">轻芽 · 监听中</string>
+</resources>

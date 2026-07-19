@@ -1,0 +1,129 @@
+openapi: 3.0.3
+info:
+  title: Agent Status API
+  version: "1.0.0"
+  description: Private multi-device agent session status API (v1 contract).
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - bearerAuth: []
+  - headerKey: []
+paths:
+  /healthz:
+    get:
+      security: []
+      summary: Liveness
+      responses:
+        "200":
+          description: ok
+  /api/v1/report:
+    post:
+      summary: Monitor report (heartbeat + sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRequest"
+      responses:
+        "200":
+          description: accepted
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/machines:
+    get:
+      summary: List machines
+      responses:
+        "200":
+          description: machine list
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/machines/{id}/sessions:
+    get:
+      summary: List sessions for a machine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: sessions
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/history:
+    get:
+      summary: Short state-change history
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: history newest first
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/ws:
+    get:
+      summary: WebSocket event stream
+      responses:
+        "101":
+          description: Switching Protocols
+        "401":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    headerKey:
+      type: apiKey
+      in: header
+      name: X-Agent-Status-Key
+  responses:
+    Error:
+      description: error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+  schemas:
+    SessionState:
+      type: string
+      enum: [confirm, working, done, idle]
+    Session:
+      type: object
+      required: [agent, session_id, state]
+      properties:
+        machine_id: { type: string }
+        machine_name: { type: string }
+        agent: { type: string, enum: [codex, claude] }
+        session_id: { type: string }
+        display_name: { type: string }
+        state: { $ref: "#/components/schemas/SessionState" }
+        message: { type: string }
+        updated_at: { type: string, format: date-time }
+    ReportRequest:
+      type: object
+      required: [machine_id, machine_name, platform, sessions]
+      properties:
+        machine_id: { type: string }
+        machine_name: { type: string }
+        platform: { type: string, enum: [linux, windows] }
+        reported_at: { type: string, format: date-time }
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }

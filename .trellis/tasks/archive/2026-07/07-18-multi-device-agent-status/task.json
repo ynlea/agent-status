@@ -1,0 +1,32 @@
+{
+  "id": "multi-device-agent-status",
+  "name": "multi-device-agent-status",
+  "title": "多端 Agent 状态监控系统",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "GreenLeo",
+  "assignee": "GreenLeo",
+  "createdAt": "2026-07-18",
+  "completedAt": "2026-07-18",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-18-api-contract",
+    "07-18-server-core",
+    "07-18-monitor-agent",
+    "07-18-android-app",
+    "07-18-docs-deploy"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

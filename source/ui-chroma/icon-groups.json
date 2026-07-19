@@ -1,0 +1,114 @@
+{
+  "boards": [
+    {
+      "file": "group-01-cat-core.png",
+      "icons": [
+        "cat_avatar.png",
+        "cat_welcome.png",
+        "cat_empty_rest.png",
+        "cat_app_icon.png"
+      ],
+      "batch": 0,
+      "notes": "主路径猫咪：头像/引导/空态趴睡/App标"
+    },
+    {
+      "file": "group-02-agent-marks.png",
+      "icons": [
+        "agent_claude.png",
+        "agent_codex.png",
+        "agent_unknown.png",
+        "agent_generic.png"
+      ],
+      "batch": 0,
+      "notes": "Agent 抽象标识"
+    },
+    {
+      "file": "group-03-cat-states.png",
+      "icons": [
+        "cat_empty_devices.png",
+        "cat_offline.png",
+        "cat_error.png",
+        "cat_working.png"
+      ],
+      "batch": 1,
+      "notes": "设备空态/离线/错误/工作中"
+    },
+    {
+      "file": "group-04-cat-emotions.png",
+      "icons": [
+        "cat_confirm.png",
+        "cat_done.png",
+        "cat_search_empty.png",
+        "cat_sleep_night.png"
+      ],
+      "batch": 2,
+      "notes": "确认/完成/搜索无果/夜间"
+    },
+    {
+      "file": "group-05-device-types.png",
+      "icons": [
+        "device_laptop.png",
+        "device_desktop.png",
+        "device_server.png",
+        "device_unknown.png"
+      ],
+      "batch": 1,
+      "notes": "设备类型图"
+    },
+    {
+      "file": "group-06-nav-icons.png",
+      "icons": [
+        "ic_nav_home.png",
+        "ic_nav_devices.png",
+        "ic_nav_settings.png",
+        "ic_bell.png"
+      ],
+      "batch": 1,
+      "notes": "底栏与通知入口"
+    },
+    {
+      "file": "group-07-settings-icons.png",
+      "icons": [
+        "ic_server_url.png",
+        "ic_key.png",
+        "ic_theme_system.png",
+        "ic_visibility.png"
+      ],
+      "batch": 1,
+      "notes": "设置：地址/密钥/主题/显隐"
+    },
+    {
+      "file": "group-08-status-notify.png",
+      "icons": [
+        "ic_notify_confirm.png",
+        "ic_notify_working.png",
+        "ic_notify_done.png",
+        "ic_link_off.png"
+      ],
+      "batch": 1,
+      "notes": "通知三态 + 断开连接"
+    },
+    {
+      "file": "group-09-utility-icons.png",
+      "icons": [
+        "ic_back.png",
+        "ic_refresh.png",
+        "ic_expand.png",
+        "ic_link_ok.png"
+      ],
+      "batch": 1,
+      "notes": "返回/刷新/展开/已连接"
+    },
+    {
+      "file": "group-10-extra-utils.png",
+      "icons": [
+        "ic_warning.png",
+        "ic_chevron_right.png",
+        "ic_collapse.png",
+        "ic_visibility_off.png"
+      ],
+      "batch": 2,
+      "notes": "警告/箭头/折叠/密钥隐藏"
+    }
+  ]
+}
