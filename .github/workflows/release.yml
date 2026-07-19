@@ -1,0 +1,142 @@
+name: Release
+
+# 推送 v* 标签：用当前 tag 指向的仓库代码编译并发版
+# Go 交叉编译 + Flutter Android APK（不依赖本地未提交的 scripts/）
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile server and monitor
+        run: |
+          set -euo pipefail
+          out=dist/release
+          mkdir -p "$out"
+
+          build_one() {
+            local goos="$1" goarch="$2" bin="$3" pkg="$4"
+            local ext=""
+            if [ "$goos" = "windows" ]; then ext=".exe"; fi
+            local name="${bin}-${goos}-${goarch}${ext}"
+            echo "building $name"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags="-s -w" -o "$out/$name" "$pkg"
+          }
+
+          build_one linux amd64 agent-status-server ./cmd/server
+          build_one linux arm64 agent-status-server ./cmd/server
+          build_one linux amd64 agent-status-monitor ./cmd/monitor
+          build_one linux arm64 agent-status-monitor ./cmd/monitor
+          build_one windows amd64 agent-status-server ./cmd/server
+          build_one windows amd64 agent-status-monitor ./cmd/monitor
+
+          (cd "$out" && sha256sum agent-status-* > sha256sums.txt)
+          ls -la "$out"
+
+      - name: Upload Go artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries
+          path: dist/release/*
+          if-no-files-found: error
+
+  build-flutter-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Android APK (release)
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"
+          build_no="$(date -u +%Y%m%d%H%M)"
+          flutter build apk --release \
+            --build-name="$ver" \
+            --build-number="$build_no"
+
+      - name: Stage APK
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/dist/flutter"
+          cp -f build/app/outputs/flutter-apk/app-release.apk \
+            "$GITHUB_WORKSPACE/dist/flutter/qingya-android-release.apk"
+          ls -la "$GITHUB_WORKSPACE/dist/flutter"
+
+      - name: Upload Flutter artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-android
+          path: dist/flutter/*
+          if-no-files-found: error
+
+  release:
+    needs: [build-go, build-flutter-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Go artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: go-binaries
+          path: dist/release
+
+      - name: Download Flutter artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-android
+          path: dist/release
+
+      - name: List assets
+        run: ls -la dist/release
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/release/* --clobber
+          else
+            gh release create "$tag" dist/release/* \
+              --title "$tag" \
+              --generate-notes
+          fi
