@@ -81,14 +81,16 @@ jobs:
         run: flutter pub get
 
       - name: Build Android APK (release)
+        env:
+          # Android versionCode 上限 2100000000；用 run_number 即可
+          BUILD_NO: ${{ github.run_number }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           ver="${tag#v}"
-          build_no="$(date -u +%Y%m%d%H%M)"
           flutter build apk --release \
             --build-name="$ver" \
-            --build-number="$build_no"
+            --build-number="${BUILD_NO}"
 
       - name: Stage APK
         run: |
