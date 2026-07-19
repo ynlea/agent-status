@@ -113,6 +113,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 完整历史与标签，用于生成可读 changelog
+          fetch-depth: 0
 
       - name: Download Go artifacts
         uses: actions/download-artifact@v4
@@ -129,16 +132,90 @@ jobs:
       - name: List assets
         run: ls -la dist/release
 
+      - name: Build full release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+
+          # 上一个 tag（按版本排序，排除当前）
+          prev="$(git tag --list 'v*' --sort=-v:refname | grep -vxF "$tag" | head -n1 || true)"
+
+          {
+            echo "## ${tag}"
+            echo
+            if [ -n "${prev}" ]; then
+              echo "相对上一版本：**${prev} → ${tag}**"
+              echo
+              echo "### 提交变更"
+              echo
+              # 完整列出提交标题，正文直接展示（不是 compare 链接）
+              if git rev-parse "${prev}" >/dev/null 2>&1; then
+                git log --reverse --pretty=format:'- %s (%h)' "${prev}..${tag}"
+                echo
+                echo
+                # 变更文件摘要（避免过长，最多 80 行）
+                echo "### 变更文件"
+                echo
+                echo '```'
+                git diff --name-status "${prev}..${tag}" | head -n 80
+                echo '```'
+              else
+                echo "- （无法解析上一标签，改为列出本 tag 指向提交）"
+                git log -1 --pretty=format:'- %s (%h)'
+                echo
+              fi
+            else
+              echo "首个发布版本。"
+              echo
+              echo "### 提交变更"
+              echo
+              git log --reverse --pretty=format:'- %s (%h)' "${tag}"
+              echo
+            fi
+            echo
+            echo "### 本版资产"
+            echo
+            for f in dist/release/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f")"
+              size="$(du -h "$f" | awk '{print $1}')"
+              echo "- \`${base}\`（${size}）"
+            done
+            echo
+            echo "### 安装入口（脚本在仓库 main，二进制在本 Release）"
+            echo
+            echo '```bash'
+            echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/scripts/install.sh | bash"
+            echo '```'
+          } >"${notes_file}"
+
+          # 预览进日志，方便排查
+          echo "----- release notes -----"
+          cat "${notes_file}"
+          echo "-------------------------"
+          echo "file=${notes_file}" >>"${GITHUB_OUTPUT}"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          notes_file="${{ steps.notes.outputs.file }}"
+          # 兜底：若 output 为空则重建路径
+          if [ -z "${notes_file}" ] || [ ! -f "${notes_file}" ]; then
+            notes_file="${RUNNER_TEMP}/release-notes.md"
+          fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/release/* --clobber
+            gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
           else
             gh release create "$tag" dist/release/* \
               --title "$tag" \
-              --generate-notes
+              --notes-file "$notes_file"
           fi
