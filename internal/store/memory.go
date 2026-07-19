@@ -19,19 +19,43 @@ type Memory struct {
 	machines map[string]apitypes.Machine
 	sessions map[sessionKey]apitypes.Session
 	history  []apitypes.HistoryEntry
+	usage    map[string]apitypes.UsageEvent // dedupe_key -> event
 	maxHist  int
+	prices   *priceCache
 }
 
 func NewMemory(maxHistory int) *Memory {
 	if maxHistory <= 0 {
 		maxHistory = 50
 	}
-	return &Memory{
+	m := &Memory{
 		machines: make(map[string]apitypes.Machine),
 		sessions: make(map[sessionKey]apitypes.Session),
 		history:  make([]apitypes.HistoryEntry, 0, maxHistory),
+		usage:    make(map[string]apitypes.UsageEvent),
 		maxHist:  maxHistory,
+		prices:   newPriceCache(),
 	}
+	for _, p := range bundledPublicPrices {
+		m.prices.upsert(p, SourceBundled)
+	}
+	for _, p := range overridePublicPrices {
+		m.prices.upsert(p, SourceOverride)
+	}
+	return m
+}
+
+func (m *Memory) LookupModelPrice(model string) (ModelPrice, bool) {
+	return m.prices.lookup(model)
+}
+
+func (m *Memory) UpsertModelPrice(p ModelPrice, source string) error {
+	m.prices.upsert(p, source)
+	return nil
+}
+
+func (m *Memory) ListModelPrices() []ModelPrice {
+	return m.prices.snapshot()
 }
 
 func (m *Memory) Close() error { return nil }
@@ -167,6 +191,78 @@ func (m *Memory) ListHistory(limit int) []apitypes.HistoryEntry {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out
+}
+
+func (m *Memory) ApplyUsageReport(req apitypes.UsageReportRequest) (accepted, duplicates int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if req.MachineID == "" {
+		return 0, 0
+	}
+	now := req.ReportedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	prev, ok := m.machines[req.MachineID]
+	name := req.MachineName
+	if name == "" && ok {
+		name = prev.MachineName
+	}
+	platform := req.Platform
+	if platform == "" && ok {
+		platform = prev.Platform
+	}
+	m.machines[req.MachineID] = apitypes.Machine{
+		MachineID:   req.MachineID,
+		MachineName: name,
+		Platform:    platform,
+		Online:      true,
+		LastSeenAt:  now,
+	}
+	for _, raw := range req.Events {
+		e, ok := sanitizeUsageEvent(req.MachineID, raw)
+		if !ok {
+			continue
+		}
+		if _, exists := m.usage[e.DedupeKey]; exists {
+			duplicates++
+			continue
+		}
+		m.usage[e.DedupeKey] = e
+		accepted++
+	}
+	return accepted, duplicates
+}
+
+func (m *Memory) UsageSummary(q apitypes.UsageQuery) apitypes.UsageSummaryResponse {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	byModel := map[string]apitypes.UsageMetrics{}
+	for _, e := range m.usage {
+		if !eventMatches(e, q) {
+			continue
+		}
+		addEventToModelMap(byModel, e)
+	}
+	return finalizeSummaryFromModelMap(m.LookupModelPrice, q, byModel)
+}
+
+func (m *Memory) UsageBreakdown(q apitypes.UsageQuery) apitypes.UsageBreakdownResponse {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	groupBy := validateGroupBy(q.GroupBy)
+	groups := map[string]map[string]apitypes.UsageMetrics{}
+	for _, e := range m.usage {
+		if !eventMatches(e, q) {
+			continue
+		}
+		gk := groupKey(e, groupBy)
+		if groups[gk] == nil {
+			groups[gk] = map[string]apitypes.UsageMetrics{}
+		}
+		addEventToModelMap(groups[gk], e)
+	}
+	return finalizeBreakdown(m.LookupModelPrice, q, groupBy, groups)
 }
 
 func (m *Memory) Cleanup(maxAgeSeconds int64, maxCount int, machineOfflineAfter int64) (historyDeleted int, machinesOffline int) {

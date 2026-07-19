@@ -29,6 +29,22 @@ type Config struct {
 	// Empty means omit (Codex default). Examples: danger-full-access, workspace-write, read-only.
 	// Do not hardcode a dangerous mode in code; set per machine via config when needed.
 	CodexSandboxMode string `json:"codex_sandbox_mode,omitempty"`
+
+	// UsageEnabled turns on local token usage scan/report (default true).
+	UsageEnabled *bool `json:"usage_enabled,omitempty"`
+	// ClaudeProjectsDir overrides default ~/.claude/projects
+	ClaudeProjectsDir string `json:"claude_projects_dir,omitempty"`
+	// UsageStateFile stores usage file cursors (default ~/.agent-status/usage-cursors.json)
+	UsageStateFile string `json:"usage_state_file,omitempty"`
+	// UsageIntervalSec is the fallback rescan interval for usage (default 600).
+	UsageIntervalSec int `json:"usage_interval_sec,omitempty"`
+}
+
+func (c *Config) UsageScanEnabled() bool {
+	if c.UsageEnabled == nil {
+		return true
+	}
+	return *c.UsageEnabled
 }
 
 func (c *Config) AppServerEnabled() bool {
@@ -74,6 +90,17 @@ func LoadConfig(path string) (*Config, error) {
 	if c.CodexSessionsDir == "" {
 		home, _ := os.UserHomeDir()
 		c.CodexSessionsDir = filepath.Join(home, ".codex", "sessions")
+	}
+	if c.ClaudeProjectsDir == "" {
+		home, _ := os.UserHomeDir()
+		c.ClaudeProjectsDir = filepath.Join(home, ".claude", "projects")
+	}
+	if c.UsageStateFile == "" {
+		home, _ := os.UserHomeDir()
+		c.UsageStateFile = filepath.Join(home, ".agent-status", "usage-cursors.json")
+	}
+	if c.UsageIntervalSec <= 0 {
+		c.UsageIntervalSec = 600
 	}
 	return &c, nil
 }

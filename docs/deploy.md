@@ -2,6 +2,9 @@
 
 从零到手机可见状态的最短路径。
 
+> **推荐**：一键安装与启停管理见 [`docs/install.md`](./install.md)（Linux/Windows 脚本，Release 二进制，不走 Docker）。  
+> 下文为手动开发/运维路径。
+
 ## 1. 服务端
 
 需要 Go 1.22+（或 Docker）。
@@ -33,6 +36,13 @@ docker compose up -d --build
 | `-history-ttl-sec` | 历史保留秒数 | 86400 |
 | `-history-max` | 历史最大条数 | 50 |
 | `-offline-after-sec` | 无心跳判离线 | 120 |
+| `-pricing-sync` / `AGENT_STATUS_PRICING_SYNC` | 是否从 OpenRouter 同步模型价表 | `true` |
+| `-pricing-sync-on-start` / `AGENT_STATUS_PRICING_SYNC_ON_START` | 启动时立即同步一次 | `true` |
+| `-pricing-sync-interval` / `AGENT_STATUS_PRICING_SYNC_INTERVAL` | 同步间隔（如 `24h`） | `24h` |
+| `-openrouter-api-url` / `OPENROUTER_API_URL` | OpenRouter API 根路径 | `https://openrouter.ai/api/v1` |
+| `-openrouter-api-key` / `OPENROUTER_API_KEY` | 可选；拉价表一般可不填 | 空 |
+
+用量费用为 **估算（非账单）**：价表优先本地 override（含 Claude 缓存分项），其余由 OpenRouter 公开模型列表自动更新；同步失败不影响用量查询，继续用库内旧价。
 
 ## 2. 监控端（本机）
 

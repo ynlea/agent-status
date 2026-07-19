@@ -16,18 +16,26 @@
 
 ## 最短路径
 
+推荐用安装器（二进制 + 本机管理，**不走 Docker**）。仓库 Public 且有 Release 后：
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/ynlea/agent-status/main/scripts/install.sh | bash
+
+# Windows PowerShell
+# irm https://raw.githubusercontent.com/ynlea/agent-status/main/scripts/install.ps1 | iex
+```
+
+开发机本地编装：
+
 ```bash
 export PATH="$HOME/.local/go/bin:$PATH"
-export AGENT_STATUS_KEY=dev-secret
-
-# 终端 1：服务
-go run ./cmd/server -addr :8080 -key "$AGENT_STATUS_KEY"
-
-# 终端 2：监控（先改 configs/monitor.example.json）
-cp configs/monitor.example.json monitor.json
-# 编辑 key / server_url
-go run ./cmd/monitor -config monitor.json
+./scripts/release-build.sh
+./scripts/install.sh install --role all --key dev-secret \
+  --server-url http://127.0.0.1:29125 --local-bin ./dist/release --yes
 ```
+
+说明见 `docs/install.md`。手动 `go run` / Docker 见 `docs/deploy.md`。
 
 Flutter 客户端：
 
@@ -36,7 +44,7 @@ export PATH="$HOME/flutter/bin:$PATH"
 cd mobile && flutter pub get && flutter run
 ```
 
-更多：`mobile/README.md`、`docs/deploy.md`。
+更多：`mobile/README.md`。
 
 ## 开发
 

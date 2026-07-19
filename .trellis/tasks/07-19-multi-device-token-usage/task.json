@@ -1,0 +1,31 @@
+{
+  "id": "multi-device-token-usage",
+  "name": "multi-device-token-usage",
+  "title": "多端 Token 用量监控（采集器+服务端+手机）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "GreenLeo",
+  "assignee": "GreenLeo",
+  "createdAt": "2026-07-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-19-token-usage-server",
+    "07-19-token-usage-monitor",
+    "07-19-token-usage-mobile",
+    "07-19-model-pricing-openrouter-sync"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

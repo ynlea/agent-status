@@ -60,6 +60,82 @@ class RestClient {
         .toList();
   }
 
+  Future<UsageSummary> fetchUsageSummary({
+    required DateTime from,
+    required DateTime to,
+    String? machineId,
+    String? agent,
+    String? model,
+  }) async {
+    final res = await http
+        .get(
+          _usageUri('/api/v1/usage/summary', from, to,
+              machineId: machineId, agent: agent, model: model),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 30));
+    _ensureOk(res);
+    return UsageSummary.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<UsageBreakdown> fetchUsageBreakdown({
+    required DateTime from,
+    required DateTime to,
+    String groupBy = 'model',
+    String? machineId,
+    String? agent,
+    String? model,
+  }) async {
+    final res = await http
+        .get(
+          _usageUri(
+            '/api/v1/usage/breakdown',
+            from,
+            to,
+            machineId: machineId,
+            agent: agent,
+            model: model,
+            groupBy: groupBy,
+          ),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 30));
+    _ensureOk(res);
+    return UsageBreakdown.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  Uri _usageUri(
+    String path,
+    DateTime from,
+    DateTime to, {
+    String? machineId,
+    String? agent,
+    String? model,
+    String? groupBy,
+  }) {
+    final q = <String, String>{
+      'from': from.toUtc().toIso8601String(),
+      'to': to.toUtc().toIso8601String(),
+    };
+    if (machineId != null && machineId.isNotEmpty) {
+      q['machine_id'] = machineId;
+    }
+    if (agent != null && agent.isNotEmpty) {
+      q['agent'] = agent;
+    }
+    if (model != null && model.isNotEmpty) {
+      q['model'] = model;
+    }
+    if (groupBy != null && groupBy.isNotEmpty) {
+      q['group_by'] = groupBy;
+    }
+    return _u(path).replace(queryParameters: q);
+  }
+
   void _ensureOk(http.Response res) {
     if (res.statusCode >= 200 && res.statusCode < 300) return;
     if (res.statusCode == 401) {

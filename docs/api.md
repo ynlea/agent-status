@@ -63,6 +63,75 @@ Response:
 
 On **state change**, server emits WS `session_upsert` and `notification`.
 
+### `POST /api/v1/usage/report`
+
+Monitor batch upsert of token usage events (idempotent by `dedupe_key`, scoped with `machine_id` prefix server-side).
+
+```json
+{
+  "machine_id": "uuid-or-stable-id",
+  "machine_name": "desk-linux",
+  "platform": "linux",
+  "reported_at": "2026-07-19T12:00:00Z",
+  "events": [
+    {
+      "dedupe_key": "claude:msg_01ABC",
+      "agent": "claude",
+      "model": "claude-sonnet-4-5",
+      "session_id": "sess-1",
+      "occurred_at": "2026-07-19T12:00:00Z",
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "reasoning_tokens": 0,
+      "cache_write_tokens": 0,
+      "cache_hit_tokens": 1000
+    }
+  ]
+}
+```
+
+Notes:
+
+- `agent`: `claude` | `codex`
+- Codex `input_tokens` must already be **billed** (`raw input - cached`)
+- Zero-token empty events are ignored
+- Batch size max 2000
+
+Response:
+
+```json
+{ "ok": true, "accepted": 1, "duplicates": 0 }
+```
+
+### `GET /api/v1/usage/summary`
+
+Query:
+
+| param | meaning |
+|-------|---------|
+| `from` / `to` | RFC3339 window (default last 24h if both omitted) |
+| `machine_id` | optional filter |
+| `agent` | optional `claude` / `codex` |
+| `model` | optional exact model string |
+
+Response metrics: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_write_tokens`, `cache_hit_tokens`, `real_usage`, `cache_hit_rate`, `estimated_cost_usd`, `event_count`, `priced`.
+
+- `real_usage` = input + output + reasoning + cache_write + cache_hit (volume, not invoice)
+- `estimated_cost_usd` is an estimate from `model_prices` (local override + OpenRouter sync + bundled seed), not a vendor invoice
+
+### `GET /api/v1/usage/breakdown`
+
+Same filters as summary, plus `group_by=agent|model|machine|day` (default `model`).
+
+```json
+{
+  "from": "...",
+  "to": "...",
+  "group_by": "model",
+  "groups": [{ "key": "claude-sonnet-4-5", "input_tokens": 100, "real_usage": 1150 }]
+}
+```
+
 ### `GET /api/v1/machines`
 
 ```json

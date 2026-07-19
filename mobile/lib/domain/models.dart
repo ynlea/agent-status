@@ -192,6 +192,125 @@ DateTime? _parseTime(dynamic v) {
   return DateTime.tryParse('$v');
 }
 
+class UsageMetrics {
+  const UsageMetrics({
+    this.inputTokens = 0,
+    this.outputTokens = 0,
+    this.reasoningTokens = 0,
+    this.cacheWriteTokens = 0,
+    this.cacheHitTokens = 0,
+    this.realUsage = 0,
+    this.cacheHitRate,
+    this.estimatedCostUsd,
+    this.eventCount = 0,
+    this.priced = false,
+  });
+
+  final int inputTokens;
+  final int outputTokens;
+  final int reasoningTokens;
+  final int cacheWriteTokens;
+  final int cacheHitTokens;
+  final int realUsage;
+  final double? cacheHitRate;
+  final double? estimatedCostUsd;
+  final int eventCount;
+  final bool priced;
+
+  int get outputTotal => outputTokens + reasoningTokens;
+
+  factory UsageMetrics.fromJson(Map<String, dynamic> json) {
+    return UsageMetrics(
+      inputTokens: _asInt(json['input_tokens']),
+      outputTokens: _asInt(json['output_tokens']),
+      reasoningTokens: _asInt(json['reasoning_tokens']),
+      cacheWriteTokens: _asInt(json['cache_write_tokens']),
+      cacheHitTokens: _asInt(json['cache_hit_tokens']),
+      realUsage: _asInt(json['real_usage']),
+      cacheHitRate: _asDouble(json['cache_hit_rate']),
+      estimatedCostUsd: _asDouble(json['estimated_cost_usd']),
+      eventCount: _asInt(json['event_count']),
+      priced: json['priced'] == true,
+    );
+  }
+}
+
+class UsageSummary {
+  const UsageSummary({
+    required this.from,
+    required this.to,
+    required this.metrics,
+  });
+
+  final DateTime? from;
+  final DateTime? to;
+  final UsageMetrics metrics;
+
+  factory UsageSummary.fromJson(Map<String, dynamic> json) {
+    return UsageSummary(
+      from: _parseTime(json['from']),
+      to: _parseTime(json['to']),
+      metrics: UsageMetrics.fromJson(json),
+    );
+  }
+}
+
+class UsageBreakdownGroup {
+  const UsageBreakdownGroup({
+    required this.key,
+    required this.metrics,
+  });
+
+  final String key;
+  final UsageMetrics metrics;
+
+  factory UsageBreakdownGroup.fromJson(Map<String, dynamic> json) {
+    return UsageBreakdownGroup(
+      key: '${json['key'] ?? ''}',
+      metrics: UsageMetrics.fromJson(json),
+    );
+  }
+}
+
+class UsageBreakdown {
+  const UsageBreakdown({
+    required this.from,
+    required this.to,
+    required this.groupBy,
+    required this.groups,
+  });
+
+  final DateTime? from;
+  final DateTime? to;
+  final String groupBy;
+  final List<UsageBreakdownGroup> groups;
+
+  factory UsageBreakdown.fromJson(Map<String, dynamic> json) {
+    final list =
+        (json['groups'] as List? ?? const []).cast<Map<String, dynamic>>();
+    return UsageBreakdown(
+      from: _parseTime(json['from']),
+      to: _parseTime(json['to']),
+      groupBy: '${json['group_by'] ?? 'model'}',
+      groups: list.map(UsageBreakdownGroup.fromJson).toList(),
+    );
+  }
+}
+
+int _asInt(dynamic v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return int.tryParse('$v') ?? 0;
+}
+
+double? _asDouble(dynamic v) {
+  if (v == null) return null;
+  if (v is double) return v;
+  if (v is num) return v.toDouble();
+  return double.tryParse('$v');
+}
+
+
 List<Session> sortActiveSessions(Iterable<Session> input) {
   final list = input.where((s) => s.state.isActive).toList();
   list.sort((a, b) {

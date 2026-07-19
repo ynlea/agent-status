@@ -173,6 +173,7 @@ jobs:
               echo
               echo "### 提交变更"
               echo
+              # 列出到达该 tag 的全部提交（完整展示，不使用 compare 链接）
               git log --reverse --pretty=format:'- %s (%h)' "${tag}"
               echo
             fi

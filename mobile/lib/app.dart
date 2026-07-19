@@ -7,6 +7,7 @@ import 'theme/qingya_theme.dart';
 import 'ui/pages/devices_page.dart';
 import 'ui/pages/home_page.dart';
 import 'ui/pages/settings_page.dart';
+import 'ui/pages/usage_page.dart';
 import 'ui/pages/welcome_page.dart';
 import 'ui/shell/main_shell.dart';
 
@@ -61,6 +62,14 @@ final routerProvider = Provider<GoRouter>((ref) {
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/usage',
+                builder: (_, __) => const UsagePage(),
               ),
             ],
           ),

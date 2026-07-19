@@ -131,3 +131,86 @@ func TestReportQueryAndWS(t *testing.T) {
 		}
 	}
 }
+
+
+func TestUsageReportAndQuery(t *testing.T) {
+	srv := &Server{
+		Key:   "dev-secret",
+		Store: store.NewMemory(50),
+		Hub:   NewHub(),
+	}
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	body := map[string]interface{}{
+		"machine_id":   "m1",
+		"machine_name": "desk",
+		"platform":     "linux",
+		"reported_at":  now.Format(time.RFC3339),
+		"events": []map[string]interface{}{{
+			"dedupe_key":        "k1",
+			"agent":             "claude",
+			"model":             "claude-sonnet-4-5",
+			"occurred_at":       now.Format(time.RFC3339),
+			"input_tokens":      100,
+			"output_tokens":     20,
+			"cache_hit_tokens":  400,
+		}},
+	}
+	raw, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/usage/report", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer dev-secret")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// replay duplicate
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/v1/usage/report", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer dev-secret")
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep apitypes.UsageReportResponse
+	_ = json.NewDecoder(res.Body).Decode(&rep)
+	res.Body.Close()
+	if !rep.OK || rep.Accepted != 0 || rep.Duplicates != 1 {
+		t.Fatalf("replay resp=%+v", rep)
+	}
+
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	to := now.Add(time.Hour).Format(time.RFC3339)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/usage/summary?from="+from+"&to="+to, nil)
+	req.Header.Set("Authorization", "Bearer dev-secret")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum apitypes.UsageSummaryResponse
+	_ = json.NewDecoder(res.Body).Decode(&sum)
+	res.Body.Close()
+	if sum.InputTokens != 100 || sum.OutputTokens != 20 || sum.CacheHitTokens != 400 {
+		t.Fatalf("sum=%+v", sum)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/usage/breakdown?from="+from+"&to="+to+"&group_by=model", nil)
+	req.Header.Set("Authorization", "Bearer dev-secret")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bd apitypes.UsageBreakdownResponse
+	_ = json.NewDecoder(res.Body).Decode(&bd)
+	res.Body.Close()
+	if len(bd.Groups) != 1 || bd.Groups[0].Key != "claude-sonnet-4-5" {
+		t.Fatalf("bd=%+v", bd)
+	}
+}

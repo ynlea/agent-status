@@ -22,7 +22,8 @@ class MainShell extends StatelessWidget {
     final accents = [
       QingyaColors.primary,
       QingyaColors.device,
-      QingyaColors.primary
+      QingyaColors.working,
+      QingyaColors.primary,
     ];
     return Scaffold(
       backgroundColor: QingyaColors.scaffold,
@@ -63,12 +64,19 @@ class MainShell extends StatelessWidget {
                   color: accents[1],
                   onTap: () => _onTap(1),
                 ),
-                _NavItem(
-                  asset: QingyaAssets.navSettingsV2,
-                  label: '设置',
+                _NavIconItem(
+                  icon: Icons.insights_rounded,
+                  label: '用量',
                   selected: index == 2,
                   color: accents[2],
                   onTap: () => _onTap(2),
+                ),
+                _NavItem(
+                  asset: QingyaAssets.navSettingsV2,
+                  label: '设置',
+                  selected: index == 3,
+                  color: accents[3],
+                  onTap: () => _onTap(3),
                 ),
               ],
             ),
@@ -108,6 +116,49 @@ class _NavItem extends StatelessWidget {
               colorFilter: ColorFilter.mode(effective, BlendMode.srcIn),
               child: Image.asset(asset, width: 25, height: 25),
             ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: effective,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _NavIconItem extends StatelessWidget {
+  const _NavIconItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final effective = selected ? color : QingyaColors.navInactive;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: effective),
             const SizedBox(height: 3),
             Text(
               label,

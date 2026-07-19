@@ -35,6 +35,9 @@ func (s *Server) log() *slog.Logger {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/report", s.requireAuth(s.handleReport))
+	mux.HandleFunc("/api/v1/usage/report", s.requireAuth(s.handleUsageReport))
+	mux.HandleFunc("/api/v1/usage/summary", s.requireAuth(s.handleUsageSummary))
+	mux.HandleFunc("/api/v1/usage/breakdown", s.requireAuth(s.handleUsageBreakdown))
 	mux.HandleFunc("/api/v1/machines", s.requireAuth(s.handleMachines))
 	mux.HandleFunc("/api/v1/machines/", s.requireAuth(s.handleMachineSub))
 	mux.HandleFunc("/api/v1/history", s.requireAuth(s.handleHistory))
@@ -157,6 +160,100 @@ func (s *Server) handleMachineSub(w http.ResponseWriter, r *http.Request) {
 		"machine_id": parts[0],
 		"sessions":   s.Store.ListSessions(parts[0]),
 	})
+}
+
+func (s *Server) handleUsageReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+		return
+	}
+	var req apitypes.UsageReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+		return
+	}
+	if req.MachineID == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "machine_id required")
+		return
+	}
+	if len(req.Events) > 2000 {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "events batch too large (max 2000)")
+		return
+	}
+	accepted, duplicates := s.Store.ApplyUsageReport(req)
+	s.log().Info("用量上报",
+		"设备标识", req.MachineID,
+		"接收", accepted,
+		"重复", duplicates,
+		"批次", len(req.Events),
+	)
+	writeJSON(w, http.StatusOK, apitypes.UsageReportResponse{
+		OK:         true,
+		Accepted:   accepted,
+		Duplicates: duplicates,
+	})
+}
+
+func (s *Server) parseUsageQuery(r *http.Request) (apitypes.UsageQuery, string) {
+	q := apitypes.UsageQuery{
+		MachineID: r.URL.Query().Get("machine_id"),
+		Agent:     r.URL.Query().Get("agent"),
+		Model:     r.URL.Query().Get("model"),
+		GroupBy:   r.URL.Query().Get("group_by"),
+	}
+	if from := r.URL.Query().Get("from"); from != "" {
+		t, err := time.Parse(time.RFC3339, from)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339Nano, from)
+		}
+		if err != nil {
+			return q, "invalid from (use RFC3339)"
+		}
+		q.From = t.UTC()
+	}
+	if to := r.URL.Query().Get("to"); to != "" {
+		t, err := time.Parse(time.RFC3339, to)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339Nano, to)
+		}
+		if err != nil {
+			return q, "invalid to (use RFC3339)"
+		}
+		q.To = t.UTC()
+	}
+	if q.From.IsZero() && q.To.IsZero() {
+		// default: last 24h
+		now := time.Now().UTC()
+		q.To = now
+		q.From = now.Add(-24 * time.Hour)
+	}
+	return q, ""
+}
+
+func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	q, errMsg := s.parseUsageQuery(r)
+	if errMsg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid_query", errMsg)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.UsageSummary(q))
+}
+
+func (s *Server) handleUsageBreakdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+		return
+	}
+	q, errMsg := s.parseUsageQuery(r)
+	if errMsg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid_query", errMsg)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.UsageBreakdown(q))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

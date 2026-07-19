@@ -135,6 +135,12 @@ func main() {
 
 	if *once {
 		doReport("once")
+		if cfg.UsageScanEnabled() {
+			us := monitor.NewUsageSyncer(cfg, rep, logger)
+			if err := us.SyncOnce(); err != nil {
+				logger.Warn("用量单次同步失败", "错误", err)
+			}
+		}
 		return
 	}
 
@@ -146,10 +152,17 @@ func main() {
 		"Codex 沙箱模式", emptyAs(cfg.CodexSandboxMode, "Codex 默认值"),
 		"启用文件扫描兜底", true,
 		"定时上报秒数", cfg.ReportIntervalSec,
+		"启用用量采集", cfg.UsageScanEnabled(),
+		"用量扫描秒数", cfg.UsageIntervalSec,
 	)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	if cfg.UsageScanEnabled() {
+		us := monitor.NewUsageSyncer(cfg, rep, logger)
+		go us.RunLoop(ctx.Done())
+	}
 
 	ticker := time.NewTicker(time.Duration(cfg.ReportIntervalSec) * time.Second)
 	defer ticker.Stop()

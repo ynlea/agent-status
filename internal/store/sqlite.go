@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -12,7 +13,8 @@ import (
 
 // SQLiteStore persists machines, sessions, and short history.
 type SQLiteStore struct {
-	db *sql.DB
+	db     *sql.DB
+	prices *priceCache
 }
 
 func NewSQLite(path string) (*SQLiteStore, error) {
@@ -21,8 +23,12 @@ func NewSQLite(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &SQLiteStore{db: db}
+	s := &SQLiteStore{db: db, prices: newPriceCache()}
 	if err := s.migrate(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := s.reloadPriceCache(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -64,8 +70,336 @@ CREATE TABLE IF NOT EXISTS history (
   at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_at ON history(at);
+CREATE TABLE IF NOT EXISTS usage_events (
+  dedupe_key          TEXT PRIMARY KEY,
+  machine_id          TEXT NOT NULL,
+  agent               TEXT NOT NULL,
+  model               TEXT NOT NULL,
+  session_id          TEXT,
+  occurred_at         TEXT NOT NULL,
+  input_tokens        INTEGER NOT NULL DEFAULT 0,
+  output_tokens       INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_hit_tokens    INTEGER NOT NULL DEFAULT 0,
+  created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_machine_at ON usage_events(machine_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_at ON usage_events(agent, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_usage_model_at ON usage_events(model, occurred_at);
+CREATE TABLE IF NOT EXISTS model_prices (
+  model_id             TEXT PRIMARY KEY,
+  input_per_mtok       REAL NOT NULL,
+  output_per_mtok      REAL NOT NULL,
+  cache_read_per_mtok  REAL NOT NULL,
+  cache_write_per_mtok REAL NOT NULL,
+  currency             TEXT NOT NULL DEFAULT 'USD',
+  source               TEXT NOT NULL DEFAULT 'bundled',
+  updated_at           TEXT NOT NULL
+);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.seedModelPrices()
+}
+
+func (s *SQLiteStore) seedModelPrices() error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, p := range bundledPublicPrices {
+		id := NormalizeModelID(p.ModelID)
+		if id == "" {
+			continue
+		}
+		_, err := s.db.Exec(`
+INSERT INTO model_prices(model_id, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, currency, source, updated_at)
+VALUES(?,?,?,?,?,'USD',?,?)
+ON CONFLICT(model_id) DO NOTHING
+`, id, p.InputPerM, p.OutputPerM, p.CacheReadPerM, p.CacheWritePerM, SourceBundled, now)
+		if err != nil {
+			return err
+		}
+	}
+	for _, p := range overridePublicPrices {
+		id := NormalizeModelID(p.ModelID)
+		if id == "" {
+			continue
+		}
+		_, err := s.db.Exec(`
+INSERT INTO model_prices(model_id, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, currency, source, updated_at)
+VALUES(?,?,?,?,?,'USD',?,?)
+ON CONFLICT(model_id) DO UPDATE SET
+  input_per_mtok=excluded.input_per_mtok,
+  output_per_mtok=excluded.output_per_mtok,
+  cache_read_per_mtok=excluded.cache_read_per_mtok,
+  cache_write_per_mtok=excluded.cache_write_per_mtok,
+  source=excluded.source,
+  updated_at=excluded.updated_at
+`, id, p.InputPerM, p.OutputPerM, p.CacheReadPerM, p.CacheWritePerM, SourceOverride, now)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) reloadPriceCache() error {
+	rows, err := s.db.Query(`
+SELECT model_id, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, source
+FROM model_prices`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var list []ModelPrice
+	for rows.Next() {
+		var p ModelPrice
+		if err := rows.Scan(&p.ModelID, &p.InputPerM, &p.OutputPerM, &p.CacheReadPerM, &p.CacheWritePerM, &p.Source); err != nil {
+			return err
+		}
+		list = append(list, p)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.prices.loadAll(list)
+	return nil
+}
+
+func (s *SQLiteStore) LookupModelPrice(model string) (ModelPrice, bool) {
+	return s.prices.lookup(model)
+}
+
+func (s *SQLiteStore) ListModelPrices() []ModelPrice {
+	return s.prices.snapshot()
+}
+
+func (s *SQLiteStore) UpsertModelPrice(p ModelPrice, source string) error {
+	id := NormalizeModelID(p.ModelID)
+	if id == "" {
+		return fmt.Errorf("empty model id")
+	}
+	if source == "" {
+		source = SourceBundled
+	}
+	// Check existing source for override protection.
+	var existingSource string
+	err := s.db.QueryRow(`SELECT source FROM model_prices WHERE model_id=?`, id).Scan(&existingSource)
+	if err == nil && !canReplace(existingSource, source) {
+		return nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+
+	// Merge cache fields when openrouter omits them.
+	if source == SourceOpenRouter {
+		if old, ok := s.prices.lookup(id); ok {
+			if p.CacheReadPerM == 0 && old.CacheReadPerM != 0 {
+				p.CacheReadPerM = old.CacheReadPerM
+			}
+			if p.CacheWritePerM == 0 && old.CacheWritePerM != 0 {
+				p.CacheWritePerM = old.CacheWritePerM
+			}
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = s.db.Exec(`
+INSERT INTO model_prices(model_id, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, currency, source, updated_at)
+VALUES(?,?,?,?,?,'USD',?,?)
+ON CONFLICT(model_id) DO UPDATE SET
+  input_per_mtok=excluded.input_per_mtok,
+  output_per_mtok=excluded.output_per_mtok,
+  cache_read_per_mtok=excluded.cache_read_per_mtok,
+  cache_write_per_mtok=excluded.cache_write_per_mtok,
+  source=excluded.source,
+  updated_at=excluded.updated_at
+WHERE model_prices.source != 'override' OR excluded.source = 'override'
+`, id, p.InputPerM, p.OutputPerM, p.CacheReadPerM, p.CacheWritePerM, source, now)
+	if err != nil {
+		return err
+	}
+	p.ModelID = id
+	p.Source = source
+	s.prices.upsert(p, source)
+	return nil
+}
+
+func (s *SQLiteStore) ApplyUsageReport(req apitypes.UsageReportRequest) (accepted, duplicates int) {
+	if req.MachineID == "" {
+		return 0, 0
+	}
+	now := req.ReportedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, _ = tx.Exec(`
+INSERT INTO machines(machine_id, machine_name, platform, online, last_seen_at)
+VALUES(?,?,?,?,?)
+ON CONFLICT(machine_id) DO UPDATE SET
+  machine_name=CASE WHEN excluded.machine_name != '' THEN excluded.machine_name ELSE machines.machine_name END,
+  platform=CASE WHEN excluded.platform != '' THEN excluded.platform ELSE machines.platform END,
+  online=1,
+  last_seen_at=excluded.last_seen_at
+`, req.MachineID, req.MachineName, req.Platform, 1, now.Format(time.RFC3339Nano))
+
+	for _, raw := range req.Events {
+		e, ok := sanitizeUsageEvent(req.MachineID, raw)
+		if !ok {
+			continue
+		}
+		res, err := tx.Exec(`
+INSERT INTO usage_events(
+  dedupe_key, machine_id, agent, model, session_id, occurred_at,
+  input_tokens, output_tokens, reasoning_tokens, cache_write_tokens, cache_hit_tokens, created_at
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(dedupe_key) DO NOTHING
+`, e.DedupeKey, e.MachineID, e.Agent, e.Model, e.SessionID, e.OccurredAt.UTC().Format(time.RFC3339Nano),
+			e.InputTokens, e.OutputTokens, e.ReasoningTokens, e.CacheWriteTokens, e.CacheHitTokens,
+			now.Format(time.RFC3339Nano))
+		if err != nil {
+			continue
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			duplicates++
+		} else {
+			accepted++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0
+	}
+	return accepted, duplicates
+}
+
+func (s *SQLiteStore) usageWhere(q apitypes.UsageQuery) (string, []interface{}) {
+	var (
+		args  []interface{}
+		where []string
+	)
+	if !q.From.IsZero() {
+		where = append(where, "occurred_at >= ?")
+		args = append(args, q.From.UTC().Format(time.RFC3339Nano))
+	}
+	if !q.To.IsZero() {
+		where = append(where, "occurred_at <= ?")
+		args = append(args, q.To.UTC().Format(time.RFC3339Nano))
+	}
+	if q.MachineID != "" {
+		where = append(where, "machine_id = ?")
+		args = append(args, q.MachineID)
+	}
+	if q.Agent != "" {
+		where = append(where, "agent = ?")
+		args = append(args, strings.ToLower(q.Agent))
+	}
+	if q.Model != "" {
+		where = append(where, "model = ?")
+		args = append(args, q.Model)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+	return clause, args
+}
+
+// aggregateByModel runs SUM(*) GROUP BY model for pricing-accurate rollups.
+func (s *SQLiteStore) aggregateByModel(q apitypes.UsageQuery) map[string]apitypes.UsageMetrics {
+	clause, args := s.usageWhere(q)
+	sqlStr := `SELECT model,
+ COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(reasoning_tokens),0),
+ COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cache_hit_tokens),0), COALESCE(COUNT(*),0)
+ FROM usage_events` + clause + ` GROUP BY model`
+	rows, err := s.db.Query(sqlStr, args...)
+	if err != nil {
+		return map[string]apitypes.UsageMetrics{}
+	}
+	defer rows.Close()
+	out := map[string]apitypes.UsageMetrics{}
+	for rows.Next() {
+		var model string
+		var in, outn, reason, cw, ch, n int64
+		if err := rows.Scan(&model, &in, &outn, &reason, &cw, &ch, &n); err != nil {
+			continue
+		}
+		if model == "" {
+			model = "unknown"
+		}
+		m := metricsFromParts(in, outn, reason, cw, ch, n)
+		out[model] = m
+	}
+	return out
+}
+
+func (s *SQLiteStore) UsageSummary(q apitypes.UsageQuery) apitypes.UsageSummaryResponse {
+	return finalizeSummaryFromModelMap(s.LookupModelPrice, q, s.aggregateByModel(q))
+}
+
+func (s *SQLiteStore) UsageBreakdown(q apitypes.UsageQuery) apitypes.UsageBreakdownResponse {
+	groupBy := validateGroupBy(q.GroupBy)
+	clause, args := s.usageWhere(q)
+
+	var groupExpr string
+	switch groupBy {
+	case "agent":
+		groupExpr = "agent"
+	case "machine":
+		groupExpr = "machine_id"
+	case "day":
+		// occurred_at is RFC3339; first 10 chars are YYYY-MM-DD in UTC storage
+		groupExpr = "substr(occurred_at, 1, 10)"
+	case "hour":
+		// YYYY-MM-DDTHH
+		groupExpr = "substr(occurred_at, 1, 13)"
+	default:
+		groupExpr = "model"
+	}
+
+	sqlStr := `SELECT ` + groupExpr + ` AS gkey, model,
+ COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(reasoning_tokens),0),
+ COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cache_hit_tokens),0), COALESCE(COUNT(*),0)
+ FROM usage_events` + clause + ` GROUP BY gkey, model`
+
+	rows, err := s.db.Query(sqlStr, args...)
+	if err != nil {
+		return finalizeBreakdown(s.LookupModelPrice, q, groupBy, map[string]map[string]apitypes.UsageMetrics{})
+	}
+	defer rows.Close()
+	groups := map[string]map[string]apitypes.UsageMetrics{}
+	for rows.Next() {
+		var gkey, model string
+		var in, outn, reason, cw, ch, n int64
+		if err := rows.Scan(&gkey, &model, &in, &outn, &reason, &cw, &ch, &n); err != nil {
+			continue
+		}
+		if gkey == "" {
+			gkey = "unknown"
+		}
+		if model == "" {
+			model = "unknown"
+		}
+		if groups[gkey] == nil {
+			groups[gkey] = map[string]apitypes.UsageMetrics{}
+		}
+		m := groups[gkey][model]
+		m.InputTokens += in
+		m.OutputTokens += outn
+		m.ReasoningTokens += reason
+		m.CacheWriteTokens += cw
+		m.CacheHitTokens += ch
+		m.EventCount += n
+		groups[gkey][model] = m
+	}
+	return finalizeBreakdown(s.LookupModelPrice, q, groupBy, groups)
 }
 
 func (s *SQLiteStore) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Session, wasOnline bool) {
