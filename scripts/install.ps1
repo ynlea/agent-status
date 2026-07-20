@@ -85,6 +85,35 @@ function Write-Done([string]$Message = '完成', [string]$Dir = '') {
 function Write-Kv([string]$Key, [string]$Value) {
     Write-Host ("  {0,-10} {1}" -f $Key, $Value) -ForegroundColor Gray
 }
+function Format-PrettyPath([string]$P) {
+    if ($env:USERPROFILE -and $P.StartsWith($env:USERPROFILE, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return '~' + $P.Substring($env:USERPROFILE.Length)
+    }
+    if ($env:LOCALAPPDATA -and $P.StartsWith($env:LOCALAPPDATA, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return '%LOCALAPPDATA%' + $P.Substring($env:LOCALAPPDATA.Length)
+    }
+    return $P
+}
+function Write-PathLine([string]$Key, [string]$P) {
+    Write-Host ("  {0,-10} " -f $Key) -NoNewline -ForegroundColor DarkGray
+    Write-Host (Format-PrettyPath $P) -ForegroundColor Cyan
+}
+function Format-HumanSize([long]$Bytes) {
+    if ($Bytes -ge 1GB) { return ('{0:N1} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N1} MB' -f ($Bytes / 1MB)) }
+    if ($Bytes -ge 1KB) { return ('{0:N1} KB' -f ($Bytes / 1KB)) }
+    return "$Bytes B"
+}
+function Write-ProgressBar([long]$Current, [long]$Total) {
+    $w = 36
+    $pct = 0
+    if ($Total -gt 0) { $pct = [math]::Min(100, [int](100.0 * $Current / $Total)) }
+    $filled = [int]($w * $pct / 100)
+    $bar = ('█' * $filled) + ('░' * ($w - $filled))
+    $curS = Format-HumanSize $Current
+    $totS = if ($Total -gt 0) { Format-HumanSize $Total } else { '?' }
+    Write-Host ("`r  [{0}] {1,3}%  {2} / {3}   " -f $bar, $pct, $curS, $totS) -NoNewline -ForegroundColor Cyan
+}
 function Die([string]$Message) {
     Write-Host "  ✗  $Message" -ForegroundColor Red
     throw $Message
@@ -142,9 +171,10 @@ function Install-Binary([string]$RoleName) {
             $src = Join-Path $LocalBin ("agent-status-{0}-windows-amd64.exe" -f $RoleName)
         }
         if (-not (Test-Path $src)) { Die "本地二进制不存在于: $LocalBin" }
-        if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force }
+        if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force; Write-Info "已备份 $(Format-PrettyPath "$dest.bak")" }
         Copy-Item $src $dest -Force
-        Write-Ok "已安装 $dest（本地文件）"
+        Write-PathLine '安装到' $dest
+        Write-Ok '二进制就绪（本地文件）'
         return
     }
 
@@ -156,18 +186,56 @@ function Install-Binary([string]$RoleName) {
     }
     $url = "https://github.com/$Repo/releases/download/$tag/$asset"
     $tmp = Join-Path $env:TEMP $asset
-    Write-Info "下载 $asset（$tag）"
-    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-    if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force }
+    Write-Host ("  {0,-10} {1}  " -f '资源', $asset) -NoNewline -ForegroundColor DarkGray
+    Write-Host "($tag)" -ForegroundColor Magenta
+    Write-PathLine '目标' $tmp
+    Write-Host ("  {0,-10} " -f '来源') -NoNewline -ForegroundColor DarkGray
+    Write-Host $url -ForegroundColor DarkGray
+
+    try {
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        $req.UserAgent = 'agent-status-installer'
+        $req.Method = 'GET'
+        $resp = $req.GetResponse()
+        $total = $resp.ContentLength
+        $stream = $resp.GetResponseStream()
+        $fs = [System.IO.File]::Open($tmp, [System.IO.FileMode]::Create)
+        $buffer = New-Object byte[] (256KB)
+        $read = 0L
+        $cur = 0L
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $fs.Write($buffer, 0, $read)
+            $cur += $read
+            if ($total -gt 0) { Write-ProgressBar $cur $total }
+        }
+        $fs.Close(); $stream.Close(); $resp.Close()
+        if ($total -gt 0) {
+            Write-ProgressBar $cur $total
+            Write-Host ""
+        }
+        Write-Ok ("下载完成  {0}" -f (Format-HumanSize $cur))
+    } catch {
+        # fallback
+        Write-Info '改用 Invoke-WebRequest 下载...'
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+        $cur = (Get-Item $tmp).Length
+        Write-Ok ("下载完成  {0}" -f (Format-HumanSize $cur))
+    }
+
+    if (Test-Path $dest) {
+        Copy-Item $dest "$dest.bak" -Force
+        Write-Info "已备份 $(Format-PrettyPath "$dest.bak")"
+    }
     Copy-Item $tmp $dest -Force
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    Write-Ok "已安装 $dest"
+    Write-PathLine '安装到' $dest
+    Write-Ok '二进制就绪'
 }
 
 function Write-ServerEnv([string]$KeyValue, [string]$AddrValue) {
     $path = Join-Path $ConfigDir 'server.env'
     if ((Test-Path $path) -and -not $ForceConfig) {
-        Write-Log "保留已有配置 $path"
+        Write-PathLine '保留配置' $path
         return
     }
     if (Test-Path $path) {
@@ -179,13 +247,13 @@ AGENT_STATUS_ADDR=$AddrValue
 AGENT_STATUS_KEY=$KeyValue
 AGENT_STATUS_DB=$db
 "@ | Set-Content -Path $path -Encoding UTF8
-    Write-Log "已写入 $path"
+    Write-PathLine '写入' $path; Write-Ok '配置已就绪'
 }
 
 function Write-MonitorJson([string]$Url, [string]$KeyValue) {
     $path = Join-Path $ConfigDir 'monitor.json'
     if ((Test-Path $path) -and -not $ForceConfig) {
-        Write-Log "保留已有配置 $path"
+        Write-PathLine '保留配置' $path
         return
     }
     if (Test-Path $path) {
@@ -204,7 +272,7 @@ function Write-MonitorJson([string]$Url, [string]$KeyValue) {
         state_file           = ''
     }
     $obj | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
-    Write-Log "已写入 $path"
+    Write-PathLine '写入' $path; Write-Ok '配置已就绪'
 }
 
 function Get-PidPath([string]$RoleName) {
@@ -317,14 +385,42 @@ function Init-Agents {
     $cfg = Join-Path $ConfigDir 'monitor.json'
     if (-not (Test-Path $mon)) { Die '监测端二进制不存在' }
     if (-not (Test-Path $cfg)) { Die "监测端配置不存在: $cfg" }
-    Write-Log 'Agent 探测：'
-    if (Detect-Claude) { Write-Log '  Claude Code：已发现' } else { Write-Log '  Claude Code：未发现' }
-    if (Detect-Codex) { Write-Log '  Codex：已发现' } else { Write-Log '  Codex：未发现' }
-    if (Detect-Claude) {
-        Write-Log '正在初始化 Claude Code hooks...'
-        & $mon --init --claude --config $cfg
+
+    $claudeOk = Detect-Claude
+    $codexOk = Detect-Codex
+    $claudeDir = Join-Path $env:USERPROFILE '.claude'
+    $codexDir = Join-Path $env:USERPROFILE '.codex'
+
+    Write-Host ''
+    Write-Host '  ╭─ Agent 探测 ──────────────────────────────────────────╮' -ForegroundColor Magenta
+    if ($claudeOk) {
+        Write-Host '  │  ●  Claude Code   已发现' -NoNewline -ForegroundColor Green
+        if (Test-Path $claudeDir) { Write-Host ("  {0}" -f (Format-PrettyPath $claudeDir)) -ForegroundColor DarkGray } else { Write-Host '' }
     } else {
-        Write-Log '跳过 Claude hooks（未检测到 Claude）'
+        Write-Host '  │  ○  Claude Code   未发现' -ForegroundColor DarkGray
+    }
+    if ($codexOk) {
+        Write-Host '  │  ●  Codex         已发现' -NoNewline -ForegroundColor Green
+        if (Test-Path $codexDir) { Write-Host ("  {0}" -f (Format-PrettyPath $codexDir)) -ForegroundColor DarkGray } else { Write-Host '' }
+    } else {
+        Write-Host '  │  ○  Codex         未发现' -ForegroundColor DarkGray
+    }
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Magenta
+
+    if ($claudeOk) {
+        Write-Info '初始化 Claude Code hooks...'
+        try {
+            & $mon --init --claude --config $cfg
+            Write-PathLine '设置文件' (Join-Path $claudeDir 'settings.json')
+            Write-Ok 'Claude hooks 已配置'
+        } catch {
+            Write-Warn "Claude hooks 初始化失败: $_"
+        }
+    } else {
+        Write-Info '跳过 Claude hooks（未检测到 Claude Code）'
+    }
+    if ($codexOk) {
+        Write-Info 'Codex 走文件监听，无需额外 hooks'
     }
 }
 

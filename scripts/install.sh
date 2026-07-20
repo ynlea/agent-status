@@ -159,8 +159,63 @@ print_done() {
 
 kv() {
   # kv "标签" "值"
-  printf '  %s%-10s%s %s\n' "${C_DIM}" "$1" "${C_RESET}" "$2"
+  printf '  %s%-10s%s %s
+' "${C_DIM}" "$1" "${C_RESET}" "$2"
 }
+
+# 家目录折叠为 ~
+pretty_path() {
+  local p="$1"
+  if [[ -n "${HOME:-}" && "$p" == "$HOME"* ]]; then
+    printf '~%s' "${p#"$HOME"}"
+  else
+    printf '%s' "$p"
+  fi
+}
+
+path_line() {
+  # path_line "标签" "绝对路径"
+  printf '  %s%-10s%s %s%s%s
+' "${C_DIM}" "$1" "${C_RESET}" "${C_A2}" "$(pretty_path "$2")" "${C_RESET}"
+}
+
+human_size() {
+  local b="$1"
+  if command -v numfmt >/dev/null 2>&1; then
+    numfmt --to=iec --suffix=B "$b" 2>/dev/null && return
+  fi
+  awk -v b="$b" 'BEGIN{
+    s="B KMGTPE";
+    while (b>=1024 && length(s)>1) { b/=1024; s=substr(s,2) }
+    printf (b<10?"%.1f":"%.0f") "%sB
+", b, substr(s,1,1)
+  }'
+}
+
+draw_bar() {
+  # draw_bar current total [label]
+  local cur="${1:-0}" total="${2:-0}" label="${3:-}"
+  local pct=0 w=36 filled empty i
+  if [[ "$total" -gt 0 ]]; then
+    pct=$(( cur * 100 / total ))
+    (( pct > 100 )) && pct=100
+  fi
+  filled=$(( pct * w / 100 ))
+  empty=$(( w - filled ))
+  printf '\r  %s' "${C_A2}"
+  printf '['
+  for ((i=0; i<filled; i++)); do printf '█'; done
+  for ((i=0; i<empty; i++)); do printf '░'; done
+  printf ']%s %s%3d%%%s' "${C_RESET}" "${C_BOLD}" "$pct" "${C_RESET}"
+  if [[ "$total" -gt 0 ]]; then
+    printf '  %s%s%s / %s%s%s'       "${C_DIM}" "$(human_size "$cur")" "${C_RESET}"       "${C_DIM}" "$(human_size "$total")" "${C_RESET}"
+  fi
+  if [[ -n "$label" ]]; then
+    printf '  %s%s%s' "${C_DIM}" "$label" "${C_RESET}"
+  fi
+  printf '   '
+}
+
 
 have_tty() { [[ -t 0 || -t 1 ]]; }
 
@@ -211,17 +266,60 @@ random_key() {
 
 download() {
   local url="$1" dest="$2"
-  if command -v curl >/dev/null 2>&1; then
-    if [[ -t 1 ]]; then
-      curl -fL --progress-bar "$url" -o "$dest"
-    else
-      curl -fsSL "$url" -o "$dest"
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$dest" "$url"
-  else
+  local total=0 cur=0 pid err=0
+
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     die "需要 curl 或 wget"
   fi
+
+  path_line "目标" "$dest"
+  printf '  %s%-10s%s %s\n' "${C_DIM}" "来源" "${C_RESET}" "$url"
+
+  if command -v curl >/dev/null 2>&1; then
+    # 尝试拿 Content-Length 画自定义进度条
+    if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+      total="$(curl -fsSIL "$url" 2>/dev/null | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r' | tail -n1)"
+      total="${total:-0}"
+      if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$total" -gt 0 ]]; then
+        curl -fL --silent --show-error "$url" -o "$dest" &
+        pid=$!
+        while kill -0 "$pid" 2>/dev/null; do
+          if [[ -f "$dest" ]]; then
+            cur="$(wc -c <"$dest" 2>/dev/null | tr -d ' ' || echo 0)"
+          else
+            cur=0
+          fi
+          draw_bar "$cur" "$total"
+          sleep 0.12
+        done
+        wait "$pid" || err=$?
+        if [[ -f "$dest" ]]; then
+          cur="$(wc -c <"$dest" 2>/dev/null | tr -d ' ' || echo 0)"
+        fi
+        draw_bar "$cur" "$total"
+        printf '\n'
+        [[ "$err" -eq 0 ]] || return "$err"
+        ok "下载完成  $(human_size "$cur")"
+        return 0
+      fi
+      # 未知大小：用 curl 自带进度条并缩进
+      printf '  %s' "${C_A2}"
+      curl -fL --progress-bar "$url" -o "$dest"
+      local rc=$?
+      printf '%s' "${C_RESET}"
+      [[ $rc -eq 0 ]] || return $rc
+      if [[ -f "$dest" ]]; then
+        ok "下载完成  $(human_size "$(wc -c <"$dest" | tr -d ' ')")"
+      else
+        ok "下载完成"
+      fi
+      return 0
+    fi
+    curl -fsSL "$url" -o "$dest"
+    return $?
+  fi
+
+  wget -qO "$dest" "$url"
 }
 
 github_release_tag() {
@@ -264,17 +362,20 @@ install_binary_from_release() {
     dest="$BIN_DIR/agent-status-monitor"
   fi
   tmp="$(mktemp)"
-  info "下载 $name（$tag）"
+  printf '  %s%-10s%s %s  %s(%s)%s
+' "${C_DIM}" "资源" "${C_RESET}" "$name" "${C_A5}" "$tag" "${C_RESET}"
   if ! download "$(asset_url "$tag" "$name")" "$tmp"; then
     rm -f "$tmp"
     die "下载失败: $name"
   fi
   if [[ -f "$dest" ]]; then
     cp -f "$dest" "${dest}.bak"
+    info "已备份 $(pretty_path "$dest").bak"
   fi
   install -m 755 "$tmp" "$dest"
   rm -f "$tmp"
-  ok "已安装 $dest"
+  path_line "安装到" "$dest"
+  ok "二进制就绪"
 }
 
 install_binary_local() {
@@ -293,7 +394,8 @@ install_binary_local() {
     cp -f "$dest" "${dest}.bak"
   fi
   install -m 755 "$src" "$dest"
-  log "已安装 $dest（本地文件）"
+  path_line "安装到" "$dest"
+  ok "二进制就绪（本地文件）"
 }
 
 install_binary() {
@@ -308,7 +410,7 @@ install_binary() {
 write_server_env() {
   local path="$CONFIG_DIR/server.env" key="$1" addr="$2"
   if [[ -f "$path" && "$FORCE_CONFIG" -eq 0 ]]; then
-    info "保留已有配置 $path"
+    path_line "保留配置" "$path"
     return
   fi
   if [[ -f "$path" ]]; then
@@ -320,7 +422,8 @@ AGENT_STATUS_KEY=${key}
 AGENT_STATUS_DB=${DATA_DIR}/agent-status.db
 EOF
   chmod 600 "$path"
-  ok "已写入 $path"
+  path_line "写入" "$path"
+  ok "配置已就绪"
 }
 
 write_monitor_json() {
@@ -331,7 +434,7 @@ write_monitor_json() {
   machine_name="$machine_id"
   platform="linux"
   if [[ -f "$path" && "$FORCE_CONFIG" -eq 0 ]]; then
-    info "保留已有配置 $path"
+    path_line "保留配置" "$path"
     return
   fi
   if [[ -f "$path" ]]; then
@@ -351,7 +454,8 @@ write_monitor_json() {
 }
 EOF
   chmod 600 "$path"
-  ok "已写入 $path"
+  path_line "写入" "$path"
+  ok "配置已就绪"
 }
 
 write_systemd_server() {
@@ -375,7 +479,8 @@ StandardError=append:${LOG_DIR}/server.log
 [Install]
 WantedBy=default.target
 EOF
-  ok "已写入 $unit"
+  path_line "单元" "$unit"
+  ok "systemd 单元已写入"
 }
 
 write_systemd_monitor() {
@@ -398,7 +503,8 @@ StandardError=append:${LOG_DIR}/monitor.log
 [Install]
 WantedBy=default.target
 EOF
-  ok "已写入 $unit"
+  path_line "单元" "$unit"
+  ok "systemd 单元已写入"
 }
 
 systemd_reload() {
@@ -456,7 +562,7 @@ persist_self() {
     download "${RAW_BASE}/main/scripts/install.sh" "$dest" || return 0
   fi
   chmod 755 "$dest" 2>/dev/null || true
-  ok "管理脚本: $dest"
+  path_line "管理脚本" "$dest"
 }
 
 link_shim() {
@@ -466,7 +572,7 @@ link_shim() {
   ln -sfn "$self" "$dest" 2>/dev/null || cp -f "$self" "$dest" 2>/dev/null || true
   if [[ -e "$dest" ]]; then
     chmod +x "$dest" 2>/dev/null || true
-    ok "命令入口: $dest"
+    path_line "命令入口" "$dest"
   fi
 }
 
@@ -488,23 +594,45 @@ init_agents() {
   [[ -x "$mon" ]] || die "监测端二进制不存在，请先 install --role monitor"
   [[ -f "$cfg" ]] || die "监测端配置不存在: $cfg"
 
-  log "Agent 探测："
-  if detect_claude; then
-    log "  Claude Code：已发现"
-  else
-    log "  Claude Code：未发现"
-  fi
-  if detect_codex; then
-    log "  Codex：已发现"
-  else
-    log "  Codex：未发现"
-  fi
+  local claude_ok=0 codex_ok=0
+  detect_claude && claude_ok=1
+  detect_codex && codex_ok=1
 
-  if detect_claude; then
-    log "正在初始化 Claude Code hooks..."
-    "$mon" --init --claude --config "$cfg"
+  printf '\n'
+  printf '  %s╭─ Agent 探测 ──────────────────────────────────────────╮%s\n' "${C_A5}" "${C_RESET}"
+  if [[ "$claude_ok" -eq 1 ]]; then
+    printf '  %s│%s  %s●%s  %-12s  %s已发现%s' "${C_A5}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}" "Claude Code" "${C_GREEN}" "${C_RESET}"
+    if [[ -d "$HOME/.claude" ]]; then
+      printf '  %s%s%s' "${C_DIM}" "$(pretty_path "$HOME/.claude")" "${C_RESET}"
+    fi
+    printf '\n'
   else
-    log "跳过 Claude hooks（未检测到 Claude）"
+    printf '  %s│%s  %s○%s  %-12s  %s未发现%s\n' "${C_A5}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "Claude Code" "${C_DIM}" "${C_RESET}"
+  fi
+  if [[ "$codex_ok" -eq 1 ]]; then
+    printf '  %s│%s  %s●%s  %-12s  %s已发现%s' "${C_A5}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}" "Codex" "${C_GREEN}" "${C_RESET}"
+    if [[ -d "$HOME/.codex" ]]; then
+      printf '  %s%s%s' "${C_DIM}" "$(pretty_path "$HOME/.codex")" "${C_RESET}"
+    fi
+    printf '\n'
+  else
+    printf '  %s│%s  %s○%s  %-12s  %s未发现%s\n' "${C_A5}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "Codex" "${C_DIM}" "${C_RESET}"
+  fi
+  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A5}" "${C_RESET}"
+
+  if [[ "$claude_ok" -eq 1 ]]; then
+    info "初始化 Claude Code hooks..."
+    if "$mon" --init --claude --config "$cfg"; then
+      path_line "设置文件" "${HOME}/.claude/settings.json"
+      ok "Claude hooks 已配置"
+    else
+      warn "Claude hooks 初始化失败（可稍后 agent-status init-agents 重试）"
+    fi
+  else
+    info "跳过 Claude hooks（未检测到 Claude Code）"
+  fi
+  if [[ "$codex_ok" -eq 1 ]]; then
+    info "Codex 走文件监听，无需额外 hooks"
   fi
 }
 
