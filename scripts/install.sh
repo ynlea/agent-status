@@ -234,10 +234,8 @@ write_monitor_json() {
   "machine_id": "${machine_id}",
   "machine_name": "${machine_name}",
   "platform": "${platform}",
-  "report_interval_sec": 15,
-  "codex_app_server": true,
+  "report_interval_sec": 60,
   "codex_file_watch": true,
-  "codex_sandbox_mode": "",
   "codex_sessions_dir": "",
   "state_file": ""
 }

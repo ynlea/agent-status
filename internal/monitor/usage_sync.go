@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,16 +13,22 @@ import (
 )
 
 type fileCursor struct {
-	Offset int64 `json:"offset"`
-	Size   int64 `json:"size"`
+	Offset int64  `json:"offset"`
+	Size   int64  `json:"size"`
+	Kind   string `json:"kind,omitempty"` // claude|codex
 }
 
 type usageState struct {
-	BackfillDone bool                  `json:"backfill_done"`
-	Files        map[string]fileCursor `json:"files"`
+	BackfillDone     bool                  `json:"backfill_done"`
+	LastDiscoverUnix int64                 `json:"last_discover_unix,omitempty"`
+	Files            map[string]fileCursor `json:"files"`
 }
 
 // UsageSyncer scans local Claude/Codex logs and reports usage events.
+// Designed for frequent ticks (e.g. 1 minute):
+//   - known files: Stat only; open/parse only when size > cursor
+//   - directory discovery: slower cadence (default 10 minutes)
+//   - cursor persistence only when something actually changed
 type UsageSyncer struct {
 	Cfg    *Config
 	Rep    *Reporter
@@ -62,6 +69,12 @@ func (u *UsageSyncer) load() error {
 	if st.Files == nil {
 		st.Files = map[string]fileCursor{}
 	}
+	for path, cur := range st.Files {
+		if cur.Kind == "" {
+			cur.Kind = inferUsageKind(path)
+			st.Files[path] = cur
+		}
+	}
 	u.state = st
 	return nil
 }
@@ -81,29 +94,44 @@ func (u *UsageSyncer) save() error {
 	return os.Rename(tmp, u.path)
 }
 
-// SyncOnce scans and reports. full=true forces reading from offset 0 for unknown files
-// but still uses cursors when present; first run walks all history.
+func (u *UsageSyncer) discoverInterval() time.Duration {
+	sec := 0
+	if u.Cfg != nil {
+		sec = u.Cfg.UsageDiscoverSec
+	}
+	if sec <= 0 {
+		sec = 600
+	}
+	return time.Duration(sec) * time.Second
+}
+
+func (u *UsageSyncer) shouldDiscover(now time.Time) bool {
+	if !u.state.BackfillDone {
+		return true
+	}
+	if u.state.LastDiscoverUnix <= 0 {
+		return true
+	}
+	last := time.Unix(u.state.LastDiscoverUnix, 0)
+	return now.Sub(last) >= u.discoverInterval()
+}
+
+// SyncOnce reconciles usage events once.
+// Hot path avoids re-reading unchanged files so a 1-minute tick stays cheap.
 func (u *UsageSyncer) SyncOnce() error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	var files []struct {
-		path  string
-		kind  string // claude|codex
-	}
-	claudeFiles, _ := CollectClaudeUsageFiles(u.Cfg.ClaudeProjectsDir)
-	for _, p := range claudeFiles {
-		files = append(files, struct {
-			path string
-			kind string
-		}{p, "claude"})
-	}
-	codexFiles, _ := CollectCodexUsageFiles(u.Cfg.CodexSessionsDir)
-	for _, p := range codexFiles {
-		files = append(files, struct {
-			path string
-			kind string
-		}{p, "codex"})
+	now := time.Now().UTC()
+	dirty := false
+	doDiscover := u.shouldDiscover(now)
+
+	if doDiscover {
+		if u.discoverFiles() {
+			dirty = true
+		}
+		u.state.LastDiscoverUnix = now.Unix()
+		dirty = true
 	}
 
 	var batch []apitypes.UsageEvent
@@ -122,7 +150,6 @@ func (u *UsageSyncer) SyncOnce() error {
 			chunk := batch[:n]
 			batch = batch[n:]
 			if err := u.Rep.ReportUsage(chunk); err != nil {
-				// put back and fail
 				batch = append(chunk, batch...)
 				return err
 			}
@@ -130,26 +157,44 @@ func (u *UsageSyncer) SyncOnce() error {
 		return nil
 	}
 
-	for _, f := range files {
-		info, err := os.Stat(f.path)
+	for path, cur := range u.state.Files {
+		info, err := os.Stat(path)
 		if err != nil {
+			if os.IsNotExist(err) {
+				delete(u.state.Files, path)
+				dirty = true
+			}
 			continue
 		}
-		cur := u.state.Files[f.path]
-		// truncated or replaced
-		if cur.Size > info.Size() || (cur.Offset > info.Size()) {
-			cur = fileCursor{}
+
+		// Truncated / replaced: restart from 0.
+		if cur.Size > info.Size() || cur.Offset > info.Size() {
+			cur = fileCursor{Kind: usageKindOrInfer(cur.Kind, path)}
+			dirty = true
 		}
+
+		// Fully caught up and size stable: no open, no parse.
+		if info.Size() == cur.Offset {
+			if cur.Size != info.Size() || cur.Kind == "" {
+				cur.Size = info.Size()
+				cur.Kind = usageKindOrInfer(cur.Kind, path)
+				u.state.Files[path] = cur
+				dirty = true
+			}
+			continue
+		}
+
+		kind := usageKindOrInfer(cur.Kind, path)
 		var events []apitypes.UsageEvent
 		var newOff int64
-		switch f.kind {
+		switch kind {
 		case "claude":
-			events, newOff, err = ParseClaudeUsageFile(f.path, cur.Offset)
+			events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
 		default:
-			events, newOff, err = ParseCodexUsageFile(f.path, cur.Offset)
+			events, newOff, err = ParseCodexUsageFile(path, cur.Offset)
 		}
 		if err != nil {
-			u.Logger.Warn("解析用量日志失败", "路径", f.path, "错误", err)
+			u.Logger.Warn("解析用量日志失败", "路径", path, "错误", err)
 			continue
 		}
 		if len(events) > 0 {
@@ -158,29 +203,78 @@ func (u *UsageSyncer) SyncOnce() error {
 				return err
 			}
 		}
-		u.state.Files[f.path] = fileCursor{Offset: newOff, Size: info.Size()}
+		u.state.Files[path] = fileCursor{Offset: newOff, Size: info.Size(), Kind: kind}
+		dirty = true
 	}
+
 	if err := flush(true); err != nil {
 		return err
 	}
-	u.state.BackfillDone = true
-	if err := u.save(); err != nil {
-		u.Logger.Warn("保存用量游标失败", "错误", err)
+	if !u.state.BackfillDone {
+		u.state.BackfillDone = true
+		dirty = true
+	}
+	if dirty {
+		if err := u.save(); err != nil {
+			u.Logger.Warn("保存用量游标失败", "错误", err)
+		}
 	}
 	return nil
+}
+
+// discoverFiles walks roots and registers new jsonl paths. Returns true if the map changed.
+func (u *UsageSyncer) discoverFiles() bool {
+	changed := false
+	found := make(map[string]struct{})
+
+	add := func(path, kind string) {
+		found[path] = struct{}{}
+		if cur, ok := u.state.Files[path]; ok {
+			if cur.Kind == "" {
+				cur.Kind = kind
+				u.state.Files[path] = cur
+				changed = true
+			}
+			return
+		}
+		u.state.Files[path] = fileCursor{Kind: kind}
+		changed = true
+	}
+
+	claudeFiles, _ := CollectClaudeUsageFiles(u.Cfg.ClaudeProjectsDir)
+	for _, p := range claudeFiles {
+		add(p, "claude")
+	}
+	codexFiles, _ := CollectCodexUsageFiles(u.Cfg.CodexSessionsDir)
+	for _, p := range codexFiles {
+		add(p, "codex")
+	}
+
+	// Drop files that disappeared (only when we have a full inventory).
+	for path := range u.state.Files {
+		if _, ok := found[path]; !ok {
+			delete(u.state.Files, path)
+			changed = true
+		}
+	}
+	return changed
 }
 
 // RunLoop periodic usage sync.
 func (u *UsageSyncer) RunLoop(stop <-chan struct{}) {
 	interval := time.Duration(u.Cfg.UsageIntervalSec) * time.Second
 	if interval <= 0 {
-		interval = 10 * time.Minute
+		interval = time.Minute
 	}
-	// first pass ASAP (full history via offset 0)
 	if err := u.SyncOnce(); err != nil {
 		u.Logger.Warn("用量首次同步失败", "错误", err)
 	} else {
-		u.Logger.Info("用量同步完成", "回填完成", u.state.BackfillDone, "文件数", len(u.state.Files))
+		u.Logger.Info("用量同步完成",
+			"回填完成", u.state.BackfillDone,
+			"文件数", len(u.state.Files),
+			"扫描间隔秒", int(interval.Seconds()),
+			"发现间隔秒", int(u.discoverInterval().Seconds()),
+		)
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -194,4 +288,19 @@ func (u *UsageSyncer) RunLoop(stop <-chan struct{}) {
 			}
 		}
 	}
+}
+
+func inferUsageKind(path string) string {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl") {
+		return "codex"
+	}
+	return "claude"
+}
+
+func usageKindOrInfer(kind, path string) string {
+	if kind == "claude" || kind == "codex" {
+		return kind
+	}
+	return inferUsageKind(path)
 }

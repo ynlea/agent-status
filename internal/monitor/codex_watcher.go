@@ -87,7 +87,7 @@ func (s *CodexFileSource) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	s.ready.Store(true)
-	s.logger.Info("Codex 会话文件监听已启动", "目录", s.root, "全量校准间隔", s.rescanInterval.String())
+	s.logger.Info("Codex 会话文件监听已启动", "目录", s.root, "轻量校准间隔", s.rescanInterval.String())
 	go s.loop(ctx, w)
 	return nil
 }
@@ -145,7 +145,7 @@ func (s *CodexFileSource) loop(ctx context.Context, w *fsnotify.Watcher) {
 			s.handleEvent(w, event)
 		case <-ticker.C:
 			if err := s.rescan(); err != nil {
-				s.logger.Warn("Codex 会话文件全量校准失败", "错误", err)
+				s.logger.Warn("Codex 会话文件轻量校准失败", "错误", err)
 			}
 		}
 	}
@@ -205,7 +205,19 @@ func (s *CodexFileSource) watchTree(w *fsnotify.Watcher, root string) error {
 	})
 }
 
+// rescan recovers missed filesystem events without re-reading unchanged files.
+// New/truncated/appended files are reconciled; size-stable files only re-evaluate
+// time-based idle transitions from the cached rollout state.
 func (s *CodexFileSource) rescan() error {
+	s.mu.RLock()
+	w := s.watcher
+	s.mu.RUnlock()
+	if w != nil {
+		if err := s.watchTree(w, s.root); err != nil {
+			s.logger.Warn("校准阶段补充目录监听失败", "错误", err)
+		}
+	}
+
 	found := make(map[string]struct{})
 	err := filepath.WalkDir(s.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -216,7 +228,7 @@ func (s *CodexFileSource) rescan() error {
 		}
 		if isCodexRollout(path) {
 			found[path] = struct{}{}
-			s.reloadFile(path)
+			s.reconcileFile(path)
 		}
 		return nil
 	})
@@ -237,6 +249,52 @@ func (s *CodexFileSource) rescan() error {
 		s.notifyChange()
 	}
 	return nil
+}
+
+// reconcileFile is the cheap recovery path: Stat first, then read only when needed.
+func (s *CodexFileSource) reconcileFile(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.removeFile(path)
+		}
+		return
+	}
+
+	s.mu.RLock()
+	file, exists := s.files[path]
+	var offset int64
+	if exists {
+		offset = file.offset
+	}
+	s.mu.RUnlock()
+
+	switch {
+	case !exists || info.Size() < offset:
+		s.reloadFile(path)
+	case info.Size() > offset:
+		s.updateFile(path)
+	default:
+		s.refreshDerived(path, info.ModTime().UTC())
+	}
+}
+
+// refreshDerived re-applies idle/drop rules without reading the file body.
+func (s *CodexFileSource) refreshDerived(path string, modTime time.Time) {
+	s.mu.Lock()
+	file, exists := s.files[path]
+	if !exists {
+		s.mu.Unlock()
+		return
+	}
+	next, present := file.state.session(modTime, time.Now().UTC())
+	changed := !sameCodexSession(file.session, file.present, next, present)
+	file.session = next
+	file.present = present
+	s.mu.Unlock()
+	if changed {
+		s.notifyChange()
+	}
 }
 
 func (s *CodexFileSource) reloadFile(path string) {

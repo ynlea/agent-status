@@ -87,7 +87,7 @@ Windows 常驻：进程 + 可选「登录时」计划任务（`AgentStatusServer
 
 - Claude Code：`claude` 在 PATH 或 `~/.claude` 存在 → 调用  
   `agent-status-monitor --init --claude --config <安装目录>/config/monitor.json`
-- Codex：仅探测并保持 monitor 配置中的 app-server / file-watch，不改 Codex 全局配置
+- Codex：仅探测并保持 monitor 配置中的 file-watch，不改 Codex 全局配置
 
 跳过初始化：`--no-init-agents` / `-NoInitAgents`。
 

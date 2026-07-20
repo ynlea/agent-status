@@ -139,10 +139,8 @@ function Write-MonitorJson([string]$Url, [string]$KeyValue) {
         machine_id           = $machine
         machine_name         = $machine
         platform             = 'windows'
-        report_interval_sec  = 15
-        codex_app_server     = $true
+        report_interval_sec  = 60
         codex_file_watch     = $true
-        codex_sandbox_mode   = ''
         codex_sessions_dir   = ''
         state_file           = ''
     }

@@ -19,16 +19,9 @@ type Config struct {
 	StateFile string `json:"state_file,omitempty"`
 	// ReportIntervalSec heartbeat when no changes
 	ReportIntervalSec int `json:"report_interval_sec,omitempty"`
-	// CodexAppServer enables the codex app-server JSON-RPC channel (default true).
-	// File rollout scan remains the fallback/merge source.
-	CodexAppServer *bool `json:"codex_app_server,omitempty"`
 	// CodexFileWatch enables real-time watching of ordinary Codex rollout files (default true).
 	// A periodic full scan remains enabled to recover from missed filesystem events.
 	CodexFileWatch *bool `json:"codex_file_watch,omitempty"`
-	// CodexSandboxMode is passed to app-server as -c sandbox_mode="...".
-	// Empty means omit (Codex default). Examples: danger-full-access, workspace-write, read-only.
-	// Do not hardcode a dangerous mode in code; set per machine via config when needed.
-	CodexSandboxMode string `json:"codex_sandbox_mode,omitempty"`
 
 	// UsageEnabled turns on local token usage scan/report (default true).
 	UsageEnabled *bool `json:"usage_enabled,omitempty"`
@@ -36,8 +29,12 @@ type Config struct {
 	ClaudeProjectsDir string `json:"claude_projects_dir,omitempty"`
 	// UsageStateFile stores usage file cursors (default ~/.agent-status/usage-cursors.json)
 	UsageStateFile string `json:"usage_state_file,omitempty"`
-	// UsageIntervalSec is the fallback rescan interval for usage (default 600).
+	// UsageIntervalSec is how often to tick usage reconciliation (default 60).
+	// Unchanged files only get Stat; open/parse happens only when size grows.
 	UsageIntervalSec int `json:"usage_interval_sec,omitempty"`
+	// UsageDiscoverSec is how often to walk trees for new usage files (default 600).
+	// Keep this slower than UsageIntervalSec so 1-minute ticks stay cheap.
+	UsageDiscoverSec int `json:"usage_discover_sec,omitempty"`
 }
 
 func (c *Config) UsageScanEnabled() bool {
@@ -45,13 +42,6 @@ func (c *Config) UsageScanEnabled() bool {
 		return true
 	}
 	return *c.UsageEnabled
-}
-
-func (c *Config) AppServerEnabled() bool {
-	if c.CodexAppServer == nil {
-		return true
-	}
-	return *c.CodexAppServer
 }
 
 func (c *Config) FileWatchEnabled() bool {
@@ -81,7 +71,7 @@ func LoadConfig(path string) (*Config, error) {
 		c.MachineID = c.MachineName
 	}
 	if c.ReportIntervalSec <= 0 {
-		c.ReportIntervalSec = 15
+		c.ReportIntervalSec = 60
 	}
 	if c.StateFile == "" {
 		home, _ := os.UserHomeDir()
@@ -100,7 +90,10 @@ func LoadConfig(path string) (*Config, error) {
 		c.UsageStateFile = filepath.Join(home, ".agent-status", "usage-cursors.json")
 	}
 	if c.UsageIntervalSec <= 0 {
-		c.UsageIntervalSec = 600
+		c.UsageIntervalSec = 60
+	}
+	if c.UsageDiscoverSec <= 0 {
+		c.UsageDiscoverSec = 600
 	}
 	return &c, nil
 }

@@ -47,6 +47,47 @@ func TestCodexFileSourceKeepsPartialLineUntilComplete(t *testing.T) {
 	})
 }
 
+func TestCodexFileSourceRescanReconcilesWithoutFullReread(t *testing.T) {
+	root := t.TempDir()
+	path := writeWatcherRollout(t, root, "rollout-session-light.jsonl", `{"type":"event_msg","payload":{"type":"user_message"}}`+"\n")
+	source := NewCodexFileSource(root, nil, CodexFileWatchOptions{})
+	source.reloadFile(path)
+
+	source.mu.RLock()
+	offsetBefore := source.files[path].offset
+	source.mu.RUnlock()
+	if offsetBefore == 0 {
+		t.Fatal("expected non-zero offset after initial load")
+	}
+
+	if err := source.rescan(); err != nil {
+		t.Fatal(err)
+	}
+	source.mu.RLock()
+	offsetAfter := source.files[path].offset
+	source.mu.RUnlock()
+	if offsetAfter != offsetBefore {
+		t.Fatalf("unchanged file should keep offset: before=%d after=%d", offsetBefore, offsetAfter)
+	}
+	assertWatcherStates(t, source.Snapshot(), map[string]apitypes.SessionState{
+		"session-light": apitypes.StateWorking,
+	})
+
+	appendWatcherLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`+"\n")
+	if err := source.rescan(); err != nil {
+		t.Fatal(err)
+	}
+	assertWatcherStates(t, source.Snapshot(), map[string]apitypes.SessionState{
+		"session-light": apitypes.StateDone,
+	})
+	source.mu.RLock()
+	offsetGrew := source.files[path].offset
+	source.mu.RUnlock()
+	if offsetGrew <= offsetBefore {
+		t.Fatalf("appended content should advance offset: before=%d after=%d", offsetBefore, offsetGrew)
+	}
+}
+
 func TestCodexFileSourceWatchesNewDirectoriesAndFiles(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -60,7 +60,7 @@ type Session struct {
 	State       SessionState `json:"state"`
 	Message     string       `json:"message,omitempty"`
 	// Source is the monitor channel that produced this session:
-	// codex-app-server | codex-file-watch | codex-file | claude-hook
+	// codex-file-watch | codex-file | claude-hook
 	Source    string    `json:"source,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

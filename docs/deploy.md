@@ -88,24 +88,22 @@ go build -o bin/agent-status-monitor ./cmd/monitor
 
 ### Codex
 
-两条通道（可并存）：
-
-1. **app-server（优先）**：监控端启动 `codex app-server --stdio`，用 JSON-RPC 拉 `thread/list` / `thread/loaded/list`，并收 `thread/status/changed`、`turn/*` 等通知。状态变化会**立即触发上报**（不必等轮询周期）。进程退出会自动重启。  
-2. **会话文件监听（普通 CLI 会话优先）**：监听 `~/.codex/sessions/**/rollout-*.jsonl` 的创建和写入；每个会话文件独立增量读取新增 JSONL 行，变化会立即上报。每分钟执行一次全量校准，处理遗漏事件、文件截断和监控端重启。
-3. **全量文件扫描（兜底）**：文件监听不可用时，按原方式扫描会话文件并推断状态。
+1. **会话文件监听（优先）**：监听 `~/.codex/sessions/**/rollout-*.jsonl` 的创建和写入；每个会话文件独立增量读取新增 JSONL 行，变化会立即上报。每分钟做一次轻量校准（先 `Stat`，只对新增/变大/截断/消失的文件再读；未变化的只刷新空闲态），处理遗漏事件和监控端重启。
+2. **全量文件扫描（兜底）**：文件监听不可用时，按原方式扫描会话文件并推断状态。
 
 配置：
 
 | 字段 | 含义 | 默认 |
 |------|------|------|
-| `codex_app_server` | 是否启用 app-server 通道 | `true` |
 | `codex_file_watch` | 是否监听普通 Codex 会话文件 | `true` |
-| `codex_sandbox_mode` | 传给 app-server 的 `sandbox_mode`（空=用 Codex 默认） | 空 |
-| `report_interval_sec` | 心跳上报周期 | 15 |
+| `report_interval_sec` | 心跳上报周期（实时靠文件事件） | 60 |
+| `usage_enabled` | 是否采集本地 token 用量 | `true` |
+| `usage_interval_sec` | 用量对账周期；未变文件只 `Stat` | 60 |
+| `usage_discover_sec` | 全量发现新用量日志的周期 | 600 |
 
-AppArmor 等环境下若默认沙箱起不来，可在该机 `monitor.json` 设 `codex_sandbox_mode`（例如 `danger-full-access`），**不要在代码里写死**。stderr 会进监控日志，便于排查 bubblewrap 失败。
+用量扫描为双频：`usage_interval_sec` 可设 1 分钟，只对已知文件做轻量对账；`usage_discover_sec` 控制多久遍历一次目录找新文件。游标有变化才落盘。
 
-合并规则：同一会话若 app-server 给出 live 状态，优先生效；`notLoaded` 仍走文件监听或扫描。日志字段 `source`：`codex-app-server` / `codex-file-watch` / `codex-file` / `claude-hook`。
+日志字段 `source`：`codex-file-watch` / `codex-file` / `claude-hook`。
 
 ## 3. Android
 

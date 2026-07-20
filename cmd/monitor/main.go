@@ -93,24 +93,8 @@ func main() {
 		}
 	}
 
-	var appSrc *monitor.AppServerSource
-	if cfg.AppServerEnabled() {
-		appSrc = monitor.NewAppServerSource(logger, monitor.AppServerOptions{
-			SandboxMode: cfg.CodexSandboxMode,
-		})
-		if err := appSrc.Start(ctx); err != nil {
-			logger.Warn("Codex app-server 启动调用失败，将使用文件扫描并继续重试", "错误", err)
-			// keep appSrc for supervise retries if Start returned nil with background supervise
-		}
-		defer appSrc.Stop()
-	}
-
 	if *printOnly {
-		// wait a bit for app-server first poll when enabled
-		if appSrc != nil {
-			time.Sleep(500 * time.Millisecond)
-		}
-		sessions, err := collect(cfg, appSrc, fileSrc)
+		sessions, err := collect(cfg, fileSrc)
 		if err != nil {
 			logger.Error("采集会话状态失败", "错误", err)
 			os.Exit(1)
@@ -128,7 +112,7 @@ func main() {
 	doReport := func(reason string) {
 		reportMu.Lock()
 		defer reportMu.Unlock()
-		if err := reportOnce(logger, cfg, rep, prev, appSrc, fileSrc); err != nil {
+		if err := reportOnce(logger, cfg, rep, prev, fileSrc); err != nil {
 			logger.Warn("上报会话状态失败", "原因", reason, "错误", err)
 		}
 	}
@@ -147,13 +131,12 @@ func main() {
 	logger.Info("监控端已启动",
 		"服务地址", cfg.ServerURL,
 		"机器名称", cfg.MachineName,
-		"启用 Codex app-server", cfg.AppServerEnabled(),
 		"启用 Codex 文件监听", fileSrc != nil && fileSrc.Ready(),
-		"Codex 沙箱模式", emptyAs(cfg.CodexSandboxMode, "Codex 默认值"),
 		"启用文件扫描兜底", true,
 		"定时上报秒数", cfg.ReportIntervalSec,
 		"启用用量采集", cfg.UsageScanEnabled(),
 		"用量扫描秒数", cfg.UsageIntervalSec,
+		"用量发现秒数", cfg.UsageDiscoverSec,
 	)
 
 	stop := make(chan os.Signal, 1)
@@ -171,10 +154,8 @@ func main() {
 	doReport("startup")
 
 	changes := make(chan struct{}, 1)
-	forwardChanges := func(source <-chan struct{}) {
-		if source == nil {
-			return
-		}
+	if fileSrc != nil {
+		source := fileSrc.Changes()
 		go func() {
 			for {
 				select {
@@ -189,12 +170,6 @@ func main() {
 			}
 		}()
 	}
-	if appSrc != nil {
-		forwardChanges(appSrc.Changes())
-	}
-	if fileSrc != nil {
-		forwardChanges(fileSrc.Changes())
-	}
 
 	for {
 		select {
@@ -202,9 +177,8 @@ func main() {
 			logger.Info("监控端已停止")
 			return
 		case <-changes:
-			// coalesce bursty app-server events
+			// coalesce bursty filesystem events
 			time.Sleep(150 * time.Millisecond)
-			// drain
 			for {
 				select {
 				case <-changes:
@@ -220,33 +194,21 @@ func main() {
 	}
 }
 
-func collect(cfg *monitor.Config, appSrc *monitor.AppServerSource, fileSrc *monitor.CodexFileSource) ([]apitypes.Session, error) {
-	var fileCodex []apitypes.Session
+func collect(cfg *monitor.Config, fileSrc *monitor.CodexFileSource) ([]apitypes.Session, error) {
+	var codex []apitypes.Session
 	if fileSrc != nil && fileSrc.Ready() {
-		fileCodex = fileSrc.Snapshot()
+		codex = fileSrc.Snapshot()
 	} else {
 		var err error
-		fileCodex, err = monitor.ScanCodex(cfg.CodexSessionsDir)
+		codex, err = monitor.ScanCodex(cfg.CodexSessionsDir)
 		if err != nil {
 			return nil, err
 		}
 	}
-	for i := range fileCodex {
-		if fileCodex[i].Source == "" {
-			fileCodex[i].Source = "codex-file"
+	for i := range codex {
+		if codex[i].Source == "" {
+			codex[i].Source = "codex-file"
 		}
-	}
-	var codex []apitypes.Session
-	if appSrc != nil && appSrc.Ready() {
-		app := appSrc.Snapshot()
-		for i := range app {
-			if app[i].Source == "" {
-				app[i].Source = "codex-app-server"
-			}
-		}
-		codex = monitor.MergeCodexSessions(app, fileCodex)
-	} else {
-		codex = fileCodex
 	}
 
 	sessions := make([]apitypes.Session, 0, len(codex)+8)
@@ -264,8 +226,8 @@ func collect(cfg *monitor.Config, appSrc *monitor.AppServerSource, fileSrc *moni
 	return sessions, nil
 }
 
-func reportOnce(logger *slog.Logger, cfg *monitor.Config, rep *monitor.Reporter, prev map[string]sessionSnap, appSrc *monitor.AppServerSource, fileSrc *monitor.CodexFileSource) error {
-	sessions, err := collect(cfg, appSrc, fileSrc)
+func reportOnce(logger *slog.Logger, cfg *monitor.Config, rep *monitor.Reporter, prev map[string]sessionSnap, fileSrc *monitor.CodexFileSource) error {
+	sessions, err := collect(cfg, fileSrc)
 	if err != nil {
 		return err
 	}
@@ -301,7 +263,7 @@ func logSessionDiffs(logger *slog.Logger, prev map[string]sessionSnap, sessions 
 		}
 		logger.Info("会话基线已建立",
 			"会话数", len(curr),
-			"Codex app-server", sourceCount["codex-app-server"],
+			"Codex 文件监听", sourceCount["codex-file-watch"],
 			"Codex 文件扫描", sourceCount["codex-file"],
 			"Claude Hook", sourceCount["claude-hook"],
 		)
@@ -382,7 +344,7 @@ func runClaudeHook(logger *slog.Logger) error {
 	}
 	if cfg, err := monitor.LoadConfig(*cfgPath); err == nil {
 		rep := monitor.NewReporter(cfg)
-		sessions, _ := collect(cfg, nil, nil)
+		sessions, _ := collect(cfg, nil)
 		if err := rep.Report(sessions); err != nil {
 			logger.Warn("Claude Hook 上报失败", "错误", err)
 		} else {
@@ -404,11 +366,4 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
-}
-
-func emptyAs(v, def string) string {
-	if v == "" {
-		return def
-	}
-	return v
 }
