@@ -2,11 +2,12 @@
 # 交互：irm https://raw.githubusercontent.com/ynlea/agent-status/main/scripts/install.ps1 | iex
 # 非交互：
 #   .\install.ps1 install -Role monitor -ServerUrl http://127.0.0.1:29125 -Key KEY -Yes
-#   .\install.ps1 status -Role all
+#   .\install.ps1 update  -Role all -Version v0.1.1 -Yes
+#   .\install.ps1 status  -Role all
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'config', 'init-agents', 'uninstall', '')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'config', 'init-agents', 'uninstall', '')]
     [string]$Command = 'install',
 
     [Parameter(Position = 1)]
@@ -467,12 +468,25 @@ function Invoke-Uninstall {
     }
 }
 
+function Invoke-Update {
+    $roles = Expand-Roles $(if ($Role) { $Role } else { 'all' })
+    foreach ($r in $roles) {
+        Write-Log "---- 更新 $r ----"
+        Stop-Role $r
+        Install-Binary $r
+        Start-Role $r
+        Write-Log "已更新 $r"
+    }
+    Show-Status
+}
+
 # When piped via irm | iex, $PSCommandPath may be empty; still allow running as function-like
 if ([string]::IsNullOrWhiteSpace($Command)) { $Command = 'install' }
 
 switch ($Command) {
     'install' { Invoke-Install }
-    'status' { Show-Status }
+    'update'   { Invoke-Update }
+    'status'   { Show-Status }
     'start' { foreach ($r in Expand-Roles $Role) { Start-Role $r } }
     'stop' { foreach ($r in Expand-Roles $Role) { Stop-Role $r } }
     'restart' { foreach ($r in Expand-Roles $Role) { Stop-Role $r; Start-Role $r } }
