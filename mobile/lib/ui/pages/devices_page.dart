@@ -346,7 +346,15 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
               sliver: SliverList.separated(
                 itemCount: active.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (_, index) => TaskCard(session: active[index]),
+                itemBuilder: (_, index) {
+                  final session = active[index];
+                  return TaskCard(
+                    session: session,
+                    onTap: () => context.push(
+                      '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+                    ),
+                  );
+                },
               ),
             ),
             if (idle.isNotEmpty)
@@ -370,7 +378,15 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                 sliver: SliverList.separated(
                   itemCount: idle.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, index) => TaskCard(session: idle[index]),
+                  itemBuilder: (_, index) {
+                  final session = idle[index];
+                  return TaskCard(
+                    session: session,
+                    onTap: () => context.push(
+                      '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+                    ),
+                  );
+                },
                 ),
               ),
           ],

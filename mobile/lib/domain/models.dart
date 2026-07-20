@@ -94,6 +94,9 @@ class Session {
     required this.message,
     this.updatedAt,
     this.machineName,
+    this.cwd = '',
+    this.lastAssistantMessage = '',
+    this.source = '',
   });
 
   final String machineId;
@@ -104,10 +107,21 @@ class Session {
   final String message;
   final DateTime? updatedAt;
   final String? machineName;
+  /// 完整项目路径
+  final String cwd;
+  /// Agent 最后一条完整输出
+  final String lastAssistantMessage;
+  final String source;
 
   String get title {
     final m = message.trim();
     if (m.isNotEmpty) return m;
+    return displayName;
+  }
+
+  String get projectPath {
+    final full = cwd.trim();
+    if (full.isNotEmpty) return full;
     return displayName;
   }
 
@@ -132,6 +146,9 @@ class Session {
       updatedAt: _parseTime(json['updated_at']),
       machineName:
           json['machine_name'] == null ? null : '${json['machine_name']}',
+      cwd: '${json['cwd'] ?? ''}'.trim(),
+      lastAssistantMessage: '${json['last_assistant_message'] ?? ''}',
+      source: '${json['source'] ?? ''}',
     );
   }
 
@@ -139,6 +156,9 @@ class Session {
     SessionState? state,
     String? message,
     String? machineName,
+    String? cwd,
+    String? lastAssistantMessage,
+    String? source,
   }) {
     return Session(
       machineId: machineId,
@@ -149,6 +169,9 @@ class Session {
       message: message ?? this.message,
       updatedAt: updatedAt,
       machineName: machineName ?? this.machineName,
+      cwd: cwd ?? this.cwd,
+      lastAssistantMessage: lastAssistantMessage ?? this.lastAssistantMessage,
+      source: source ?? this.source,
     );
   }
 }

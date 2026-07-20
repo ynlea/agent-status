@@ -59,6 +59,10 @@ type Session struct {
 	DisplayName string       `json:"display_name"`
 	State       SessionState `json:"state"`
 	Message     string       `json:"message,omitempty"`
+	// Cwd is the full project path for the session (absolute when available).
+	Cwd string `json:"cwd,omitempty"`
+	// LastAssistantMessage is the latest agent-visible text (full, not truncated).
+	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
 	// Source is the monitor channel that produced this session:
 	// codex-file-watch | codex-file | claude-hook
 	Source    string    `json:"source,omitempty"`

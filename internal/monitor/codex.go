@@ -45,12 +45,13 @@ type codexLine struct {
 }
 
 type codexRolloutState struct {
-	sessionID string
-	display   string
-	state     apitypes.SessionState
-	message   string
-	lastEvent time.Time
-	cwd       string
+	sessionID      string
+	display        string
+	state          apitypes.SessionState
+	message        string
+	lastAssistant  string
+	lastEvent      time.Time
+	cwd            string
 }
 
 func newCodexRolloutState(path string) codexRolloutState {
@@ -95,6 +96,11 @@ func (s *codexRolloutState) applyLine(line string, fallback time.Time) {
 		}
 	}
 
+	// Full assistant message body when present (response_item / event shapes).
+	if text := extractCodexAssistantText(row.Type, pt, payload); text != "" {
+		s.lastAssistant = text
+	}
+
 	switch pt {
 	case "task_started":
 		s.state = apitypes.StateWorking
@@ -117,7 +123,10 @@ func (s *codexRolloutState) applyLine(line string, fallback time.Time) {
 	case "custom_tool_call_output", "function_call_output", "reasoning", "agent_message":
 		if s.state != apitypes.StateConfirm {
 			s.state = apitypes.StateWorking
-			s.message = preferMessage(s.message, pt)
+			// Prefer real assistant text already captured; keep event label only as fallback.
+			if s.lastAssistant == "" {
+				s.message = preferMessage(s.message, pt)
+			}
 		}
 		s.lastEvent = ts
 	case "task_complete":
@@ -178,7 +187,14 @@ func stringifyCodexText(v interface{}) string {
 					parts = append(parts, el)
 				}
 			case map[string]interface{}:
-				if txt, ok := el["text"].(string); ok && txt != "" {
+				typ, _ := el["type"].(string)
+				if typ == "output_text" || typ == "text" || typ == "input_text" || typ == "" {
+					if txt, ok := el["text"].(string); ok && txt != "" {
+						parts = append(parts, txt)
+					} else if txt, ok := el["content"].(string); ok && txt != "" {
+						parts = append(parts, txt)
+					}
+				} else if txt, ok := el["text"].(string); ok && txt != "" {
 					parts = append(parts, txt)
 				} else if txt, ok := el["content"].(string); ok && txt != "" {
 					parts = append(parts, txt)
@@ -234,14 +250,54 @@ func (s codexRolloutState) session(fileMod, now time.Time) (apitypes.Session, bo
 		updated = s.lastEvent.UTC()
 	}
 	return apitypes.Session{
-		Agent:       "codex",
-		SessionID:   s.sessionID,
-		DisplayName: display,
-		State:       state,
-		Message:     message,
-		Source:      "codex-file",
-		UpdatedAt:   updated,
+		Agent:                "codex",
+		SessionID:            s.sessionID,
+		DisplayName:          display,
+		State:                state,
+		Message:              message,
+		Cwd:                  s.cwd,
+		LastAssistantMessage: s.lastAssistant,
+		Source:               "codex-file",
+		UpdatedAt:            updated,
 	}, true
+}
+
+// extractCodexAssistantText returns full assistant-visible text from a rollout line.
+func extractCodexAssistantText(rowType, payloadType string, payload map[string]interface{}) string {
+	if payload == nil {
+		return ""
+	}
+	// response_item / message with assistant role
+	role, _ := payload["role"].(string)
+	typ := payloadType
+	if typ == "" {
+		typ, _ = payload["type"].(string)
+	}
+	if role == "assistant" || typ == "agent_message" || (rowType == "response_item" && role == "assistant") {
+		if text := extractCodexUserText(payload); text != "" {
+			// reuse text extractor for content/text fields
+			return strings.TrimSpace(text)
+		}
+		// content blocks often use output_text
+		if text := stringifyCodexText(payload["content"]); text != "" {
+			return strings.TrimSpace(text)
+		}
+		if msg, ok := payload["message"].(string); ok && strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+		if msg, ok := payload["message"].(map[string]interface{}); ok {
+			if text := stringifyCodexText(msg["content"]); text != "" {
+				return strings.TrimSpace(text)
+			}
+		}
+	}
+	// event_msg agent_message with free text
+	if rowType == "event_msg" && payloadType == "agent_message" {
+		if text := extractCodexUserText(payload); text != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }
 
 func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, bool) {

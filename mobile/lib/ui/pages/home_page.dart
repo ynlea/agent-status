@@ -139,8 +139,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: TaskCard(
                       session: session,
-                      onTap: () =>
-                          context.push('/devices/${session.machineId}'),
+                      onTap: () => context.push(
+                        '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+                      ),
                     ),
                   ),
                 ),

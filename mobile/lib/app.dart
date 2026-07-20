@@ -6,6 +6,7 @@ import 'data/prefs/settings_store.dart';
 import 'theme/qingya_theme.dart';
 import 'ui/pages/devices_page.dart';
 import 'ui/pages/home_page.dart';
+import 'ui/pages/session_detail_page.dart';
 import 'ui/pages/settings_page.dart';
 import 'ui/pages/usage_page.dart';
 import 'ui/pages/welcome_page.dart';
@@ -35,6 +36,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/setup',
         builder: (_, __) => const SetupPage(),
+      ),
+      GoRoute(
+        path: '/sessions/:machineId/:agent/:sessionId',
+        builder: (_, state) => SessionDetailPage(
+          machineId: state.pathParameters['machineId']!,
+          agent: state.pathParameters['agent']!,
+          sessionId: state.pathParameters['sessionId']!,
+        ),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {

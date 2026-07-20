@@ -202,30 +202,84 @@ func lastPromptFromTranscript(path string) string {
 		if msg == nil {
 			continue
 		}
-		switch c := msg["content"].(type) {
-		case string:
-			if strings.TrimSpace(c) != "" {
-				last = c
-			}
-		case []interface{}:
-			var parts []string
-			for _, item := range c {
-				m, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if typ, _ := m["type"].(string); typ == "text" {
-					if txt, _ := m["text"].(string); strings.TrimSpace(txt) != "" {
-						parts = append(parts, txt)
-					}
-				}
-			}
-			if joined := strings.TrimSpace(strings.Join(parts, " ")); joined != "" {
-				last = joined
-			}
+		if text := claudeMessageText(msg); text != "" {
+			last = text
 		}
 	}
 	return last
+}
+
+// lastAssistantFromTranscript returns the full text of the latest assistant message.
+func lastAssistantFromTranscript(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var last string
+	sc := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 8*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var row map[string]interface{}
+		if json.Unmarshal([]byte(line), &row) != nil {
+			continue
+		}
+		t, _ := row["type"].(string)
+		msg, _ := row["message"].(map[string]interface{})
+		role := ""
+		if msg != nil {
+			role, _ = msg["role"].(string)
+		}
+		if role == "" {
+			role, _ = row["role"].(string)
+		}
+		if t != "assistant" && role != "assistant" {
+			continue
+		}
+		if msg == nil {
+			continue
+		}
+		if text := claudeMessageText(msg); text != "" {
+			last = text
+		}
+	}
+	return last
+}
+
+func claudeMessageText(msg map[string]interface{}) string {
+	if msg == nil {
+		return ""
+	}
+	switch c := msg["content"].(type) {
+	case string:
+		return strings.TrimSpace(c)
+	case []interface{}:
+		var parts []string
+		for _, item := range c {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			typ, _ := m["type"].(string)
+			if typ == "text" || typ == "output_text" || typ == "" {
+				if txt, _ := m["text"].(string); strings.TrimSpace(txt) != "" {
+					parts = append(parts, txt)
+				}
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	default:
+		return ""
+	}
 }
 
 // ApplyHookEvent updates state from a hook event.
@@ -237,21 +291,25 @@ func (c *ClaudeState) ApplyHookEvent(ev HookEvent) (apitypes.Session, error) {
 	}
 	prev, hasPrev := c.Sessions[ev.SessionID]
 
-	display := ev.Cwd
-	if display == "" {
-		if hasPrev && prev.DisplayName != "" {
-			display = prev.DisplayName
-		} else {
-			display = ev.SessionID
-		}
+	cwd := strings.TrimSpace(ev.Cwd)
+	if cwd == "" && hasPrev {
+		cwd = prev.Cwd
+	}
+	display := ""
+	if cwd != "" {
+		display = filepath.Base(cwd)
+	} else if hasPrev && prev.DisplayName != "" {
+		display = prev.DisplayName
 	} else {
-		display = filepath.Base(display)
+		display = ev.SessionID
 	}
 
 	state := apitypes.StateWorking
 	msg := ""
+	lastAsst := ""
 	if hasPrev {
 		msg = prev.Message
+		lastAsst = prev.LastAssistantMessage
 	}
 	// Drop leftover generic labels so UI never shows "stopped" as the task title.
 	if isGenericStatusMessage(msg) {
@@ -331,14 +389,21 @@ func (c *ClaudeState) ApplyHookEvent(ev HookEvent) (apitypes.Session, error) {
 		}
 	}
 
+	// Refresh full last assistant text from transcript when available.
+	if asst := lastAssistantFromTranscript(ev.TranscriptPath); asst != "" {
+		lastAsst = asst
+	}
+
 	sess := apitypes.Session{
-		Agent:       "claude",
-		SessionID:   ev.SessionID,
-		DisplayName: display,
-		State:       state,
-		Message:     msg,
-		Source:      "claude-hook",
-		UpdatedAt:   time.Now().UTC(),
+		Agent:                "claude",
+		SessionID:            ev.SessionID,
+		DisplayName:          display,
+		State:                state,
+		Message:              msg,
+		Cwd:                  cwd,
+		LastAssistantMessage: lastAsst,
+		Source:               "claude-hook",
+		UpdatedAt:            time.Now().UTC(),
 	}
 	c.Sessions[ev.SessionID] = sess
 	if err := c.saveLocked(); err != nil {
