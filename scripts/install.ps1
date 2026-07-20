@@ -198,9 +198,10 @@ function Start-Role([string]$RoleName) {
         }
     }
     $info = Get-StartInfo $RoleName
-    $log = $info.Log
+    $logOut = $info.Log
+    $logErr = if ($logOut -match '\.log$') { $logOut -replace '\.log$', '.err.log' } else { "$logOut.err" }
     $p = Start-Process -FilePath $info.FilePath -ArgumentList $info.ArgumentList -WorkingDirectory $InstallRoot `
-        -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $log
+        -WindowStyle Hidden -PassThru -RedirectStandardOutput $logOut -RedirectStandardError $logErr
     Set-Content -Path $pidPath -Value $p.Id -Encoding ascii
     Write-Log "已启动 $RoleName pid=$($p.Id)"
 }
