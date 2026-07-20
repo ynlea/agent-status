@@ -32,6 +32,7 @@ NO_ENABLE=0
 LOCAL_BIN_SRC=""
 FORCE_CONFIG=0
 PURGE=0
+FORCE_UPDATE=0
 CONFIG_ACTION=""
 CONFIG_KV=()
 
@@ -64,6 +65,7 @@ agent-status 安装与管理工具（Linux）
   --local-bin DIR     使用本地二进制，跳过下载
   --force-config      安装时覆盖已有配置
   --purge             彻底清理：安装目录、命令入口、用量游标、Claude hooks
+  --force             更新时即使版本相同也强制重装
   -h, --help
 EOF
 }
@@ -395,6 +397,48 @@ download() {
   fi
 
   wget -qO "$dest" "$url"
+}
+
+normalize_version() {
+  # v0.1.2 / 0.1.2 / dev → 可比对字符串
+  local v
+  v="$(printf '%s' "$1" | tr -d '[:space:]')"
+  v="${v#v}"
+  v="${v#V}"
+  printf '%s' "$v"
+}
+
+local_binary_version() {
+  # local_binary_version server|monitor → 版本或空
+  local role="$1" bin
+  bin="$BIN_DIR/agent-status-$role"
+  [[ -x "$bin" ]] || { printf ''; return 0; }
+  local out
+  out="$("$bin" -version 2>/dev/null | head -n1 | tr -d '\r')" || out=""
+  # 过滤非版本噪音
+  if [[ -z "$out" || "$out" == *"flag"* || "$out" == *"Usage"* ]]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "$out"
+}
+
+should_skip_update() {
+  # should_skip_update role target_tag → 0=跳过 1=需要更新
+  local role="$1" target="$2" local_ver local_n target_n
+  if [[ "$FORCE_UPDATE" -eq 1 ]]; then
+    return 1
+  fi
+  local_ver="$(local_binary_version "$role")"
+  if [[ -z "$local_ver" || "$local_ver" == "dev" ]]; then
+    return 1
+  fi
+  local_n="$(normalize_version "$local_ver")"
+  target_n="$(normalize_version "$target")"
+  if [[ -n "$local_n" && -n "$target_n" && "$local_n" == "$target_n" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 github_release_tag() {
@@ -1071,20 +1115,46 @@ PY
 
 cmd_update() {
   print_banner "更新二进制"
-  local r
+  local r target local_ver
   ROLE="${ROLE:-all}"
+  target="$(github_release_tag)"
+  info "目标版本  $target"
   local roles=()
   while IFS= read -r r; do roles+=("$r"); done < <(roles_expand "$ROLE")
   UI_STEP_CUR=0
   UI_STEP_TOTAL=${#roles[@]}
+  local updated=0 skipped=0
   for r in "${roles[@]}"; do
-    step "更新 $r"
+    step "检查 $r"
+    local_ver="$(local_binary_version "$r")"
+    if [[ -n "$local_ver" ]]; then
+      kv "本地" "$local_ver"
+    else
+      kv "本地" "未知（旧版或未注入版本）"
+    fi
+    kv "目标" "$target"
+    if should_skip_update "$r" "$target"; then
+      ok "$r 已是最新（$local_ver），跳过"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    info "需要更新，开始下载..."
+    # 临时 VERSION，确保 install_binary 拉同一 tag（避免 latest 二次解析漂移）
+    local prev_version="$VERSION"
+    VERSION="$target"
     systemctl --user stop "$(unit_for_role "$r")" 2>/dev/null || true
     install_binary "$r"
     systemctl --user start "$(unit_for_role "$r")" 2>/dev/null || true
-    ok "已更新 $r"
+    VERSION="$prev_version"
+    local_ver="$(local_binary_version "$r")"
+    ok "已更新 $r → ${local_ver:-$target}"
+    updated=$((updated + 1))
   done
-  print_done "更新完成" "$INSTALL_ROOT"
+  if [[ "$updated" -eq 0 && "$skipped" -gt 0 ]]; then
+    print_done "已是最新，无需更新"
+  else
+    print_done "更新完成（更新 ${updated} · 跳过 ${skipped}）" "$INSTALL_ROOT"
+  fi
   cmd_status
 }
 
@@ -1328,6 +1398,7 @@ parse_args() {
       --local-bin) LOCAL_BIN_SRC="${2:-}"; shift 2 ;;
       --force-config) FORCE_CONFIG=1; shift ;;
       --purge) PURGE=1; shift ;;
+      --force) FORCE_UPDATE=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *=*)
         if [[ "$CMD" == "config" && "$CONFIG_ACTION" == "set" ]]; then

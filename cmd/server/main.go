@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/ynlea/agent-status/internal/pricing"
 	"github.com/ynlea/agent-status/internal/server"
 	"github.com/ynlea/agent-status/internal/store"
+	"github.com/ynlea/agent-status/pkg/buildinfo"
 )
 
 func main() {
@@ -30,7 +32,12 @@ func main() {
 	pricingInterval := flag.Duration("pricing-sync-interval", envDuration("AGENT_STATUS_PRICING_SYNC_INTERVAL", 24*time.Hour), "OpenRouter price sync interval")
 	openRouterURL := flag.String("openrouter-api-url", envOr("OPENROUTER_API_URL", "https://openrouter.ai/api/v1"), "OpenRouter API base URL")
 	openRouterKey := flag.String("openrouter-api-key", envOr("OPENROUTER_API_KEY", ""), "optional OpenRouter API key for price list")
+	showVersion := flag.Bool("version", false, "print server version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.Version)
+		return
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if *key == "" {

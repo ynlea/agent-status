@@ -145,6 +145,39 @@ function Read-Prompt([string]$Message, [string]$Default = '') {
     return Read-Host $Message
 }
 
+
+function Normalize-Version([string]$V) {
+    if ([string]::IsNullOrWhiteSpace($V)) { return '' }
+    $v = $V.Trim()
+    if ($v.StartsWith('v') -or $v.StartsWith('V')) { $v = $v.Substring(1) }
+    return $v
+}
+
+function Get-LocalBinaryVersion([string]$RoleName) {
+    $exe = Join-Path $BinDir ("agent-status-{0}.exe" -f $RoleName)
+    if (-not (Test-Path $exe)) { return '' }
+    try {
+        $out = & $exe -version 2>$null
+        if ($out -is [array]) { $out = $out | Select-Object -First 1 }
+        $s = [string]$out
+        if ([string]::IsNullOrWhiteSpace($s)) { return '' }
+        if ($s -match 'flag|Usage|error') { return '' }
+        return $s.Trim()
+    } catch {
+        return ''
+    }
+}
+
+function Test-ShouldSkipUpdate([string]$RoleName, [string]$Target) {
+    if ($Force) { return $false }
+    $local = Get-LocalBinaryVersion $RoleName
+    if ([string]::IsNullOrWhiteSpace($local) -or $local -eq 'dev') { return $false }
+    $ln = Normalize-Version $local
+    $tn = Normalize-Version $Target
+    return ($ln -ne '' -and $tn -ne '' -and $ln -eq $tn)
+}
+
+
 function Get-ReleaseTag {
     if ($Version -ne 'latest') { return $Version }
     $headers = @{ 'User-Agent' = 'agent-status-installer' }
@@ -902,19 +935,41 @@ function Invoke-Uninstall {
 function Invoke-Update {
     Write-Banner '更新二进制'
     $roles = Expand-Roles $(if ($Role) { $Role } else { 'all' })
+    $target = Get-ReleaseTag
+    Write-Info "目标版本  $target"
     $script:UiStepCur = 0
     $script:UiStepTotal = @($roles).Count
+    $updated = 0
+    $skipped = 0
+    $prevVersion = $Version
     foreach ($r in $roles) {
-        Write-Step "更新 $r"
+        Write-Step "检查 $r"
+        $local = Get-LocalBinaryVersion $r
+        if ($local) { Write-Kv '本地' $local } else { Write-Kv '本地' '未知（旧版或未注入版本）' }
+        Write-Kv '目标' $target
+        if (Test-ShouldSkipUpdate $r $target) {
+            Write-Ok "$r 已是最新（$local），跳过"
+            $skipped++
+            continue
+        }
+        Write-Info '需要更新，开始下载...'
+        # 固定为同一 tag，避免 latest 二次解析
+        $script:Version = $target
         Stop-Role $r
         Install-Binary $r
         Start-Role $r
-        Write-Ok "已更新 $r"
+        $script:Version = $prevVersion
+        $local2 = Get-LocalBinaryVersion $r
+        if ($local2) { Write-Ok "已更新 $r → $local2" } else { Write-Ok "已更新 $r → $target" }
+        $updated++
     }
-    Write-Done '更新完成' $InstallRoot
+    if ($updated -eq 0 -and $skipped -gt 0) {
+        Write-Done '已是最新，无需更新'
+    } else {
+        Write-Done ("更新完成（更新 {0} · 跳过 {1}）" -f $updated, $skipped) $InstallRoot
+    }
     Show-Status
 }
-
 
 function Read-ActionMenu {
     Write-Banner '管理面板'
