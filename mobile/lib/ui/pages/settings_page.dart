@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../data/monitor/monitor_bridge.dart';
+import '../../data/prefs/package_info_provider.dart';
 import '../../data/prefs/settings_store.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
@@ -37,6 +38,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final settings = ref.watch(settingsProvider);
     final snapshot = ref.watch(statusRepositoryProvider);
     final allNotifications =
@@ -49,7 +51,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: c.scaffold,
       body: SafeArea(
         bottom: false,
         child: ListView(
@@ -68,13 +70,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   value: settings.baseUrl.isEmpty ? '未配置' : settings.baseUrl,
                   onTap: () => context.push('/setup'),
                 ),
-                const Divider(height: 1, indent: 12, endIndent: 12),
+                Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsValueRow(
                   label: '访问密钥',
                   value: settings.apiKey.isEmpty ? '未配置' : '••••••••••••',
                   onTap: () => context.push('/setup'),
                 ),
-                const Divider(height: 1, indent: 12, endIndent: 12),
+                Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsValueRow(
                   label: '后台监测',
                   value: _monitorStatus,
@@ -97,26 +99,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                   ),
                 ),
-                const Divider(height: 1, indent: 12, endIndent: 12),
+                Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsSwitchRow(
                   label: '需确认（红色）',
-                  dotColor: QingyaColors.confirm,
+                  dotColor: c.confirm,
                   value: settings.notifyConfirm,
                   onChanged: (value) =>
                       save(settings.copyWith(notifyConfirm: value)),
                 ),
-                const Divider(height: 1, indent: 12, endIndent: 12),
+                Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsSwitchRow(
                   label: '工作中（黄色）',
-                  dotColor: QingyaColors.working,
+                  dotColor: c.working,
                   value: settings.notifyWorking,
                   onChanged: (value) =>
                       save(settings.copyWith(notifyWorking: value)),
                 ),
-                const Divider(height: 1, indent: 12, endIndent: 12),
+                Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsSwitchRow(
                   label: '已完成（绿色）',
-                  dotColor: QingyaColors.done,
+                  dotColor: c.done,
                   value: settings.notifyDone,
                   onChanged: (value) =>
                       save(settings.copyWith(notifyDone: value)),
@@ -124,30 +126,77 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
             const SizedBox(height: 10),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
                 '成功时通知栏会出现「轻芽后台监听」。请允许通知权限；点「后台监测」可重新拉起。演示模式不会启真实后台。',
                 style: TextStyle(
-                    fontSize: 11,
-                    color: QingyaColors.textSecondary,
-                    height: 1.35),
+                  fontSize: 11,
+                  color: c.textSecondary,
+                  height: 1.35,
+                ),
               ),
             ),
             const SizedBox(height: 22),
             const QingyaSectionCaption('外观设置'),
             QingyaGroupCard(
               children: [
-                const _SettingsValueRow(label: '跟随系统主题', value: '浅色模式'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '主题模式',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: c.textPrimary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SegmentedButton<AppThemeMode>(
+                        segments: const [
+                          ButtonSegment(
+                            value: AppThemeMode.system,
+                            label: Text('跟随系统'),
+                          ),
+                          ButtonSegment(
+                            value: AppThemeMode.light,
+                            label: Text('浅色'),
+                          ),
+                          ButtonSegment(
+                            value: AppThemeMode.dark,
+                            label: Text('深色'),
+                          ),
+                        ],
+                        selected: {settings.themeMode},
+                        onSelectionChanged: (next) {
+                          if (next.isEmpty) return;
+                          save(settings.copyWith(themeMode: next.first));
+                        },
+                        showSelectedIcon: false,
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 22),
             const QingyaSectionCaption('关于'),
             QingyaGroupCard(
               children: [
-                const _SettingsValueRow(label: '版本信息', value: 'v1.0.0'),
+                _SettingsValueRow(
+                  label: '版本信息',
+                  value: ref.watch(packageInfoProvider).when(
+                        data: (info) => info.versionWithBuild,
+                        loading: () => '…',
+                        error: (_, __) => 'v0.1.6',
+                      ),
+                ),
                 if (settings.demoMode) ...[
-                  const Divider(height: 1, indent: 12, endIndent: 12),
+                  Divider(
+                      height: 1, indent: 12, endIndent: 12, color: c.divider),
                   _SettingsValueRow(
                     label: '演示数据',
                     value: '退出演示',
@@ -179,6 +228,7 @@ class _SettingsValueRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -189,8 +239,7 @@ class _SettingsValueRow extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: const TextStyle(
-                    fontSize: 13, color: QingyaColors.textPrimary),
+                style: TextStyle(fontSize: 13, color: c.textPrimary),
               ),
             ),
             Flexible(
@@ -199,13 +248,12 @@ class _SettingsValueRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
-                style: const TextStyle(
-                    fontSize: 11, color: QingyaColors.textSecondary),
+                style: TextStyle(fontSize: 11, color: c.textSecondary),
               ),
             ),
             if (onTap != null) ...[
               const SizedBox(width: 8),
-              Image.asset(QingyaAssets.chevron, width: 14, height: 14),
+              QingyaTintIcon(QingyaAssets.chevron, size: 14),
             ],
           ],
         ),
@@ -229,6 +277,7 @@ class _SettingsSwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 5, 8, 5),
       child: Row(
@@ -245,8 +294,7 @@ class _SettingsSwitchRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                  fontSize: 13, color: QingyaColors.textPrimary),
+              style: TextStyle(fontSize: 13, color: c.textPrimary),
             ),
           ),
           Transform.scale(

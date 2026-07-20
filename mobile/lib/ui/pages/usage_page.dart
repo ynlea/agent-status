@@ -94,11 +94,11 @@ class _UsagePageState extends ConsumerState<UsagePage> {
             : '';
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          color: QingyaColors.primary,
+          color: context.qingya.primary,
           onRefresh: () => ref
               .read(usageRepositoryProvider.notifier)
               .refresh(forceNetwork: true),
@@ -110,23 +110,23 @@ class _UsagePageState extends ConsumerState<UsagePage> {
             children: [
               Row(
                 children: [
-                  const Text(
+                  Text(
                     'Token 用量',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
-                      color: QingyaColors.textPrimary,
+                      color: context.qingya.textPrimary,
                     ),
                   ),
                   const Spacer(),
                   if (snap.fromCache)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
                       child: Text(
                         '缓存',
                         style: TextStyle(
                           fontSize: 11,
-                          color: QingyaColors.textSecondary,
+                          color: context.qingya.textSecondary,
                         ),
                       ),
                     ),
@@ -264,9 +264,9 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   snap.fromCache
                       ? '费用为估算 · 当前为本地缓存，下拉可强制刷新'
                       : '费用为公开列表价估算，非账单',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: QingyaColors.textSecondary,
+                    color: context.qingya.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -284,12 +284,12 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   fmtCost: _fmtCost,
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   '明细',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: QingyaColors.textPrimary,
+                    color: context.qingya.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -333,19 +333,18 @@ class _DropdownBox<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Force light menu even if system/app dark theme leaks into popup.
-    final lightMenu = Theme.of(context).copyWith(
-      brightness: Brightness.light,
-      canvasColor: QingyaColors.card,
-      colorScheme: const ColorScheme.light(
-        primary: QingyaColors.primary,
-        onPrimary: Colors.white,
-        surface: QingyaColors.card,
-        onSurface: QingyaColors.textPrimary,
-      ),
-      dropdownMenuTheme: const DropdownMenuThemeData(
+    final c = context.qingya;
+    final menuTheme = Theme.of(context).copyWith(
+      canvasColor: c.card,
+      colorScheme: Theme.of(context).colorScheme.copyWith(
+            primary: c.primary,
+            onPrimary: Colors.white,
+            surface: c.card,
+            onSurface: c.textPrimary,
+          ),
+      dropdownMenuTheme: DropdownMenuThemeData(
         menuStyle: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(QingyaColors.card),
+          backgroundColor: WidgetStatePropertyAll(c.card),
         ),
       ),
     );
@@ -354,26 +353,26 @@ class _DropdownBox<T> extends StatelessWidget {
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: context.qingya.card,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: QingyaColors.border),
+        border: Border.all(color: context.qingya.border),
       ),
       child: Theme(
-        data: lightMenu,
+        data: menuTheme,
         child: DropdownButtonHideUnderline(
           child: DropdownButton<T>(
             isExpanded: true,
             value: value,
-            dropdownColor: QingyaColors.card,
-            focusColor: QingyaColors.primarySoft,
-            icon: const Icon(
+            dropdownColor: context.qingya.card,
+            focusColor: context.qingya.primarySoft,
+            icon: Icon(
               Icons.keyboard_arrow_down_rounded,
               size: 18,
-              color: QingyaColors.textSecondary,
+              color: context.qingya.textSecondary,
             ),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
-              color: QingyaColors.textPrimary,
+              color: context.qingya.textPrimary,
               fontWeight: FontWeight.w600,
             ),
             borderRadius: BorderRadius.circular(12),
@@ -382,9 +381,9 @@ class _DropdownBox<T> extends StatelessWidget {
                 DropdownMenuItem<T>(
                   value: item.value,
                   child: DefaultTextStyle(
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: QingyaColors.textPrimary,
+                      color: context.qingya.textPrimary,
                       fontWeight: FontWeight.w500,
                     ),
                     child: item.child,
@@ -394,7 +393,7 @@ class _DropdownBox<T> extends StatelessWidget {
             onChanged: onChanged,
             hint: Text(
               label,
-              style: const TextStyle(color: QingyaColors.textSecondary),
+              style: TextStyle(color: context.qingya.textSecondary),
             ),
           ),
         ),
@@ -427,20 +426,20 @@ class _CompactHero extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: context.qingya.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: QingyaColors.border),
+        border: Border.all(color: context.qingya.border),
       ),
       child: Column(
         children: [
           Row(
             children: [
               Expanded(child: _BigStat(label: '真实用量', value: realUsage)),
-              Container(width: 1, height: 36, color: QingyaColors.divider),
+              Container(width: 1, height: 36, color: context.qingya.divider),
               Expanded(
                 child: _BigStat(label: '估算费用', value: cost, accent: true),
               ),
-              Container(width: 1, height: 36, color: QingyaColors.divider),
+              Container(width: 1, height: 36, color: context.qingya.divider),
               Expanded(child: _BigStat(label: '命中率', value: hitRate)),
             ],
           ),
@@ -450,26 +449,26 @@ class _CompactHero extends StatelessWidget {
               _SmallStat(
                 label: '输入',
                 value: input,
-                bg: const Color(0xFFE8F0FF),
-                fg: QingyaColors.device,
+                bg: context.qingya.deviceSoft,
+                fg: context.qingya.device,
               ),
               _SmallStat(
                 label: '输出',
                 value: output,
-                bg: const Color(0xFFFFF1DF),
-                fg: QingyaColors.working,
+                bg: context.qingya.workingSoft,
+                fg: context.qingya.working,
               ),
               _SmallStat(
                 label: '缓存',
                 value: cacheHit,
-                bg: const Color(0xFFE7F7EC),
-                fg: QingyaColors.done,
+                bg: context.qingya.doneSoft,
+                fg: context.qingya.done,
               ),
               _SmallStat(
                 label: '事件',
                 value: events,
-                bg: const Color(0xFFF3EEEA),
-                fg: QingyaColors.textSecondary,
+                bg: context.qingya.idleSoft,
+                fg: context.qingya.textSecondary,
               ),
             ],
           ),
@@ -495,7 +494,7 @@ class _BigStat extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 11, color: QingyaColors.textSecondary),
+          style: TextStyle(fontSize: 11, color: context.qingya.textSecondary),
         ),
         const SizedBox(height: 2),
         Text(
@@ -505,7 +504,7 @@ class _BigStat extends StatelessWidget {
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w800,
-            color: accent ? QingyaColors.device : QingyaColors.textPrimary,
+            color: accent ? context.qingya.device : context.qingya.textPrimary,
           ),
         ),
       ],
@@ -590,15 +589,16 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
   }
 
   Color _colorFor(int value, int maxV) {
+    final c = context.qingya;
     if (value <= 0 || maxV <= 0) {
-      return const Color(0xFFF0EBE6);
+      return c.idleSoft;
     }
     final t = (value / maxV).clamp(0.0, 1.0);
-    // 浅 → 青芽橙绿
-    if (t < 0.25) return const Color(0xFFFFE4D6);
-    if (t < 0.5) return const Color(0xFFFFC2A8);
-    if (t < 0.75) return const Color(0xFFFF9A7A);
-    return const Color(0xFFE9685F);
+    // 浅 → 青芽橙
+    if (t < 0.25) return Color.lerp(c.idleSoft, c.primarySoft, 0.7)!;
+    if (t < 0.5) return c.primarySoft;
+    if (t < 0.75) return Color.lerp(c.primarySoft, c.primary, 0.55)!;
+    return c.primaryDark;
   }
 
   @override
@@ -637,29 +637,29 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: context.qingya.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: QingyaColors.border),
+        border: Border.all(color: context.qingya.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 '活跃热力',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: QingyaColors.textPrimary,
+                  color: context.qingya.textPrimary,
                 ),
               ),
               const Spacer(),
               Text(
                 _tip ?? '近 16 周 · 按真实用量',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: QingyaColors.textSecondary,
+                  color: context.qingya.textSecondary,
                 ),
               ),
             ],
@@ -711,7 +711,8 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
                                       border: empty
                                           ? null
                                           : Border.all(
-                                              color: const Color(0x14000000),
+                                              color: context.qingya.border
+                                                  .withValues(alpha: 0.45),
                                               width: 0.5,
                                             ),
                                     ),
@@ -731,17 +732,17 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
           const SizedBox(height: 8),
           Row(
             children: [
-              const Text(
+              Text(
                 '少',
-                style: TextStyle(fontSize: 10, color: QingyaColors.textSecondary),
+                style: TextStyle(fontSize: 10, color: context.qingya.textSecondary),
               ),
               const SizedBox(width: 4),
-              for (final c in const [
-                Color(0xFFF0EBE6),
-                Color(0xFFFFE4D6),
-                Color(0xFFFFC2A8),
-                Color(0xFFFF9A7A),
-                Color(0xFFE9685F),
+              for (final c in [
+                context.qingya.idleSoft,
+                Color.lerp(context.qingya.idleSoft, context.qingya.primarySoft, 0.7)!,
+                context.qingya.primarySoft,
+                Color.lerp(context.qingya.primarySoft, context.qingya.primary, 0.55)!,
+                context.qingya.primaryDark,
               ]) ...[
                 Container(
                   width: 9,
@@ -753,9 +754,9 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
                   ),
                 ),
               ],
-              const Text(
+              Text(
                 '多',
-                style: TextStyle(fontSize: 10, color: QingyaColors.textSecondary),
+                style: TextStyle(fontSize: 10, color: context.qingya.textSecondary),
               ),
             ],
           ),
@@ -860,9 +861,9 @@ class _TrendCardState extends State<_TrendCard> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: context.qingya.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: QingyaColors.border),
+        border: Border.all(color: context.qingya.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -871,10 +872,10 @@ class _TrendCardState extends State<_TrendCard> {
             children: [
               Text(
                 widget.byHour ? '用量趋势（按小时）' : '用量趋势（按天）',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: QingyaColors.textPrimary,
+                  color: context.qingya.textPrimary,
                 ),
               ),
               const Spacer(),
@@ -882,28 +883,28 @@ class _TrendCardState extends State<_TrendCard> {
                 widget.byHour
                     ? '${points.length} 个时点'
                     : '${points.length} 天',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: QingyaColors.textSecondary,
+                  color: context.qingya.textSecondary,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             '点击/拖动曲线节点查看详情',
-            style: TextStyle(fontSize: 11, color: QingyaColors.textSecondary),
+            style: TextStyle(fontSize: 11, color: context.qingya.textSecondary),
           ),
           const SizedBox(height: 8),
           SizedBox(
             height: 120,
             child: points.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       '暂无趋势数据',
                       style: TextStyle(
                         fontSize: 12,
-                        color: QingyaColors.textSecondary,
+                        color: context.qingya.textSecondary,
                       ),
                     ),
                   )
@@ -925,6 +926,7 @@ class _TrendCardState extends State<_TrendCard> {
                           painter: _TrendPainter(
                             points: points,
                             selected: _selected,
+                            palette: context.qingya,
                           ),
                           child: const SizedBox.expand(),
                         ),
@@ -938,25 +940,25 @@ class _TrendCardState extends State<_TrendCard> {
               children: [
                 Text(
                   points.first.label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
-                    color: QingyaColors.textSecondary,
+                    color: context.qingya.textSecondary,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   '峰值 ${widget.fmtInt(points.map((e) => e.value).reduce(math.max))}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
-                    color: QingyaColors.textSecondary,
+                    color: context.qingya.textSecondary,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   points.last.label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
-                    color: QingyaColors.textSecondary,
+                    color: context.qingya.textSecondary,
                   ),
                 ),
               ],
@@ -968,7 +970,7 @@ class _TrendCardState extends State<_TrendCard> {
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: QingyaColors.primarySoft.withValues(alpha: 0.55),
+                color: context.qingya.primarySoft.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -976,10 +978,10 @@ class _TrendCardState extends State<_TrendCard> {
                 children: [
                   Text(
                     selected.title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: QingyaColors.textPrimary,
+                      color: context.qingya.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1023,9 +1025,9 @@ class _TrendCardState extends State<_TrendCard> {
   Widget _tip(String k, String v) {
     return Text(
       '$k $v',
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11,
-        color: QingyaColors.textPrimary,
+        color: context.qingya.textPrimary,
         fontWeight: FontWeight.w600,
       ),
     );
@@ -1045,9 +1047,14 @@ class _TrendPoint {
 }
 
 class _TrendPainter extends CustomPainter {
-  _TrendPainter({required this.points, required this.selected});
+  _TrendPainter({
+    required this.points,
+    required this.selected,
+    required this.palette,
+  });
   final List<_TrendPoint> points;
   final int? selected;
+  final QingyaPalette palette;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1062,7 +1069,7 @@ class _TrendPainter extends CustomPainter {
     final h = size.height - padT - padB;
 
     final grid = Paint()
-      ..color = QingyaColors.divider
+      ..color = palette.divider
       ..strokeWidth = 1;
     for (var i = 0; i < 3; i++) {
       final y = padT + h * i / 2;
@@ -1083,7 +1090,7 @@ class _TrendPainter extends CustomPainter {
         Offset(sp.dx, padT),
         Offset(sp.dx, padT + h),
         Paint()
-          ..color = QingyaColors.primary.withValues(alpha: 0.35)
+          ..color = palette.primary.withValues(alpha: 0.35)
           ..strokeWidth = 1.2,
       );
     }
@@ -1111,22 +1118,22 @@ class _TrendPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            QingyaColors.primary.withValues(alpha: 0.28),
-            QingyaColors.primary.withValues(alpha: 0.02),
+            palette.primary.withValues(alpha: 0.28),
+            palette.primary.withValues(alpha: 0.02),
           ],
         ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
     );
     canvas.drawPath(
       path,
       Paint()
-        ..color = QingyaColors.primary
+        ..color = palette.primary
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.2
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round,
     );
 
-    final dot = Paint()..color = QingyaColors.primaryDark;
+    final dot = Paint()..color = palette.primaryDark;
     for (var i = 0; i < n; i++) {
       final p = pt(i);
       final active = selected == i;
@@ -1136,7 +1143,7 @@ class _TrendPainter extends CustomPainter {
           p,
           7,
           Paint()
-            ..color = QingyaColors.primary.withValues(alpha: 0.2)
+            ..color = palette.primary.withValues(alpha: 0.2)
             ..style = PaintingStyle.fill,
         );
       }
@@ -1145,7 +1152,7 @@ class _TrendPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TrendPainter oldDelegate) =>
-      oldDelegate.points != points || oldDelegate.selected != selected;
+      oldDelegate.points != points || oldDelegate.selected != selected || oldDelegate.palette != palette;
 }
 
 class _CompactTile extends StatelessWidget {
@@ -1171,7 +1178,7 @@ class _CompactTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: QingyaColors.card,
+        color: context.qingya.card,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -1187,19 +1194,19 @@ class _CompactTile extends StatelessWidget {
                         group.key.isEmpty ? 'unknown' : group.key,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: QingyaColors.textPrimary,
+                          color: context.qingya.textPrimary,
                         ),
                       ),
                     ),
                     Text(
                       fmtInt(m.realUsage),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: QingyaColors.primaryDark,
+                        color: context.qingya.primaryDark,
                       ),
                     ),
                     Icon(
@@ -1207,7 +1214,7 @@ class _CompactTile extends StatelessWidget {
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
-                      color: QingyaColors.textSecondary,
+                      color: context.qingya.textSecondary,
                     ),
                   ],
                 ),
@@ -1216,17 +1223,17 @@ class _CompactTile extends StatelessWidget {
                   children: [
                     Text(
                       '入${fmtInt(m.inputTokens)} · 出${fmtInt(m.outputTotal)} · 命中${fmtRate(m.cacheHitRate)}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: QingyaColors.textSecondary,
+                        color: context.qingya.textSecondary,
                       ),
                     ),
                     const Spacer(),
                     Text(
                       fmtCost(m.estimatedCostUsd, m.priced),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: QingyaColors.device,
+                        color: context.qingya.device,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1234,13 +1241,13 @@ class _CompactTile extends StatelessWidget {
                 ),
                 if (expanded) ...[
                   const SizedBox(height: 6),
-                  _kv('新增输入', fmtInt(m.inputTokens)),
-                  _kv('输出', fmtInt(m.outputTokens)),
+                  _kv(context, '新增输入', fmtInt(m.inputTokens)),
+                  _kv(context, '输出', fmtInt(m.outputTokens)),
                   if (m.reasoningTokens > 0)
-                    _kv('推理', fmtInt(m.reasoningTokens)),
-                  _kv('缓存命中', fmtInt(m.cacheHitTokens)),
-                  _kv('缓存写入', fmtInt(m.cacheWriteTokens)),
-                  _kv('事件', '${m.eventCount}'),
+                    _kv(context, '推理', fmtInt(m.reasoningTokens)),
+                  _kv(context, '缓存命中', fmtInt(m.cacheHitTokens)),
+                  _kv(context, '缓存写入', fmtInt(m.cacheWriteTokens)),
+                  _kv(context, '事件', '${m.eventCount}'),
                 ],
               ],
             ),
@@ -1250,20 +1257,20 @@ class _CompactTile extends StatelessWidget {
     );
   }
 
-  Widget _kv(String k, String v) {
+  Widget _kv(BuildContext context, String k, String v) {
+    final c = context.qingya;
     return Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Row(
         children: [
           Text(k,
-              style: const TextStyle(
-                  fontSize: 11, color: QingyaColors.textSecondary)),
+              style: TextStyle(fontSize: 11, color: c.textSecondary)),
           const Spacer(),
           Text(v,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: QingyaColors.textPrimary)),
+                  color: c.textPrimary)),
         ],
       ),
     );

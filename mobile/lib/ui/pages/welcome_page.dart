@@ -78,7 +78,7 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -94,10 +94,10 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                         alignment: Alignment.centerLeft,
                         child: IconButton(
                           onPressed: () => context.pop(),
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.arrow_back_ios_new_rounded,
                             size: 20,
-                            color: QingyaColors.textPrimary,
+                            color: context.qingya.textPrimary,
                           ),
                         ),
                       )
@@ -109,10 +109,13 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                         Container(
                           width: 236,
                           height: 192,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
-                              colors: [Color(0xFFFFF0E7), Color(0x00FFF0E7)],
+                              colors: [
+                                context.qingya.primarySoft,
+                                context.qingya.primarySoft.withValues(alpha: 0),
+                              ],
                             ),
                           ),
                         ),
@@ -122,35 +125,36 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                           height: 202,
                           fit: BoxFit.contain,
                         ),
-                        const Positioned(
+                        Positioned(
                           right: 15,
                           top: 32,
                           child: Icon(Icons.favorite,
-                              size: 12, color: Color(0xFFFFA5A0)),
+                              size: 12, color: context.qingya.primary),
                         ),
-                        const Positioned(
+                        Positioned(
                           left: 10,
                           bottom: 38,
                           child: Icon(Icons.auto_awesome,
-                              size: 14, color: Color(0xFFFFC6B7)),
+                              size: 14,
+                              color: context.qingya.primary.withValues(alpha: 0.75)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       '欢迎使用 轻芽',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w700,
-                        color: QingyaColors.textPrimary,
+                        color: context.qingya.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 9),
-                    const Text(
+                    Text(
                       '配置连接信息，开启跨设备任务管理',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          fontSize: 13, color: QingyaColors.textSecondary),
+                          fontSize: 13, color: context.qingya.textSecondary),
                     ),
                     const SizedBox(height: 28),
                     const _InputLabel('服务地址'),
@@ -171,12 +175,11 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                         hintText: '请输入访问密钥',
                         suffixIcon: IconButton(
                           onPressed: () => setState(() => _obscure = !_obscure),
-                          icon: Image.asset(
+                          icon: QingyaTintIcon(
                             _obscure
                                 ? QingyaAssets.visibilityOff
                                 : QingyaAssets.visibility,
-                            width: 20,
-                            height: 20,
+                            size: 20,
                           ),
                         ),
                       ),
@@ -184,15 +187,23 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                     const SizedBox(height: 24),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF7184FF), Color(0xFF2854F5)],
+                        gradient: LinearGradient(
+                          colors: [
+                            context.qingya.device,
+                            Color.lerp(
+                                  context.qingya.device,
+                                  const Color(0xFF1A2F9E),
+                                  0.35,
+                                ) ??
+                                context.qingya.device,
+                          ],
                         ),
                         borderRadius: BorderRadius.circular(18),
-                        boxShadow: const [
+                        boxShadow: [
                           BoxShadow(
-                            color: Color(0x3D4D6DFF),
+                            color: context.qingya.device.withValues(alpha: 0.28),
                             blurRadius: 18,
-                            offset: Offset(0, 8),
+                            offset: const Offset(0, 8),
                           ),
                         ],
                       ),
@@ -220,10 +231,10 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                               .enableDemo();
                           if (context.mounted) context.go('/home');
                         },
-                        child: const Text(
+                        child: Text(
                           '跳过，稍后设置',
                           style: TextStyle(
-                              fontSize: 12, color: QingyaColors.device),
+                              fontSize: 12, color: context.qingya.device),
                         ),
                       ),
                     ],
@@ -249,9 +260,9 @@ class _InputLabel extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
-          color: QingyaColors.textPrimary,
+          color: context.qingya.textPrimary,
           fontWeight: FontWeight.w500,
         ),
       ),

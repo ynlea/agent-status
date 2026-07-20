@@ -24,6 +24,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final snapshot = ref.watch(statusRepositoryProvider);
     final active = snapshot.activeSessions;
     final visible = active.where((session) {
@@ -36,11 +37,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: c.scaffold,
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          color: QingyaColors.primary,
+          color: c.primary,
           onRefresh: () =>
               ref.read(statusRepositoryProvider.notifier).refresh(),
           child: ListView(
@@ -67,9 +68,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                   children: [
                     Text(
                       '活跃任务（${active.length}）',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
-                        color: QingyaColors.textPrimary,
+                        color: c.textPrimary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -119,8 +120,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   snapshot.error!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 11, color: QingyaColors.confirm),
+                  style: TextStyle(fontSize: 11, color: c.confirm),
                 ),
               ],
               const SizedBox(height: 12),
@@ -165,20 +165,29 @@ class _HeroCard extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          const Positioned(
+          Positioned(
             left: 11,
             top: 27,
-            child: _Sparkle(color: Color(0xFFFFD0BE), size: 7),
+            child: _Sparkle(
+              color: context.qingya.primary.withValues(alpha: 0.45),
+              size: 7,
+            ),
           ),
-          const Positioned(
+          Positioned(
             left: 150,
             top: 22,
-            child: _Sparkle(color: Color(0xFFFFE3D8), size: 5),
+            child: _Sparkle(
+              color: context.qingya.primarySoft,
+              size: 5,
+            ),
           ),
-          const Positioned(
+          Positioned(
             right: 5,
             bottom: 28,
-            child: _Sparkle(color: Color(0xFFFFA99C), size: 6),
+            child: _Sparkle(
+              color: context.qingya.primary.withValues(alpha: 0.65),
+              size: 6,
+            ),
           ),
           Positioned(
             left: 4,
@@ -215,8 +224,12 @@ class _SpeechBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return CustomPaint(
-      painter: const _SpeechBubblePainter(),
+      painter: _SpeechBubblePainter(
+        fill: c.bubbleFill,
+        shadow: c.shadow,
+      ),
       child: SizedBox(
         width: 151,
         child: Padding(
@@ -224,17 +237,17 @@ class _SpeechBubble extends StatelessWidget {
           child: RichText(
             text: TextSpan(
               style: DefaultTextStyle.of(context).style.copyWith(
-                fontSize: 12,
-                height: 1.55,
-                color: QingyaColors.textPrimary,
-                fontWeight: FontWeight.w500,
-              ),
+                    fontSize: 12,
+                    height: 1.55,
+                    color: c.textPrimary,
+                    fontWeight: FontWeight.w500,
+                  ),
               children: [
                 TextSpan(text: text),
                 TextSpan(
                   text: '  ♥',
                   style: TextStyle(
-                    color: QingyaColors.primary,
+                    color: c.primary,
                     fontSize: 11,
                     fontFamily: DefaultTextStyle.of(context).style.fontFamily,
                   ),
@@ -249,7 +262,10 @@ class _SpeechBubble extends StatelessWidget {
 }
 
 class _SpeechBubblePainter extends CustomPainter {
-  const _SpeechBubblePainter();
+  const _SpeechBubblePainter({required this.fill, required this.shadow});
+
+  final Color fill;
+  final Color shadow;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -264,12 +280,13 @@ class _SpeechBubblePainter extends CustomPainter {
       ..lineTo(size.width, size.height * 0.56)
       ..lineTo(size.width - 15, size.height * 0.68)
       ..close();
-    canvas.drawShadow(path, QingyaColors.shadow, 6, false);
-    canvas.drawPath(path, Paint()..color = Colors.white);
+    canvas.drawShadow(path, shadow, 6, false);
+    canvas.drawPath(path, Paint()..color = fill);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _SpeechBubblePainter oldDelegate) =>
+      oldDelegate.fill != fill || oldDelegate.shadow != shadow;
 }
 
 class _Sparkle extends StatelessWidget {
@@ -301,6 +318,7 @@ class _FilterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: InkWell(
@@ -310,14 +328,13 @@ class _FilterButton extends StatelessWidget {
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: selected ? QingyaColors.deviceSoft : QingyaColors.idleSoft,
+            color: selected ? c.deviceSoft : c.idleSoft,
             borderRadius: BorderRadius.circular(16),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color:
-                  selected ? QingyaColors.device : QingyaColors.textSecondary,
+              color: selected ? c.device : c.textSecondary,
               fontSize: 12,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             ),

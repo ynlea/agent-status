@@ -15,20 +15,6 @@ class TaskCard extends StatelessWidget {
   final Session session;
   final VoidCallback? onTap;
 
-  Color get _stateColor => switch (session.state) {
-        SessionState.confirm => QingyaColors.confirm,
-        SessionState.working => QingyaColors.working,
-        SessionState.done => QingyaColors.done,
-        SessionState.idle => QingyaColors.idle,
-      };
-
-  Color get _stateSoft => switch (session.state) {
-        SessionState.confirm => QingyaColors.confirmSoft,
-        SessionState.working => QingyaColors.workingSoft,
-        SessionState.done => QingyaColors.doneSoft,
-        SessionState.idle => QingyaColors.idleSoft,
-      };
-
   String get _stateIcon => switch (session.state) {
         SessionState.confirm => QingyaAssets.notifyConfirm,
         SessionState.working => QingyaAssets.notifyWorking,
@@ -36,44 +22,57 @@ class TaskCard extends StatelessWidget {
         SessionState.idle => QingyaAssets.collapse,
       };
 
-  _AgentStyle get _agent {
-    switch (session.agent.toLowerCase()) {
-      case 'claude':
-        return const _AgentStyle(
-          label: 'Claude',
-          color: Color(0xFFD97757),
-          soft: Color(0xFFFFF1EB),
-        );
-      case 'codex':
-        return const _AgentStyle(
-          label: 'Codex',
-          color: Color(0xFF10A37F),
-          soft: Color(0xFFE6F7F2),
-        );
-      case 'opencode':
-        return const _AgentStyle(
-          label: 'OpenCode',
-          color: Color(0xFF6078FF),
-          soft: Color(0xFFEEF1FF),
-        );
-      default:
-        return _AgentStyle(
-          label: session.agent.isEmpty ? 'Agent' : session.agent,
-          color: QingyaColors.textSecondary,
-          soft: QingyaColors.idleSoft,
-        );
-    }
-  }
-
   String get _displayPath {
     final value = session.displayName.trim();
     if (value.isEmpty) return session.sessionId;
     return value.startsWith('/') ? value : '/$value';
   }
 
+  _AgentStyle _agentOf(QingyaPalette c) {
+    switch (session.agent.toLowerCase()) {
+      case 'claude':
+        return _AgentStyle(
+          label: 'Claude',
+          color: c.agentClaude,
+          soft: c.agentClaudeSoft,
+        );
+      case 'codex':
+        return _AgentStyle(
+          label: 'Codex',
+          color: c.agentCodex,
+          soft: c.agentCodexSoft,
+        );
+      case 'opencode':
+        return _AgentStyle(
+          label: 'OpenCode',
+          color: c.agentOpencode,
+          soft: c.agentOpencodeSoft,
+        );
+      default:
+        return _AgentStyle(
+          label: session.agent.isEmpty ? 'Agent' : session.agent,
+          color: c.textSecondary,
+          soft: c.idleSoft,
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final agent = _agent;
+    final c = context.qingya;
+    final agent = _agentOf(c);
+    final stateColor = switch (session.state) {
+      SessionState.confirm => c.confirm,
+      SessionState.working => c.working,
+      SessionState.done => c.done,
+      SessionState.idle => c.idle,
+    };
+    final stateSoft = switch (session.state) {
+      SessionState.confirm => c.confirmSoft,
+      SessionState.working => c.workingSoft,
+      SessionState.done => c.doneSoft,
+      SessionState.idle => c.idleSoft,
+    };
 
     return Material(
       color: Colors.transparent,
@@ -84,14 +83,14 @@ class TaskCard extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 108),
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           decoration: BoxDecoration(
-            color: QingyaColors.card,
+            color: c.card,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _stateColor.withValues(alpha: 0.18)),
-            boxShadow: const [
+            border: Border.all(color: stateColor.withValues(alpha: 0.18)),
+            boxShadow: [
               BoxShadow(
-                color: QingyaColors.shadow,
+                color: c.shadow,
                 blurRadius: 14,
-                offset: Offset(0, 5),
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -109,8 +108,8 @@ class TaskCard extends StatelessWidget {
                         _Chip(
                           icon: _stateIcon,
                           label: session.state.labelZh,
-                          color: _stateColor,
-                          soft: _stateSoft,
+                          color: stateColor,
+                          soft: stateSoft,
                           tintIcon: true,
                         ),
                         _Chip(
@@ -127,10 +126,10 @@ class TaskCard extends StatelessWidget {
                       session.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: QingyaColors.textPrimary,
+                        color: c.textPrimary,
                         height: 1.2,
                       ),
                     ),
@@ -139,9 +138,9 @@ class TaskCard extends StatelessWidget {
                       _displayPath,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: QingyaColors.textSecondary,
+                        color: c.textSecondary,
                         height: 1.2,
                       ),
                     ),
@@ -150,9 +149,9 @@ class TaskCard extends StatelessWidget {
                       '${session.machineName ?? session.machineId} · ${_relativeTime(session.updatedAt)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: QingyaColors.textSecondary,
+                        color: c.textSecondary,
                         height: 1.2,
                       ),
                     ),
@@ -160,7 +159,6 @@ class TaskCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              // 右侧官方 Agent 圆标（Claude 星芒 / OpenAI·Codex）
               ClipOval(
                 child: Image.asset(
                   QingyaAssets.agent(session.agent),
@@ -171,7 +169,7 @@ class TaskCard extends StatelessWidget {
               ),
               if (onTap != null) ...[
                 const SizedBox(width: 4),
-                Image.asset(QingyaAssets.chevron, width: 14, height: 14),
+                QingyaTintIcon(QingyaAssets.chevron, size: 14),
               ],
             ],
           ),

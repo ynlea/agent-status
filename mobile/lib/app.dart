@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'data/prefs/settings_store.dart';
+import 'domain/models.dart';
 import 'theme/qingya_theme.dart';
 import 'ui/pages/devices_page.dart';
 import 'ui/pages/home_page.dart';
@@ -117,12 +118,19 @@ class QingyaApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
+    final themeMode = ref.watch(
+      settingsProvider.select((s) => s.themeMode),
+    );
     return MaterialApp.router(
       title: '轻芽',
       debugShowCheckedModeBanner: false,
       theme: theme ?? QingyaTheme.light(),
       darkTheme: darkTheme ?? QingyaTheme.dark(),
-      themeMode: ThemeMode.system,
+      themeMode: switch (themeMode) {
+        AppThemeMode.system => ThemeMode.system,
+        AppThemeMode.light => ThemeMode.light,
+        AppThemeMode.dark => ThemeMode.dark,
+      },
       routerConfig: router,
     );
   }

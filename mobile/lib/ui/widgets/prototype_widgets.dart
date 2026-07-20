@@ -16,6 +16,7 @@ class QingyaBrandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final avatarSize = compact ? 38.0 : 44.0;
     return Row(
       children: [
@@ -26,7 +27,7 @@ class QingyaBrandHeader extends StatelessWidget {
           fit: BoxFit.contain,
         ),
         const SizedBox(width: 8),
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -36,18 +37,18 @@ class QingyaBrandHeader extends StatelessWidget {
                 fontSize: 21,
                 height: 1,
                 fontWeight: FontWeight.w700,
-                color: QingyaColors.textPrimary,
+                color: c.textPrimary,
                 letterSpacing: 1,
               ),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
               'Q I N G Y A',
               style: TextStyle(
                 fontSize: 7,
                 height: 1,
                 fontWeight: FontWeight.w600,
-                color: QingyaColors.textSecondary,
+                color: c.textSecondary,
                 letterSpacing: 1.2,
               ),
             ),
@@ -67,12 +68,13 @@ class ConnectionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: c.card,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: QingyaColors.border),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -81,16 +83,16 @@ class ConnectionPill extends StatelessWidget {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: connected ? QingyaColors.online : QingyaColors.offline,
+              color: connected ? c.online : c.offline,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 6),
           Text(
             connected ? '已连接' : '未连接',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: QingyaColors.textPrimary,
+              color: c.textPrimary,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -107,16 +109,17 @@ class QingyaGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Container(
       decoration: BoxDecoration(
-        color: QingyaColors.card,
+        color: c.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: QingyaColors.border.withValues(alpha: 0.75)),
-        boxShadow: const [
+        border: Border.all(color: c.border.withValues(alpha: 0.75)),
+        boxShadow: [
           BoxShadow(
-            color: QingyaColors.shadow,
+            color: c.shadow,
             blurRadius: 18,
-            offset: Offset(0, 7),
+            offset: const Offset(0, 7),
           ),
         ],
       ),
@@ -132,13 +135,14 @@ class QingyaSectionCaption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 9),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
-          color: QingyaColors.textPrimary,
+          color: c.textPrimary,
           fontWeight: FontWeight.w600,
         ),
       ),

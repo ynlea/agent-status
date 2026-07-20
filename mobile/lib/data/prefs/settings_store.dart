@@ -19,6 +19,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
   static const _kWorking = 'notify_working';
   static const _kDone = 'notify_done';
   static const _kDemo = 'demo_mode';
+  static const _kThemeMode = 'theme_mode';
 
   void _load() {
     state = AppSettings(
@@ -28,6 +29,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
       notifyWorking: _prefs.getBool(_kWorking) ?? true,
       notifyDone: _prefs.getBool(_kDone) ?? true,
       demoMode: _prefs.getBool(_kDemo) ?? false,
+      themeMode: AppThemeMode.fromStorage(_prefs.getString(_kThemeMode)),
     );
     unawaited(MonitorBridge.apply(state));
   }
@@ -39,6 +41,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
     await _prefs.setBool(_kWorking, next.notifyWorking);
     await _prefs.setBool(_kDone, next.notifyDone);
     await _prefs.setBool(_kDemo, next.demoMode);
+    await _prefs.setString(_kThemeMode, next.themeMode.storageValue);
     state = next.copyWith(
       baseUrl: next.baseUrl.trim(),
       apiKey: next.apiKey.trim(),

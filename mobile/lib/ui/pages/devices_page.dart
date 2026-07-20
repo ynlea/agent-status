@@ -20,7 +20,7 @@ class DevicesPage extends ConsumerWidget {
     final machines = snapshot.machines;
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -39,10 +39,10 @@ class DevicesPage extends ConsumerWidget {
                 children: [
                   Text(
                     '我的设备（${machines.length}）',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      color: QingyaColors.textPrimary,
+                      color: context.qingya.textPrimary,
                     ),
                   ),
                   const Spacer(),
@@ -50,10 +50,9 @@ class DevicesPage extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(20),
                     onTap: () =>
                         ref.read(statusRepositoryProvider.notifier).refresh(),
-                    child: Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: Image.asset(QingyaAssets.refreshV2,
-                          width: 20, height: 20),
+                    child: const Padding(
+                      padding: EdgeInsets.all(7),
+                      child: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
                     ),
                   ),
                 ],
@@ -68,7 +67,7 @@ class DevicesPage extends ConsumerWidget {
                       subtitle: '等待监控端上报，或检查服务连接',
                     )
                   : RefreshIndicator(
-                      color: QingyaColors.device,
+                      color: context.qingya.device,
                       onRefresh: () =>
                           ref.read(statusRepositoryProvider.notifier).refresh(),
                       child: ListView.separated(
@@ -140,15 +139,16 @@ class _DeviceTile extends StatelessWidget {
 
   String get _catAsset => QingyaAssets.catForSeed(machine.machineId);
 
-  Color get _background => [
-        const Color(0xFFFFF8F4),
-        const Color(0xFFF6FAFF),
-        const Color(0xFFF7FBF7),
-        const Color(0xFFFFFAF2),
+  Color _backgroundOf(QingyaPalette c) => [
+        c.primarySoft,
+        c.deviceSoft,
+        c.doneSoft,
+        c.workingSoft,
       ][index % 4];
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -159,13 +159,13 @@ class _DeviceTile extends StatelessWidget {
           height: 94,
           padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
           decoration: BoxDecoration(
-            color: _background,
+            color: _backgroundOf(c),
             borderRadius: BorderRadius.circular(18),
             border:
-                Border.all(color: QingyaColors.border.withValues(alpha: 0.85)),
-            boxShadow: const [
+                Border.all(color: c.border.withValues(alpha: 0.85)),
+            boxShadow: [
               BoxShadow(
-                  color: QingyaColors.shadow,
+                  color: c.shadow,
                   blurRadius: 14,
                   offset: Offset(0, 5)),
             ],
@@ -177,7 +177,7 @@ class _DeviceTile extends StatelessWidget {
                 height: 48,
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.82),
+                  color: c.card.withValues(alpha: 0.9),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Image.asset(_deviceAsset, fit: BoxFit.contain),
@@ -195,22 +195,22 @@ class _DeviceTile extends StatelessWidget {
                             machine.machineName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
-                              color: QingyaColors.textPrimary,
+                              color: context.qingya.textPrimary,
                             ),
                           ),
                         ),
                         GestureDetector(
                           onTap: onRename,
                           behavior: HitTestBehavior.opaque,
-                          child: const Padding(
-                            padding: EdgeInsets.only(left: 4),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 4),
                             child: Icon(
                               Icons.edit_outlined,
                               size: 15,
-                              color: QingyaColors.textSecondary,
+                              color: context.qingya.textSecondary,
                             ),
                           ),
                         ),
@@ -226,16 +226,16 @@ class _DeviceTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             color: machine.online
-                                ? QingyaColors.online
-                                : QingyaColors.offline,
+                                ? context.qingya.online
+                                : context.qingya.offline,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const Text(
+                        Text(
                           ' · ',
                           style: TextStyle(
                             fontSize: 11,
-                            color: QingyaColors.textSecondary,
+                            color: context.qingya.textSecondary,
                           ),
                         ),
                         Flexible(
@@ -246,9 +246,9 @@ class _DeviceTile extends StatelessWidget {
                             ].join(' · '),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: QingyaColors.textSecondary,
+                              color: context.qingya.textSecondary,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -260,8 +260,8 @@ class _DeviceTile extends StatelessWidget {
                       machine.online
                           ? '有 $activeCount 个活跃会话'
                           : _lastSeen(machine.lastSeenAt),
-                      style: const TextStyle(
-                          fontSize: 11, color: QingyaColors.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: context.qingya.textSecondary),
                     ),
                   ],
                 ),
@@ -271,7 +271,7 @@ class _DeviceTile extends StatelessWidget {
                 height: 70,
                 child: Image.asset(_catAsset, fit: BoxFit.contain),
               ),
-              Image.asset(QingyaAssets.chevron, width: 14, height: 14),
+              QingyaTintIcon(QingyaAssets.chevron, size: 14),
             ],
           ),
         ),
@@ -341,7 +341,7 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
     final idle = all.where((session) => !session.state.isActive).toList();
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
@@ -365,13 +365,13 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                   _SessionSectionHeader(label: '活跃会话', count: active.length),
                   const SizedBox(height: 8),
                   if (active.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
                       child: Text(
                         '当前没有活跃会话',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 12, color: QingyaColors.textSecondary),
+                            fontSize: 12, color: context.qingya.textSecondary),
                       ),
                     ),
                 ],
@@ -455,10 +455,10 @@ class _DetailHeader extends StatelessWidget {
             top: 2,
             child: IconButton(
               onPressed: () => context.pop(),
-              icon: const Icon(
+              icon: Icon(
                 Icons.arrow_back_ios_new_rounded,
                 size: 20,
-                color: QingyaColors.textPrimary,
+                color: context.qingya.textPrimary,
               ),
             ),
           ),
@@ -476,10 +476,10 @@ class _DetailHeader extends StatelessWidget {
                         title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w700,
-                          color: QingyaColors.textPrimary,
+                          color: context.qingya.textPrimary,
                         ),
                       ),
                     ),
@@ -487,10 +487,10 @@ class _DetailHeader extends StatelessWidget {
                       IconButton(
                         onPressed: onRename,
                         visualDensity: VisualDensity.compact,
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.edit_outlined,
                           size: 18,
-                          color: QingyaColors.textSecondary,
+                          color: context.qingya.textSecondary,
                         ),
                       ),
                   ],
@@ -504,17 +504,17 @@ class _DetailHeader extends StatelessWidget {
                       machine?.online == true ? '在线' : '离线',
                       style: TextStyle(
                         color: machine?.online == true
-                            ? QingyaColors.online
-                            : QingyaColors.offline,
+                            ? context.qingya.online
+                            : context.qingya.offline,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const Text(
+                    Text(
                       ' · ',
                       style: TextStyle(
                         fontSize: 12,
-                        color: QingyaColors.textSecondary,
+                        color: context.qingya.textSecondary,
                       ),
                     ),
                     Flexible(
@@ -526,9 +526,9 @@ class _DetailHeader extends StatelessWidget {
                         ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: QingyaColors.textSecondary,
+                          color: context.qingya.textSecondary,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -539,9 +539,9 @@ class _DetailHeader extends StatelessWidget {
                   const SizedBox(height: 7),
                   Text(
                     '监测端 ${machine!.version}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: QingyaColors.textSecondary,
+                      color: context.qingya.textSecondary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -551,8 +551,8 @@ class _DetailHeader extends StatelessWidget {
                   machine?.online == true
                       ? '最后心跳：1 分钟前'
                       : _lastSeen(machine?.lastSeenAt),
-                  style: const TextStyle(
-                      fontSize: 11, color: QingyaColors.textSecondary),
+                  style: TextStyle(
+                      fontSize: 11, color: context.qingya.textSecondary),
                 ),
               ],
             ),
@@ -597,18 +597,17 @@ class _SessionSectionHeader extends StatelessWidget {
           children: [
             Text(
               '$label（$count）',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: QingyaColors.textPrimary,
+                color: context.qingya.textPrimary,
               ),
             ),
             const Spacer(),
             if (expanded != null)
-              Image.asset(
+              QingyaTintIcon(
                 expanded! ? QingyaAssets.collapse : QingyaAssets.expand,
-                width: 17,
-                height: 17,
+                size: 17,
               ),
           ],
         ),
@@ -626,31 +625,45 @@ Future<void> showRenameMachineDialog(
   final name = await showDialog<String>(
     context: context,
     builder: (ctx) {
+      final colors = ctx.qingya;
       return AlertDialog(
         title: const Text('给设备起个名字'),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 40,
-          decoration: const InputDecoration(
+          style: TextStyle(fontSize: 14, color: colors.textPrimary),
+          cursorColor: colors.device,
+          decoration: InputDecoration(
             hintText: '例如：书房电脑 / 公司 Mac',
             counterText: '',
+            filled: true,
+            fillColor: colors.scaffold,
           ),
           onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
+            style: TextButton.styleFrom(foregroundColor: colors.textSecondary),
             child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
             child: const Text('保存'),
           ),
         ],
       );
     },
   );
+  controller.dispose();
   if (name == null || name.isEmpty || name == machine.machineName) return;
   try {
     await ref
@@ -663,8 +676,11 @@ Future<void> showRenameMachineDialog(
     }
   } catch (e) {
     if (context.mounted) {
+      final c = context.qingya;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('改名失败：$e')),
+        SnackBar(
+          content: Text('改名失败：$e', style: TextStyle(color: c.confirm)),
+        ),
       );
     }
   }

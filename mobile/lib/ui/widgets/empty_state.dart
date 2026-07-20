@@ -16,6 +16,7 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 24),
@@ -27,10 +28,10 @@ class EmptyState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
-                color: QingyaColors.textPrimary,
+                color: c.textPrimary,
               ),
             ),
             if (subtitle != null) ...[
@@ -38,9 +39,9 @@ class EmptyState extends StatelessWidget {
               Text(
                 subtitle!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: QingyaColors.textSecondary,
+                  color: c.textSecondary,
                   height: 1.5,
                 ),
               ),

@@ -18,33 +18,28 @@ class MainShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final index = navigationShell.currentIndex;
-    final accents = [
-      QingyaColors.primary,
-      QingyaColors.device,
-      QingyaColors.working,
-      QingyaColors.primary,
-    ];
+    final accents = [c.primary, c.device, c.working, c.primary];
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: c.scaffold,
       body: navigationShell,
       bottomNavigationBar: ColoredBox(
-        color: QingyaColors.scaffold,
+        color: c.scaffold,
         child: SafeArea(
           top: false,
           minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: Container(
             height: 68,
             decoration: BoxDecoration(
-              color: QingyaColors.card,
+              color: c.card,
               borderRadius: BorderRadius.circular(28),
-              border:
-                  Border.all(color: QingyaColors.border.withValues(alpha: 0.7)),
-              boxShadow: const [
+              border: Border.all(color: c.border.withValues(alpha: 0.7)),
+              boxShadow: [
                 BoxShadow(
-                  color: QingyaColors.shadow,
+                  color: c.shadow,
                   blurRadius: 22,
-                  offset: Offset(0, 8),
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -104,7 +99,7 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effective = selected ? color : QingyaColors.navInactive;
+    final effective = selected ? color : context.qingya.navInactive;
     return Expanded(
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
@@ -132,7 +127,6 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-
 class _NavIconItem extends StatelessWidget {
   const _NavIconItem({
     required this.icon,
@@ -150,7 +144,7 @@ class _NavIconItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effective = selected ? color : QingyaColors.navInactive;
+    final effective = selected ? color : context.qingya.navInactive;
     return Expanded(
       child: InkWell(
         borderRadius: BorderRadius.circular(24),

@@ -11,11 +11,12 @@ class StatusDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final color = switch (state) {
-      SessionState.confirm => QingyaColors.confirm,
-      SessionState.working => QingyaColors.working,
-      SessionState.done => QingyaColors.done,
-      SessionState.idle => QingyaColors.idle,
+      SessionState.confirm => c.confirm,
+      SessionState.working => c.working,
+      SessionState.done => c.done,
+      SessionState.idle => c.idle,
     };
     return Container(
       width: size,
@@ -33,11 +34,12 @@ class OnlineDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: online ? QingyaColors.online : QingyaColors.offline,
+        color: online ? c.online : c.offline,
         shape: BoxShape.circle,
       ),
     );

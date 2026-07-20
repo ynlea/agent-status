@@ -51,11 +51,12 @@ class SessionDetailPage extends ConsumerWidget {
             : machineId);
     final online = machine?.online ?? false;
     final state = session?.state ?? SessionState.idle;
+    final c = context.qingya;
     final agentLabel = _agentLabel(session?.agent ?? agent);
     final time = _relativeTime(session?.updatedAt);
 
     return Scaffold(
-      backgroundColor: QingyaColors.scaffold,
+      backgroundColor: c.scaffold,
       body: SafeArea(
         child: Column(
           children: [
@@ -66,31 +67,31 @@ class SessionDetailPage extends ConsumerWidget {
                 children: [
                   IconButton(
                     onPressed: () => context.pop(),
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.arrow_back_ios_new_rounded,
                       size: 18,
-                      color: QingyaColors.textPrimary,
+                      color: c.textPrimary,
                     ),
                   ),
-                  const Text(
+                  Text(
                     '会话',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
-                      color: QingyaColors.textPrimary,
+                      color: c.textPrimary,
                     ),
                   ),
                   const Spacer(),
                   _SoftChip(
                     label: state.labelZh,
-                    color: _stateColor(state),
-                    soft: _stateSoft(state),
+                    color: _stateColor(c, state),
+                    soft: _stateSoft(c, state),
                   ),
                   const SizedBox(width: 6),
                   _SoftChip(
                     label: agentLabel,
-                    color: _agentColor(agent),
-                    soft: _agentSoft(agent),
+                    color: _agentColor(c, agent),
+                    soft: _agentSoft(c, agent),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -109,17 +110,17 @@ class SessionDetailPage extends ConsumerWidget {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          _stateSoft(state),
-                          QingyaColors.card,
+                          _stateSoft(c, state),
+                          context.qingya.card,
                         ],
                       ),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: _stateColor(state).withValues(alpha: 0.18),
+                        color: _stateColor(c, state).withValues(alpha: 0.18),
                       ),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(
-                          color: QingyaColors.shadow,
+                          color: context.qingya.shadow,
                           blurRadius: 16,
                           offset: Offset(0, 6),
                         ),
@@ -130,10 +131,10 @@ class SessionDetailPage extends ConsumerWidget {
                       children: [
                         Text(
                           title,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
-                            color: QingyaColors.textPrimary,
+                            color: context.qingya.textPrimary,
                             height: 1.3,
                           ),
                         ),
@@ -153,9 +154,9 @@ class SessionDetailPage extends ConsumerWidget {
                                   ].join(' · '),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
-                                    color: QingyaColors.textSecondary,
+                                    color: context.qingya.textSecondary,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -169,10 +170,10 @@ class SessionDetailPage extends ConsumerWidget {
                             icon: Icons.folder_open_rounded,
                             child: Text(
                               path,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 height: 1.4,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -188,17 +189,17 @@ class SessionDetailPage extends ConsumerWidget {
                         width: 4,
                         height: 14,
                         decoration: BoxDecoration(
-                          color: QingyaColors.primary,
+                          color: context.qingya.primary,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Text(
+                      Text(
                         'Agent 最后消息',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: QingyaColors.textPrimary,
+                          color: context.qingya.textPrimary,
                         ),
                       ),
                     ],
@@ -209,26 +210,26 @@ class SessionDetailPage extends ConsumerWidget {
                     constraints: const BoxConstraints(minHeight: 120),
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
                     decoration: BoxDecoration(
-                      color: QingyaColors.card,
+                      color: context.qingya.card,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: QingyaColors.border),
-                      boxShadow: const [
+                      border: Border.all(color: context.qingya.border),
+                      boxShadow: [
                         BoxShadow(
-                          color: QingyaColors.shadow,
+                          color: context.qingya.shadow,
                           blurRadius: 14,
                           offset: Offset(0, 5),
                         ),
                       ],
                     ),
                     child: body.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 28),
+                              padding: const EdgeInsets.symmetric(vertical: 28),
                               child: Text(
                                 '暂无 Agent 输出',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: QingyaColors.textSecondary,
+                                  color: context.qingya.textSecondary,
                                 ),
                               ),
                             ),
@@ -238,83 +239,83 @@ class SessionDetailPage extends ConsumerWidget {
                             selectable: true,
                             softLineBreak: true,
                             styleSheet: MarkdownStyleSheet(
-                              p: const TextStyle(
+                              p: TextStyle(
                                 fontSize: 14.5,
                                 height: 1.55,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                               ),
-                              h1: const TextStyle(
+                              h1: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                                 height: 1.35,
                               ),
-                              h2: const TextStyle(
+                              h2: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w700,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                                 height: 1.35,
                               ),
-                              h3: const TextStyle(
+                              h3: TextStyle(
                                 fontSize: 15.5,
                                 fontWeight: FontWeight.w700,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                                 height: 1.35,
                               ),
-                              strong: const TextStyle(
+                              strong: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                               ),
-                              em: const TextStyle(
+                              em: TextStyle(
                                 fontStyle: FontStyle.italic,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                               ),
-                              code: const TextStyle(
+                              code: TextStyle(
                                 fontSize: 13,
                                 fontFamily: 'monospace',
-                                color: QingyaColors.primaryDark,
-                                backgroundColor: QingyaColors.primarySoft,
+                                color: context.qingya.primaryDark,
+                                backgroundColor: context.qingya.primarySoft,
                               ),
                               codeblockDecoration: BoxDecoration(
-                                color: const Color(0xFFF7F2EE),
+                                color: context.qingya.idleSoft,
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: QingyaColors.border),
+                                border: Border.all(color: context.qingya.border),
                               ),
                               codeblockPadding: const EdgeInsets.all(12),
-                              blockquote: const TextStyle(
+                              blockquote: TextStyle(
                                 fontSize: 14,
                                 height: 1.5,
-                                color: QingyaColors.textSecondary,
+                                color: context.qingya.textSecondary,
                               ),
-                              blockquoteDecoration: const BoxDecoration(
+                              blockquoteDecoration: BoxDecoration(
                                 border: Border(
                                   left: BorderSide(
-                                    color: QingyaColors.primary,
+                                    color: context.qingya.primary,
                                     width: 3,
                                   ),
                                 ),
                               ),
                               blockquotePadding:
                                   const EdgeInsets.fromLTRB(12, 4, 0, 4),
-                              listBullet: const TextStyle(
+                              listBullet: TextStyle(
                                 fontSize: 14.5,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                               ),
-                              a: const TextStyle(
-                                color: QingyaColors.device,
+                              a: TextStyle(
+                                color: context.qingya.device,
                                 decoration: TextDecoration.underline,
                               ),
-                              tableHead: const TextStyle(
+                              tableHead: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: QingyaColors.textPrimary,
+                                color: context.qingya.textPrimary,
                               ),
-                              tableBody: const TextStyle(
-                                color: QingyaColors.textPrimary,
+                              tableBody: TextStyle(
+                                color: context.qingya.textPrimary,
                               ),
-                              horizontalRuleDecoration: const BoxDecoration(
+                              horizontalRuleDecoration: BoxDecoration(
                                 border: Border(
                                   top: BorderSide(
-                                    color: QingyaColors.divider,
+                                    color: context.qingya.divider,
                                     width: 1,
                                   ),
                                 ),
@@ -343,7 +344,7 @@ class _MetaRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 15, color: QingyaColors.textSecondary),
+        Icon(icon, size: 15, color: context.qingya.textSecondary),
         const SizedBox(width: 8),
         Expanded(child: child),
       ],
@@ -382,18 +383,18 @@ class _SoftChip extends StatelessWidget {
   }
 }
 
-Color _stateColor(SessionState s) => switch (s) {
-      SessionState.confirm => QingyaColors.confirm,
-      SessionState.working => QingyaColors.working,
-      SessionState.done => QingyaColors.done,
-      SessionState.idle => QingyaColors.idle,
+Color _stateColor(QingyaPalette c, SessionState s) => switch (s) {
+      SessionState.confirm => c.confirm,
+      SessionState.working => c.working,
+      SessionState.done => c.done,
+      SessionState.idle => c.idle,
     };
 
-Color _stateSoft(SessionState s) => switch (s) {
-      SessionState.confirm => QingyaColors.confirmSoft,
-      SessionState.working => QingyaColors.workingSoft,
-      SessionState.done => QingyaColors.doneSoft,
-      SessionState.idle => QingyaColors.idleSoft,
+Color _stateSoft(QingyaPalette c, SessionState s) => switch (s) {
+      SessionState.confirm => c.confirmSoft,
+      SessionState.working => c.workingSoft,
+      SessionState.done => c.doneSoft,
+      SessionState.idle => c.idleSoft,
     };
 
 String _agentLabel(String agent) => switch (agent.toLowerCase()) {
@@ -403,18 +404,18 @@ String _agentLabel(String agent) => switch (agent.toLowerCase()) {
       _ => agent.isEmpty ? 'Agent' : agent,
     };
 
-Color _agentColor(String agent) => switch (agent.toLowerCase()) {
-      'claude' => const Color(0xFFD97757),
-      'codex' => const Color(0xFF10A37F),
-      'opencode' => const Color(0xFF6078FF),
-      _ => QingyaColors.device,
+Color _agentColor(QingyaPalette c, String agent) => switch (agent.toLowerCase()) {
+      'claude' => c.agentClaude,
+      'codex' => c.agentCodex,
+      'opencode' => c.agentOpencode,
+      _ => c.device,
     };
 
-Color _agentSoft(String agent) => switch (agent.toLowerCase()) {
-      'claude' => const Color(0xFFFFF1EB),
-      'codex' => const Color(0xFFE6F7F2),
-      'opencode' => const Color(0xFFEEF1FF),
-      _ => QingyaColors.deviceSoft,
+Color _agentSoft(QingyaPalette c, String agent) => switch (agent.toLowerCase()) {
+      'claude' => c.agentClaudeSoft,
+      'codex' => c.agentCodexSoft,
+      'opencode' => c.agentOpencodeSoft,
+      _ => c.deviceSoft,
     };
 
 String _relativeTime(DateTime? t) {
