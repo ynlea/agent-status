@@ -78,32 +78,88 @@ if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
   C_RED=$'\033[31m'
   C_MAGENTA=$'\033[35m'
   C_BLUE=$'\033[34m'
+  C_WHITE=$'\033[97m'
+  C_BG=$'\033[48;5;236m'
+  # 256-color accents
+  C_A1=$'\033[38;5;51m'    # bright cyan
+  C_A2=$'\033[38;5;45m'
+  C_A3=$'\033[38;5;39m'
+  C_A4=$'\033[38;5;33m'
+  C_A5=$'\033[38;5;99m'    # purple
 else
-  C_RESET= C_BOLD= C_DIM= C_CYAN= C_GREEN= C_YELLOW= C_RED= C_MAGENTA= C_BLUE=
+  C_RESET= C_BOLD= C_DIM= C_CYAN= C_GREEN= C_YELLOW= C_RED= C_MAGENTA= C_BLUE= C_WHITE= C_BG=
+  C_A1= C_A2= C_A3= C_A4= C_A5=
 fi
 
+UI_STEP_CUR=0
+UI_STEP_TOTAL=0
+UI_WIDTH=54
+
 log()  { printf '%s\n' "$*"; }
-info() { printf '%s›%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
-ok()   { printf '%s✓%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
-warn() { printf '%s!%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
-err()  { printf '%s✗%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2; }
+info() { printf '  %s›%s  %s\n' "${C_A2}" "${C_RESET}" "$*"; }
+ok()   { printf '  %s✓%s  %s\n' "${C_GREEN}${C_BOLD}" "${C_RESET}" "$*"; }
+warn() { printf '  %s!%s  %s\n' "${C_YELLOW}${C_BOLD}" "${C_RESET}" "$*"; }
+err()  { printf '  %s✗%s  %s\n' "${C_RED}${C_BOLD}" "${C_RESET}" "$*" >&2; }
 die()  { err "$*"; exit 1; }
-step() { printf '\n%s▸%s %s%s%s\n' "${C_MAGENTA}" "${C_RESET}" "${C_BOLD}" "$*" "${C_RESET}"; }
+
+hr() {
+  local ch="${1:-─}" i
+  printf '  %s' "${C_DIM}"
+  for ((i = 0; i < UI_WIDTH; i++)); do printf '%s' "$ch"; done
+  printf '%s\n' "${C_RESET}"
+}
+
+step() {
+  UI_STEP_CUR=$((UI_STEP_CUR + 1))
+  local label="$*"
+  local n="$UI_STEP_CUR" t="$UI_STEP_TOTAL"
+  printf '\n'
+  hr
+  if [[ "$t" -gt 0 ]]; then
+    printf '  %s●%s %s步骤 %s/%s%s  %s%s%s\n' \
+      "${C_A5}${C_BOLD}" "${C_RESET}" \
+      "${C_DIM}" "$n" "$t" "${C_RESET}" \
+      "${C_BOLD}${C_WHITE}" "$label" "${C_RESET}"
+  else
+    printf '  %s●%s  %s%s%s\n' \
+      "${C_A5}${C_BOLD}" "${C_RESET}" \
+      "${C_BOLD}${C_WHITE}" "$label" "${C_RESET}"
+  fi
+  hr
+}
 
 print_banner() {
   local title="${1:-agent-status}"
   printf '\n'
-  printf '%s' "${C_CYAN}${C_BOLD}"
-  cat <<'BANNER'
-   ╔══════════════════════════════════════╗
-   ║                                      ║
-   ║         ✦  agent-status  ✦           ║
-   ║     会话监测 · 用量统计 · 安装器       ║
-   ║                                      ║
-   ╚══════════════════════════════════════╝
-BANNER
-  printf '%s' "${C_RESET}"
-  printf '  %s%s%s\n\n' "${C_DIM}" "$title" "${C_RESET}"
+  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_A4}" "${C_RESET}"
+  printf '  %s│%s                                                      %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s █████╗  ███████╗%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A1}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s██╔══██╗ ██╔════╝%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A2}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s███████║ ███████╗%s  agent-status                  %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A3}${C_BOLD}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s██╔══██║ ╚════██║%s  会话监测 · 用量统计 · 安装器    %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s██║  ██║ ███████║%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A5}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s╚═╝  ╚═╝ ╚══════╝%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_MAGENTA}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s                                                      %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
+  printf '  %s│%s   %s▸%s %-48s %s│%s\n' "${C_A4}" "${C_RESET}" "${C_GREEN}" "${C_RESET}" "$title" "${C_A4}" "${C_RESET}"
+  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A4}" "${C_RESET}"
+  printf '\n'
+}
+
+print_done() {
+  local msg="${1:-完成}" dir="${2:-}"
+  printf '\n'
+  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_GREEN}" "${C_RESET}"
+  printf '  %s│%s  %s✦  %s%s%s\n' "${C_GREEN}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}${C_BOLD}" "$msg" "${C_RESET}"
+  if [[ -n "$dir" ]]; then
+    printf '  %s│%s  %s目录%s  %s\n' "${C_GREEN}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "$dir"
+  fi
+  printf '  %s│%s  %s提示%s  agent-status status | update | restart\n' "${C_GREEN}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
+  printf '  %s╰──────────────────────────────────────────────────────╯%s\n\n' "${C_GREEN}" "${C_RESET}"
+}
+
+kv() {
+  # kv "标签" "值"
+  printf '  %s%-10s%s %s\n' "${C_DIM}" "$1" "${C_RESET}" "$2"
 }
 
 have_tty() { [[ -t 0 || -t 1 ]]; }
@@ -111,10 +167,12 @@ have_tty() { [[ -t 0 || -t 1 ]]; }
 prompt() {
   local msg="$1" def="${2:-}" ans
   if [[ -n "$def" ]]; then
-    read -r -p "$msg [$def]: " ans || true
+    printf '  %s?%s  %s %s[%s]%s: ' "${C_A2}${C_BOLD}" "${C_RESET}" "$msg" "${C_DIM}" "$def" "${C_RESET}" >&2
+    read -r ans || true
     printf '%s' "${ans:-$def}"
   else
-    read -r -p "$msg: " ans || true
+    printf '  %s?%s  %s: ' "${C_A2}${C_BOLD}" "${C_RESET}" "$msg" >&2
+    read -r ans || true
     printf '%s' "$ans"
   fi
 }
@@ -124,7 +182,8 @@ confirm() {
   [[ "$YES" -eq 1 ]] && return 0
   have_tty || die "非交互模式请加 --yes"
   local ans
-  read -r -p "$msg [y/N]: " ans || true
+  printf '  %s?%s  %s %s[y/N]%s: ' "${C_YELLOW}${C_BOLD}" "${C_RESET}" "$msg" "${C_DIM}" "${C_RESET}" >&2
+  read -r ans || true
   [[ "$ans" == "y" || "$ans" == "Y" || "$ans" == "yes" ]]
 }
 
@@ -249,7 +308,7 @@ install_binary() {
 write_server_env() {
   local path="$CONFIG_DIR/server.env" key="$1" addr="$2"
   if [[ -f "$path" && "$FORCE_CONFIG" -eq 0 ]]; then
-    log "保留已有配置 $path"
+    info "保留已有配置 $path"
     return
   fi
   if [[ -f "$path" ]]; then
@@ -261,7 +320,7 @@ AGENT_STATUS_KEY=${key}
 AGENT_STATUS_DB=${DATA_DIR}/agent-status.db
 EOF
   chmod 600 "$path"
-  log "已写入 $path"
+  ok "已写入 $path"
 }
 
 write_monitor_json() {
@@ -272,7 +331,7 @@ write_monitor_json() {
   machine_name="$machine_id"
   platform="linux"
   if [[ -f "$path" && "$FORCE_CONFIG" -eq 0 ]]; then
-    log "保留已有配置 $path"
+    info "保留已有配置 $path"
     return
   fi
   if [[ -f "$path" ]]; then
@@ -292,7 +351,7 @@ write_monitor_json() {
 }
 EOF
   chmod 600 "$path"
-  log "已写入 $path"
+  ok "已写入 $path"
 }
 
 write_systemd_server() {
@@ -316,7 +375,7 @@ StandardError=append:${LOG_DIR}/server.log
 [Install]
 WantedBy=default.target
 EOF
-  log "已写入 $unit"
+  ok "已写入 $unit"
 }
 
 write_systemd_monitor() {
@@ -339,7 +398,7 @@ StandardError=append:${LOG_DIR}/monitor.log
 [Install]
 WantedBy=default.target
 EOF
-  log "已写入 $unit"
+  ok "已写入 $unit"
 }
 
 systemd_reload() {
@@ -397,7 +456,7 @@ persist_self() {
     download "${RAW_BASE}/main/scripts/install.sh" "$dest" || return 0
   fi
   chmod 755 "$dest" 2>/dev/null || true
-  log "管理脚本: $dest"
+  ok "管理脚本: $dest"
 }
 
 link_shim() {
@@ -407,7 +466,7 @@ link_shim() {
   ln -sfn "$self" "$dest" 2>/dev/null || cp -f "$self" "$dest" 2>/dev/null || true
   if [[ -e "$dest" ]]; then
     chmod +x "$dest" 2>/dev/null || true
-    log "命令入口: $dest"
+    ok "命令入口: $dest"
   fi
 }
 
@@ -450,39 +509,67 @@ init_agents() {
 }
 
 cmd_status() {
-  local r
+  local r unit active
+  printf '\n'
+  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_A3}" "${C_RESET}"
+  printf '  %s│%s  %s系统状态%s                                           %s│%s\n' "${C_A3}" "${C_RESET}" "${C_BOLD}" "${C_RESET}" "${C_A3}" "${C_RESET}"
+  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A3}" "${C_RESET}"
+
   while IFS= read -r r; do
-    log "---- $r ----"
+    printf '\n'
+    printf '  %s◆ %s%s%s\n' "${C_A5}${C_BOLD}" "${C_RESET}${C_BOLD}" "$r" "${C_RESET}"
+    hr "·"
+
     if [[ -x "$BIN_DIR/agent-status-$r" ]]; then
-      log "二进制: $BIN_DIR/agent-status-$r"
+      kv "二进制" "$BIN_DIR/agent-status-$r"
+      if [[ "$r" == "monitor" ]]; then
+        local ver
+        ver="$("$BIN_DIR/agent-status-monitor" -version 2>/dev/null || true)"
+        [[ -n "$ver" ]] && kv "版本" "$ver"
+      fi
     else
-      log "二进制: 缺失"
+      kv "二进制" "缺失"
     fi
+
     case "$r" in
       server)
         if [[ -f "$CONFIG_DIR/server.env" ]]; then
-          # mask key
-          sed -E 's/^(AGENT_STATUS_KEY=).*/\1****/' "$CONFIG_DIR/server.env" || true
+          local line k v
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            k="${line%%=*}"; v="${line#*=}"
+            case "$k" in
+              AGENT_STATUS_KEY) kv "KEY" "****" ;;
+              AGENT_STATUS_ADDR) kv "ADDR" "$v" ;;
+              AGENT_STATUS_DB) kv "DB" "$v" ;;
+              *) kv "$k" "$v" ;;
+            esac
+          done < "$CONFIG_DIR/server.env"
         fi
         ;;
       monitor)
-        if [[ -f "$CONFIG_DIR/monitor.json" ]]; then
-          if command -v python3 >/dev/null 2>&1; then
-            python3 - "$CONFIG_DIR/monitor.json" <<'PY'
-import json,sys
-p=sys.argv[1]
-with open(p) as f: d=json.load(f)
-if "key" in d: d["key"]="****"
-print(json.dumps(d, ensure_ascii=False, indent=2))
-PY
-          else
-            log "配置: $CONFIG_DIR/monitor.json"
-          fi
+        if [[ -f "$CONFIG_DIR/monitor.json" ]] && command -v python3 >/dev/null 2>&1; then
+          local url machine platform
+          url="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("server_url",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+          machine="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("machine_name") or d.get("machine_id",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+          platform="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("platform",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+          [[ -n "$url" ]] && kv "URL" "$url"
+          [[ -n "$machine" ]] && kv "机器" "$machine"
+          [[ -n "$platform" ]] && kv "平台" "$platform"
+          kv "KEY" "****"
         fi
         ;;
     esac
-    svc status "$r" || true
+
+    unit="$(unit_for_role "$r")"
+    active="$(systemctl --user is-active "$unit" 2>/dev/null || echo inactive)"
+    if [[ "$active" == "active" ]]; then
+      printf '  %s%-10s%s %s● active%s  %s\n' "${C_DIM}" "服务" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}" "$unit"
+    else
+      printf '  %s%-10s%s %s○ %s%s  %s\n' "${C_DIM}" "服务" "${C_RESET}" "${C_YELLOW}" "$active" "${C_RESET}" "$unit"
+    fi
   done < <(roles_expand "$ROLE")
+  printf '\n'
 }
 
 cmd_control() {
@@ -598,14 +685,18 @@ cmd_update() {
   print_banner "更新二进制"
   local r
   ROLE="${ROLE:-all}"
-  while IFS= read -r r; do
+  local roles=()
+  while IFS= read -r r; do roles+=("$r"); done < <(roles_expand "$ROLE")
+  UI_STEP_CUR=0
+  UI_STEP_TOTAL=${#roles[@]}
+  for r in "${roles[@]}"; do
     step "更新 $r"
     systemctl --user stop "$(unit_for_role "$r")" 2>/dev/null || true
     install_binary "$r"
     systemctl --user start "$(unit_for_role "$r")" 2>/dev/null || true
     ok "已更新 $r"
-  done < <(roles_expand "$ROLE")
-  printf '\n%s✦ 更新完成%s\n\n' "${C_GREEN}${C_BOLD}" "${C_RESET}"
+  done
+  print_done "更新完成" "$INSTALL_ROOT"
   cmd_status
 }
 
@@ -616,10 +707,18 @@ interactive_fill() {
 
   if [[ -z "$ROLE" ]]; then
     have_tty || die "非交互安装请指定 --role 与 --yes"
-    log "请选择角色："
-    log "  1) 服务端 server"
-    log "  2) 监测端 monitor"
-    log "  3) 两者都装"
+    printf '  %s选择要安装的角色%s
+' "${C_BOLD}" "${C_RESET}"
+    printf '  %s┌────────────────────────────────────────────────────┐%s
+' "${C_DIM}" "${C_RESET}"
+    printf '  %s│%s  %s1%s  服务端 server     接收上报、WebSocket、API      %s│%s
+' "${C_DIM}" "${C_RESET}" "${C_A1}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
+    printf '  %s│%s  %s2%s  监测端 monitor    扫描会话 / 用量并上报         %s│%s
+' "${C_DIM}" "${C_RESET}" "${C_A2}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
+    printf '  %s│%s  %s3%s  两者都装 all      本机完整部署                  %s│%s
+' "${C_DIM}" "${C_RESET}" "${C_A5}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
+    printf '  %s└────────────────────────────────────────────────────┘%s
+' "${C_DIM}" "${C_RESET}"
     local c
     c="$(prompt "请输入序号" "2")"
     case "$c" in
@@ -653,7 +752,7 @@ interactive_fill() {
 
   if [[ "$want_server" -eq 1 ]]; then
     if [[ "$keep_server" -eq 1 ]]; then
-      log "复用已有服务端配置"
+      ok "复用已有服务端配置"
       [[ -n "$KEY" ]] || KEY="$existing_key"
     else
       if [[ -z "$KEY" ]]; then
@@ -676,7 +775,7 @@ interactive_fill() {
 
   if [[ "$want_monitor" -eq 1 ]]; then
     if [[ "$keep_monitor" -eq 1 ]]; then
-      log "复用已有监测端配置（${default_url}）"
+      ok "复用已有监测端配置（${default_url}）"
       [[ -n "$SERVER_URL" ]] || SERVER_URL="$default_url"
       if [[ -z "$KEY" ]]; then
         KEY="$existing_key"
@@ -717,6 +816,12 @@ cmd_install() {
     all) want_server=1; want_monitor=1 ;;
   esac
 
+  UI_STEP_CUR=0
+  UI_STEP_TOTAL=1
+  [[ "$want_server" -eq 1 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 1))
+  [[ "$want_monitor" -eq 1 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 1))
+  [[ "$want_monitor" -eq 1 && "$NO_INIT_AGENTS" -eq 0 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 1))
+
   if [[ "$want_server" -eq 1 ]]; then
     step "安装服务端"
     install_binary server
@@ -751,7 +856,7 @@ cmd_install() {
     init_agents || true
   fi
 
-  printf '\n%s✦ 安装完成%s  目录：%s\n\n' "${C_GREEN}${C_BOLD}" "${C_RESET}" "$INSTALL_ROOT"
+  print_done "安装完成" "$INSTALL_ROOT"
   cmd_status
 }
 

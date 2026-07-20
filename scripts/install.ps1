@@ -40,26 +40,53 @@ $LogDir = Join-Path $InstallRoot 'logs'
 $StateDir = Join-Path $InstallRoot 'state'
 
 function Write-Log([string]$Message) { Write-Host $Message }
-function Write-Info([string]$Message) { Write-Host "› $Message" -ForegroundColor Cyan }
-function Write-Ok([string]$Message) { Write-Host "✓ $Message" -ForegroundColor Green }
-function Write-Warn([string]$Message) { Write-Host "! $Message" -ForegroundColor Yellow }
+function Write-Info([string]$Message) { Write-Host "  ›  $Message" -ForegroundColor Cyan }
+function Write-Ok([string]$Message) { Write-Host "  ✓  $Message" -ForegroundColor Green }
+function Write-Warn([string]$Message) { Write-Host "  !  $Message" -ForegroundColor Yellow }
+function Write-Hr([string]$Char = '─') {
+    $line = ($Char * 54)
+    Write-Host "  $line" -ForegroundColor DarkGray
+}
 function Write-Step([string]$Message) {
+    $script:UiStepCur = [int]$script:UiStepCur + 1
     Write-Host ""
-    Write-Host "▸ $Message" -ForegroundColor Magenta
+    Write-Hr
+    if ([int]$script:UiStepTotal -gt 0) {
+        Write-Host ("  ● 步骤 {0}/{1}  {2}" -f $script:UiStepCur, $script:UiStepTotal, $Message) -ForegroundColor Magenta
+    } else {
+        Write-Host "  ●  $Message" -ForegroundColor Magenta
+    }
+    Write-Hr
 }
 function Write-Banner([string]$Title = '安装向导') {
     Write-Host ""
-    Write-Host '   ╔══════════════════════════════════════╗' -ForegroundColor Cyan
-    Write-Host '   ║                                      ║' -ForegroundColor Cyan
-    Write-Host '   ║         ✦  agent-status  ✦           ║' -ForegroundColor Cyan
-    Write-Host '   ║     会话监测 · 用量统计 · 安装器       ║' -ForegroundColor Cyan
-    Write-Host '   ║                                      ║' -ForegroundColor Cyan
-    Write-Host '   ╚══════════════════════════════════════╝' -ForegroundColor Cyan
-    Write-Host "  $Title" -ForegroundColor DarkGray
+    Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor DarkCyan
+    Write-Host '  │                                                      │' -ForegroundColor DarkCyan
+    Write-Host '  │    █████╗  ███████╗                                 │' -ForegroundColor Cyan
+    Write-Host '  │   ██╔══██╗ ██╔════╝                                 │' -ForegroundColor Cyan
+    Write-Host '  │   ███████║ ███████╗  agent-status                   │' -ForegroundColor Blue
+    Write-Host '  │   ██╔══██║ ╚════██║  会话监测 · 用量统计 · 安装器     │' -ForegroundColor DarkBlue
+    Write-Host '  │   ██║  ██║ ███████║                                 │' -ForegroundColor Magenta
+    Write-Host '  │   ╚═╝  ╚═╝ ╚══════╝                                 │' -ForegroundColor DarkMagenta
+    Write-Host '  │                                                      │' -ForegroundColor DarkCyan
+    Write-Host ("  │   ▸ {0,-48} │" -f $Title) -ForegroundColor DarkCyan
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor DarkCyan
     Write-Host ""
 }
+function Write-Done([string]$Message = '完成', [string]$Dir = '') {
+    Write-Host ""
+    Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor Green
+    Write-Host "  │  ✦  $Message" -ForegroundColor Green
+    if ($Dir) { Write-Host "  │  目录  $Dir" -ForegroundColor DarkGray }
+    Write-Host '  │  提示  install.ps1 status | update | restart' -ForegroundColor DarkGray
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Green
+    Write-Host ""
+}
+function Write-Kv([string]$Key, [string]$Value) {
+    Write-Host ("  {0,-10} {1}" -f $Key, $Value) -ForegroundColor Gray
+}
 function Die([string]$Message) {
-    Write-Host "✗ $Message" -ForegroundColor Red
+    Write-Host "  ✗  $Message" -ForegroundColor Red
     throw $Message
 }
 
@@ -302,29 +329,52 @@ function Init-Agents {
 }
 
 function Show-Status {
+    Write-Host ""
+    Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor DarkCyan
+    Write-Host '  │  系统状态                                             │' -ForegroundColor DarkCyan
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor DarkCyan
     foreach ($r in Expand-Roles $Role) {
-        Write-Log "---- $r ----"
+        Write-Host ""
+        Write-Host "  ◆ $r" -ForegroundColor Magenta
+        Write-Hr '·'
         $exe = Join-Path $BinDir ("agent-status-{0}.exe" -f $r)
-        if (Test-Path $exe) { Write-Log "二进制: $exe" } else { Write-Log '二进制: 缺失' }
+        if (Test-Path $exe) {
+            Write-Kv '二进制' $exe
+            if ($r -eq 'monitor') {
+                try {
+                    $ver = & $exe -version 2>$null
+                    if ($ver) { Write-Kv '版本' "$ver" }
+                } catch {}
+            }
+        } else {
+            Write-Kv '二进制' '缺失'
+        }
         $pidPath = Get-PidPath $r
         if (Test-Path $pidPath) {
             $id = Get-Content $pidPath
             $p = Get-Process -Id ([int]$id) -ErrorAction SilentlyContinue
-            if ($p) { Write-Log "运行中: pid=$id" } else { Write-Log "失效的 pid 文件: $id" }
+            if ($p) { Write-Kv '进程' "● running  pid=$id" }
+            else { Write-Kv '进程' "○ stale pid=$id" }
         } else {
-            Write-Log '运行中: 否'
+            Write-Kv '进程' '○ stopped'
         }
         if ($r -eq 'server' -and (Test-Path (Join-Path $ConfigDir 'server.env'))) {
             Get-Content (Join-Path $ConfigDir 'server.env') | ForEach-Object {
-                if ($_ -match '^AGENT_STATUS_KEY=') { 'AGENT_STATUS_KEY=****' } else { $_ }
+                if ($_ -match '^AGENT_STATUS_KEY=') { Write-Kv 'KEY' '****' }
+                elseif ($_ -match '^AGENT_STATUS_ADDR=(.*)$') { Write-Kv 'ADDR' $Matches[1] }
+                elseif ($_ -match '^AGENT_STATUS_DB=(.*)$') { Write-Kv 'DB' $Matches[1] }
             }
         }
         if ($r -eq 'monitor' -and (Test-Path (Join-Path $ConfigDir 'monitor.json'))) {
             $j = Get-Content (Join-Path $ConfigDir 'monitor.json') -Raw | ConvertFrom-Json
-            $j.key = '****'
-            $j | ConvertTo-Json
+            if ($j.server_url) { Write-Kv 'URL' $j.server_url }
+            $hostName = if ($j.machine_name) { $j.machine_name } else { $j.machine_id }
+            if ($hostName) { Write-Kv '机器' $hostName }
+            if ($j.platform) { Write-Kv '平台' $j.platform }
+            Write-Kv 'KEY' '****'
         }
     }
+    Write-Host ""
 }
 
 function Get-ExistingMonitorConfig {
@@ -344,10 +394,12 @@ function Get-ExistingServerKey {
 function Fill-Interactive {
     if ([string]::IsNullOrWhiteSpace($Role)) {
         if (-not (Test-Interactive)) { Die '非交互安装请指定 -Role 与 -Yes' }
-        Write-Log '请选择角色：'
-        Write-Log '  1) 服务端 server'
-        Write-Log '  2) 监测端 monitor'
-        Write-Log '  3) 两者都装'
+        Write-Host '  选择要安装的角色' -ForegroundColor White
+        Write-Host '  ┌────────────────────────────────────────────────────┐' -ForegroundColor DarkGray
+        Write-Host '  │  1  服务端 server     接收上报、WebSocket、API      │' -ForegroundColor DarkGray
+        Write-Host '  │  2  监测端 monitor    扫描会话 / 用量并上报         │' -ForegroundColor DarkGray
+        Write-Host '  │  3  两者都装 all      本机完整部署                  │' -ForegroundColor DarkGray
+        Write-Host '  └────────────────────────────────────────────────────┘' -ForegroundColor DarkGray
         $c = Read-Prompt '请输入序号' '2'
         switch ($c) {
             '1' { $script:Role = 'server' }
@@ -429,6 +481,12 @@ function Invoke-Install {
     $wantServer = $Role -eq 'server' -or $Role -eq 'all'
     $wantMonitor = $Role -eq 'monitor' -or $Role -eq 'all'
 
+    $script:UiStepCur = 0
+    $script:UiStepTotal = 1
+    if ($wantServer) { $script:UiStepTotal++ }
+    if ($wantMonitor) { $script:UiStepTotal++ }
+    if ($wantMonitor -and -not $NoInitAgents) { $script:UiStepTotal++ }
+
     if ($wantServer) {
         Write-Step '安装服务端'
         Install-Binary server
@@ -466,12 +524,12 @@ function Invoke-Install {
             $url = "https://raw.githubusercontent.com/$Repo/main/scripts/install.ps1"
             Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
         }
-        Write-Log "管理脚本: $dest"
+        Write-Ok "管理脚本: $dest"
     } catch {
-        Write-Log "警告：无法保存 install.ps1: $_"
+        Write-Warn "无法保存 install.ps1: $_"
     }
 
-    Write-Host ""; Write-Host "✦ 安装完成  目录：$InstallRoot" -ForegroundColor Green; Write-Host ""
+    Write-Done '安装完成' $InstallRoot
     Show-Status
 }
 
@@ -554,6 +612,8 @@ function Invoke-Uninstall {
 function Invoke-Update {
     Write-Banner '更新二进制'
     $roles = Expand-Roles $(if ($Role) { $Role } else { 'all' })
+    $script:UiStepCur = 0
+    $script:UiStepTotal = @($roles).Count
     foreach ($r in $roles) {
         Write-Step "更新 $r"
         Stop-Role $r
@@ -561,9 +621,7 @@ function Invoke-Update {
         Start-Role $r
         Write-Ok "已更新 $r"
     }
-    Write-Host ""
-    Write-Host '✦ 更新完成' -ForegroundColor Green
-    Write-Host ""
+    Write-Done '更新完成' $InstallRoot
     Show-Status
 }
 
