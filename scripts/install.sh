@@ -43,6 +43,7 @@ agent-status 安装与管理工具（Linux）
 
 命令：
   install（默认）     安装或升级
+  update              更新二进制（停服→下载→启动，保留配置）
   status              查看状态
   start|stop|restart  启停服务
   enable|disable      开机自启（systemd --user）
@@ -130,10 +131,21 @@ github_release_tag() {
     echo "$VERSION"
     return
   fi
-  local json tag
-  json="$(curl -fsSL "${RELEASE_API}/latest" 2>/dev/null || true)"
+  local json tag auth_hdr
+  auth_hdr=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth_hdr=(-H "Authorization: Bearer $GITHUB_TOKEN")
+  elif [[ -n "${GH_TOKEN:-}" ]]; then
+    auth_hdr=(-H "Authorization: Bearer $GH_TOKEN")
+  fi
+  json="$(curl -fsSL "${auth_hdr[@]}" "${RELEASE_API}/latest" 2>/dev/null || true)"
   tag="$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  [[ -n "$tag" ]] || die "无法获取 $REPO 的最新 Release（请确认仓库已公开且已发版）"
+  if [[ -z "$tag" ]]; then
+    if printf '%s' "$json" | grep -q 'rate limit'; then
+      die "GitHub API 限流。请用 --version v0.1.1 指定版本，或设置 GITHUB_TOKEN 环境变量。"
+    fi
+    die "无法获取 $REPO 的最新 Release（请确认仓库已公开且已发版）"
+  fi
   echo "$tag"
 }
 
@@ -543,6 +555,19 @@ cmd_uninstall() {
   fi
 }
 
+cmd_update() {
+  local r
+  ROLE="${ROLE:-all}"
+  while IFS= read -r r; do
+    log "---- 更新 $r ----"
+    systemctl --user stop "$(unit_for_role "$r")" 2>/dev/null || true
+    install_binary "$r"
+    systemctl --user start "$(unit_for_role "$r")" 2>/dev/null || true
+    log "已更新 $r"
+  done < <(roles_expand "$ROLE")
+  cmd_status
+}
+
 interactive_fill() {
   local want_server=0 want_monitor=0
   if [[ -z "$ROLE" ]]; then
@@ -649,7 +674,7 @@ parse_args() {
     return
   fi
   case "$1" in
-    install|status|start|stop|restart|enable|disable|config|init-agents|uninstall)
+    install|update|status|start|stop|restart|enable|disable|config|init-agents|uninstall)
       CMD="$1"; shift
       ;;
     -h|--help)
@@ -704,6 +729,7 @@ main() {
   parse_args "$@"
   case "$CMD" in
     install) cmd_install ;;
+    update)  cmd_update ;;
     status) cmd_status ;;
     start|stop|restart|enable|disable) cmd_control "$CMD" ;;
     config)

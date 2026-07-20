@@ -69,9 +69,19 @@ function Read-Prompt([string]$Message, [string]$Default = '') {
 
 function Get-ReleaseTag {
     if ($Version -ne 'latest') { return $Version }
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ 'User-Agent' = 'agent-status-installer' }
-    if (-not $rel.tag_name) { Die "无法获取 $Repo 的最新 Release（请确认仓库已公开且已发版）" }
-    return $rel.tag_name
+    $headers = @{ 'User-Agent' = 'agent-status-installer' }
+    if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+    elseif ($env:GH_TOKEN) { $headers['Authorization'] = "Bearer $env:GH_TOKEN" }
+    try {
+        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
+        if (-not $rel.tag_name) { throw "empty tag" }
+        return $rel.tag_name
+    } catch {
+        if ("$_" -match 'rate limit') {
+            Die "GitHub API 限流。请用 -Version v0.1.1 指定版本，或设置 GITHUB_TOKEN / GH_TOKEN 环境变量。"
+        }
+        Die "无法获取 $Repo 的最新 Release（请确认仓库已公开且已发版）"
+    }
 }
 
 function Install-Binary([string]$RoleName) {
