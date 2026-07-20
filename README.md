@@ -13,6 +13,18 @@
 | 轻芽 App（Flutter） | `mobile/` | 只读客户端，对齐原型图 |
 | 部署说明 | `docs/deploy.md` | 从零安装 |
 
+## 轻芽界面预览
+
+演示数据下的界面示意（Flutter golden 截图）：
+
+| 欢迎 / 配置 | 首页任务 | 设备列表 |
+|:---:|:---:|:---:|
+| ![欢迎](docs/screenshots/qingya-welcome.png) | ![首页](docs/screenshots/qingya-home.png) | ![设备](docs/screenshots/qingya-devices.png) |
+
+| 设备详情 | 设置 |
+|:---:|:---:|
+| ![设备详情](docs/screenshots/qingya-device-detail.png) | ![设置](docs/screenshots/qingya-settings.png) |
+
 ## 最短路径
 
 推荐用安装器（二进制 + 本机管理，**不走 Docker**）。仓库 Public 且有 Release 后：

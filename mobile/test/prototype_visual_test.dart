@@ -1,12 +1,41 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qingya/app.dart';
 import 'package:qingya/data/prefs/settings_store.dart';
+import 'package:qingya/theme/qingya_theme.dart';
 import 'package:qingya/ui/widgets/assets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Future<void> _loadCjkFonts() async {
+  // Local extracts of Noto Sans CJK SC (gitignored). Theme falls back to these names.
+  const faces = <String, String>{
+    'Noto Sans CJK SC': 'test/fonts/NotoSansCJK-SC-Regular.otf',
+    'Noto Sans SC': 'test/fonts/NotoSansCJK-SC-Regular.otf',
+  };
+  for (final entry in faces.entries) {
+    final file = File(entry.value);
+    if (!file.existsSync()) {
+      // ignore: avoid_print
+      print('skip font ${entry.key}: missing ${entry.value}');
+      continue;
+    }
+    final bytes = await file.readAsBytes();
+    final data = ByteData.sublistView(bytes);
+    final loader = FontLoader(entry.key)..addFont(Future.value(data));
+    await loader.load();
+  }
+}
+
 void main() {
+  setUpAll(() async {
+    await _loadCjkFonts();
+  });
+
   Future<Finder> pumpApp(
     WidgetTester tester, {
     required Map<String, Object> preferences,
@@ -42,6 +71,18 @@ void main() {
         await precacheImage(AssetImage(asset), cacheKey.currentContext!);
       }
     });
+    // flutter_test defaults to Ahem (boxes for every glyph). Force a real font.
+    const cjk = 'Noto Sans CJK SC';
+    final base = QingyaTheme.light();
+    final screenshotTheme = base.copyWith(
+      textTheme: base.textTheme.apply(fontFamily: cjk),
+      primaryTextTheme: base.primaryTextTheme.apply(fontFamily: cjk),
+      appBarTheme: base.appBarTheme.copyWith(
+        titleTextStyle: base.appBarTheme.titleTextStyle?.copyWith(
+          fontFamily: cjk,
+        ),
+      ),
+    );
     final boundaryKey = GlobalKey();
     await tester.pumpWidget(
       RepaintBoundary(
@@ -50,7 +91,10 @@ void main() {
           overrides: [
             sharedPrefsProvider.overrideWithValue(sharedPreferences),
           ],
-          child: const QingyaApp(),
+          child: DefaultTextStyle.merge(
+            style: const TextStyle(fontFamily: cjk),
+            child: QingyaApp(theme: screenshotTheme),
+          ),
         ),
       ),
     );

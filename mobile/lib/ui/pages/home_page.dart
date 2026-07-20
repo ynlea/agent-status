@@ -222,7 +222,7 @@ class _SpeechBubble extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 22, 12),
           child: RichText(
             text: TextSpan(
-              style: const TextStyle(
+              style: DefaultTextStyle.of(context).style.copyWith(
                 fontSize: 12,
                 height: 1.55,
                 color: QingyaColors.textPrimary,
@@ -230,9 +230,13 @@ class _SpeechBubble extends StatelessWidget {
               ),
               children: [
                 TextSpan(text: text),
-                const TextSpan(
+                TextSpan(
                   text: '  ♥',
-                  style: TextStyle(color: QingyaColors.primary, fontSize: 11),
+                  style: TextStyle(
+                    color: QingyaColors.primary,
+                    fontSize: 11,
+                    fontFamily: DefaultTextStyle.of(context).style.fontFamily,
+                  ),
                 ),
               ],
             ),

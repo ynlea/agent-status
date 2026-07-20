@@ -99,7 +99,11 @@ class _SettingsRefresh extends ChangeNotifier {
 }
 
 class QingyaApp extends ConsumerWidget {
-  const QingyaApp({super.key});
+  const QingyaApp({super.key, this.theme, this.darkTheme});
+
+  /// Optional overrides (e.g. golden tests with real CJK fonts).
+  final ThemeData? theme;
+  final ThemeData? darkTheme;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -107,8 +111,8 @@ class QingyaApp extends ConsumerWidget {
     return MaterialApp.router(
       title: '轻芽',
       debugShowCheckedModeBanner: false,
-      theme: QingyaTheme.light(),
-      darkTheme: QingyaTheme.dark(),
+      theme: theme ?? QingyaTheme.light(),
+      darkTheme: darkTheme ?? QingyaTheme.dark(),
       themeMode: ThemeMode.system,
       routerConfig: router,
     );

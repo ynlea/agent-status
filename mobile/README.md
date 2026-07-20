@@ -2,6 +2,18 @@
 
 按 `source/原型图.png` 重做的只读监控 App：首页活跃任务 / 设备 / 设置。
 
+界面示意见仓库根目录 README 的「轻芽界面预览」（`docs/screenshots/`）。更新截图：
+
+```bash
+# 需本机有 test/fonts/NotoSansCJK-SC-Regular.otf（见 test/prototype_visual_test.dart）
+flutter test test/prototype_visual_test.dart --update-goldens
+cp test/goldens/welcome.png ../docs/screenshots/qingya-welcome.png
+cp test/goldens/home.png ../docs/screenshots/qingya-home.png
+cp test/goldens/devices.png ../docs/screenshots/qingya-devices.png
+cp test/goldens/device_detail.png ../docs/screenshots/qingya-device-detail.png
+cp test/goldens/settings.png ../docs/screenshots/qingya-settings.png
+```
+
 ## 运行
 
 ```bash

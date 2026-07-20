@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local CJK fonts used only for golden screenshots (large; extract on demand)
+/test/fonts/
