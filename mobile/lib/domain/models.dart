@@ -52,6 +52,7 @@ class Machine {
     required this.platform,
     required this.online,
     this.lastSeenAt,
+    this.version = '',
   });
 
   final String machineId;
@@ -59,6 +60,8 @@ class Machine {
   final String platform;
   final bool online;
   final DateTime? lastSeenAt;
+  /// 监测端二进制版本（如 v0.1.4），服务端从上报里带回
+  final String version;
 
   factory Machine.fromJson(Map<String, dynamic> json) {
     return Machine(
@@ -67,15 +70,17 @@ class Machine {
       platform: '${json['platform'] ?? ''}',
       online: json['online'] == true,
       lastSeenAt: _parseTime(json['last_seen_at']),
+      version: '${json['version'] ?? ''}'.trim(),
     );
   }
 
-  Machine copyWith({bool? online}) => Machine(
+  Machine copyWith({bool? online, String? version}) => Machine(
         machineId: machineId,
         machineName: machineName,
         platform: platform,
         online: online ?? this.online,
         lastSeenAt: lastSeenAt,
+        version: version ?? this.version,
       );
 }
 

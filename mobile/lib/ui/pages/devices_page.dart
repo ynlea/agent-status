@@ -214,7 +214,10 @@ class _DeviceTile extends StatelessWidget {
                         ),
                         Flexible(
                           child: Text(
-                            platformLabel(machine.platform),
+                            [
+                              platformLabel(machine.platform),
+                              if (machine.version.isNotEmpty) machine.version,
+                            ].join(' · '),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -443,7 +446,11 @@ class _DetailHeader extends StatelessWidget {
                     ),
                     Flexible(
                       child: Text(
-                        platformLabel(machine?.platform),
+                        [
+                          platformLabel(machine?.platform),
+                          if ((machine?.version ?? '').isNotEmpty)
+                            machine!.version,
+                        ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -455,6 +462,17 @@ class _DetailHeader extends StatelessWidget {
                     ),
                   ],
                 ),
+                if ((machine?.version ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    '监测端 ${machine!.version}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: QingyaColors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 7),
                 Text(
                   machine?.online == true

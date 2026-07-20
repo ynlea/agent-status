@@ -212,30 +212,35 @@ const _demoMachines = [
     machineName: 'ThinkPad-X1',
     platform: 'linux',
     online: true,
+    version: 'v0.1.4',
   ),
   Machine(
     machineId: 'm-macbook',
     machineName: 'MacBook-Pro',
     platform: 'darwin',
     online: true,
+    version: 'v0.1.4',
   ),
   Machine(
     machineId: 'm-macmini',
     machineName: 'Mac mini',
     platform: 'darwin',
     online: true,
+    version: 'v0.1.3',
   ),
   Machine(
     machineId: 'm-ubuntu',
     machineName: 'Ubuntu-Server',
     platform: 'linux',
     online: false,
+    version: 'v0.1.2',
   ),
   Machine(
     machineId: 'm-windows',
     machineName: 'Windows-PC',
     platform: 'windows',
     online: false,
+    version: 'v0.1.4',
   ),
 ];
 
