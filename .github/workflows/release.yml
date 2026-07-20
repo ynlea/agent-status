@@ -93,14 +93,33 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Decode Android release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 secret is required for signed release APK" >&2
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/qingya-release.jks"
+          ls -la "$GITHUB_WORKSPACE/qingya-release.jks"
+
       - name: Build Android APK (release)
         env:
           # Android versionCode 上限 2100000000；用 run_number 即可
           BUILD_NO: ${{ github.run_number }}
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/qingya-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           ver="${tag#v}"
+          test -n "${ANDROID_KEYSTORE_PASSWORD:-}"
+          test -n "${ANDROID_KEY_ALIAS:-}"
+          test -n "${ANDROID_KEY_PASSWORD:-}"
           flutter build apk --release \
             --build-name="$ver" \
             --build-number="${BUILD_NO}"

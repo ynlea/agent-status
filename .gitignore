@@ -66,3 +66,8 @@ source/**/boards-normalized/
 node_modules/
 package.json
 package-lock.json
+
+# Android release signing local artifacts
+*.jks
+*.keystore
+mobile/android/key.properties
