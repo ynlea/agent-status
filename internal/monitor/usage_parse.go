@@ -134,31 +134,45 @@ func parseClaudeLine(line, path string) (apitypes.UsageEvent, bool) {
 }
 
 // ParseCodexUsageFile reads token_count events from a Codex rollout JSONL.
-func ParseCodexUsageFile(path string, fromOffset int64) (events []apitypes.UsageEvent, newOffset int64, err error) {
+// startModel is the last known model from a previous cursor (empty → "unknown").
+// When fromOffset > 0 and startModel is empty/unknown, the file prefix is scanned
+// for the latest turn_context model so mid-file ticks do not emit "unknown".
+func ParseCodexUsageFile(path string, fromOffset int64, startModel string) (events []apitypes.UsageEvent, newOffset int64, lastModel string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fromOffset, err
+		return nil, fromOffset, startModel, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fromOffset, err
+		return nil, fromOffset, startModel, err
 	}
 	size := info.Size()
 	if fromOffset > size {
 		fromOffset = 0
 	}
-	if fromOffset > 0 {
+
+	model := strings.TrimSpace(startModel)
+	if model == "" {
+		model = "unknown"
+	}
+	// Incremental reads start mid-file; recover model from prefix if needed.
+	if fromOffset > 0 && isUnknownModel(model) {
+		if m, ok := recoverCodexModelPrefix(f, fromOffset); ok {
+			model = m
+		}
 		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
-			return nil, fromOffset, err
+			return nil, fromOffset, model, err
+		}
+	} else if fromOffset > 0 {
+		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
+			return nil, fromOffset, model, err
 		}
 	}
 
-	model := "unknown"
 	var prevTotal map[string]int64
 	r := bufio.NewReader(f)
 	var pos = fromOffset
-	// if starting mid-file, model may be unknown until next turn_context
 	for {
 		line, err := r.ReadString('\n')
 		if len(line) > 0 {
@@ -177,7 +191,7 @@ func ParseCodexUsageFile(path string, fromOffset int64) (events []apitypes.Usage
 			case "session_meta":
 				// ok
 			case "turn_context":
-				if m := strField(payload, "model"); m != "" {
+				if m := codexModelFromPayload(payload); m != "" {
 					model = m
 				}
 			case "event_msg":
@@ -253,10 +267,91 @@ func ParseCodexUsageFile(path string, fromOffset int64) (events []apitypes.Usage
 			break
 		}
 		if err != nil {
-			return events, pos, err
+			return events, pos, model, err
 		}
 	}
-	return events, pos, nil
+	return events, pos, model, nil
+}
+
+func isUnknownModel(m string) bool {
+	m = strings.TrimSpace(m)
+	return m == "" || strings.EqualFold(m, "unknown")
+}
+
+func codexModelFromPayload(payload map[string]interface{}) string {
+	if m := strField(payload, "model"); m != "" {
+		return m
+	}
+	if ts := mapField(payload, "thread_settings"); ts != nil {
+		if m := strField(ts, "model"); m != "" {
+			return m
+		}
+		if cm := mapField(ts, "collaboration_mode"); cm != nil {
+			if settings := mapField(cm, "settings"); settings != nil {
+				if m := strField(settings, "model"); m != "" {
+					return m
+				}
+			}
+		}
+	}
+	if cm := mapField(payload, "collaboration_mode"); cm != nil {
+		if settings := mapField(cm, "settings"); settings != nil {
+			if m := strField(settings, "model"); m != "" {
+				return m
+			}
+		}
+	}
+	return ""
+}
+
+// recoverCodexModelPrefix scans [0, until) for the last turn_context model.
+func recoverCodexModelPrefix(f *os.File, until int64) (string, bool) {
+	if until <= 0 {
+		return "", false
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", false
+	}
+	r := bufio.NewReader(f)
+	var pos int64
+	model := ""
+	for pos < until {
+		line, err := r.ReadString('\n')
+		if len(line) == 0 && err != nil {
+			break
+		}
+		pos += int64(len(line))
+		if pos > until {
+			// line crossed the cursor boundary; ignore this incomplete-at-cursor line
+			break
+		}
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			if err != nil {
+				break
+			}
+			continue
+		}
+		var rec map[string]interface{}
+		if json.Unmarshal([]byte(trim), &rec) != nil {
+			if err != nil {
+				break
+			}
+			continue
+		}
+		if typ, _ := rec["type"].(string); typ == "turn_context" {
+			if m := codexModelFromPayload(mapField(rec, "payload")); m != "" {
+				model = m
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	if model == "" {
+		return "", false
+	}
+	return model, true
 }
 
 func intMap(m map[string]interface{}) map[string]int64 {

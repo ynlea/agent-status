@@ -13,16 +13,18 @@ import (
 )
 
 type fileCursor struct {
-	Offset int64  `json:"offset"`
-	Size   int64  `json:"size"`
-	Kind   string `json:"kind,omitempty"` // claude|codex
+	Offset    int64  `json:"offset"`
+	Size      int64  `json:"size"`
+	Kind      string `json:"kind,omitempty"` // claude|codex
+	LastModel string `json:"last_model,omitempty"`
 }
 
 type usageState struct {
-	ServerURL        string                `json:"server_url,omitempty"`
-	BackfillDone     bool                  `json:"backfill_done"`
-	LastDiscoverUnix int64                 `json:"last_discover_unix,omitempty"`
-	Files            map[string]fileCursor `json:"files"`
+	ServerURL          string                `json:"server_url,omitempty"`
+	BackfillDone       bool                  `json:"backfill_done"`
+	LastDiscoverUnix   int64                 `json:"last_discover_unix,omitempty"`
+	CodexModelHealDone bool                  `json:"codex_model_heal_done,omitempty"`
+	Files              map[string]fileCursor `json:"files"`
 }
 
 // UsageSyncer scans local Claude/Codex logs and reports usage events.
@@ -161,6 +163,9 @@ func (u *UsageSyncer) SyncOnce() error {
 
 	now := time.Now().UTC()
 	dirty := false
+	if u.healCodexUnknownModels() {
+		dirty = true
+	}
 	doDiscover := u.shouldDiscover(now)
 
 	if doDiscover {
@@ -223,7 +228,7 @@ func (u *UsageSyncer) SyncOnce() error {
 
 		// Truncated / replaced: restart from 0.
 		if cur.Size > info.Size() || cur.Offset > info.Size() {
-			cur = fileCursor{Kind: usageKindOrInfer(cur.Kind, path)}
+			cur = fileCursor{Kind: usageKindOrInfer(cur.Kind, path), LastModel: cur.LastModel}
 			dirty = true
 		}
 
@@ -241,17 +246,18 @@ func (u *UsageSyncer) SyncOnce() error {
 		kind := usageKindOrInfer(cur.Kind, path)
 		var events []apitypes.UsageEvent
 		var newOff int64
+		lastModel := cur.LastModel
 		switch kind {
 		case "claude":
 			events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
 		default:
-			events, newOff, err = ParseCodexUsageFile(path, cur.Offset)
+			events, newOff, lastModel, err = ParseCodexUsageFile(path, cur.Offset, cur.LastModel)
 		}
 		if err != nil {
 			u.Logger.Warn("解析用量日志失败", "路径", path, "错误", err)
 			continue
 		}
-		next := fileCursor{Offset: newOff, Size: info.Size(), Kind: kind}
+		next := fileCursor{Offset: newOff, Size: info.Size(), Kind: kind, LastModel: lastModel}
 		if len(events) > 0 {
 			batch = append(batch, events...)
 			pending = append(pending, pendingAdvance{path: path, cur: next})
@@ -297,6 +303,30 @@ func (u *UsageSyncer) SyncOnce() error {
 		}
 	}
 	return nil
+}
+
+// healCodexUnknownModels once resets Codex cursors so events previously
+// stored as model=unknown can be re-reported (server fills model on conflict).
+func (u *UsageSyncer) healCodexUnknownModels() bool {
+	if u.state.CodexModelHealDone {
+		return false
+	}
+	changed := false
+	for path, cur := range u.state.Files {
+		kind := usageKindOrInfer(cur.Kind, path)
+		if kind != "codex" {
+			continue
+		}
+		// Force a full re-read; LastModel is rebuilt during parse.
+		_ = cur
+		u.state.Files[path] = fileCursor{Kind: kind}
+		changed = true
+	}
+	u.state.CodexModelHealDone = true
+	if changed {
+		u.Logger.Info("用量修复：重扫 Codex 日志以回填模型名", "文件数", len(u.state.Files))
+	}
+	return true
 }
 
 // discoverFiles walks roots and registers new jsonl paths. Returns true if the map changed.

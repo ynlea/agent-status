@@ -224,18 +224,24 @@ func (m *Memory) ApplyUsageReport(req apitypes.UsageReportRequest) (accepted, du
 		Online:      true,
 		LastSeenAt:  now,
 	}
-	for _, raw := range req.Events {
-		e, ok := sanitizeUsageEvent(req.MachineID, raw)
-		if !ok {
-			continue
+		for _, raw := range req.Events {
+			e, ok := sanitizeUsageEvent(req.MachineID, raw)
+			if !ok {
+				continue
+			}
+			if old, exists := m.usage[e.DedupeKey]; exists {
+				if isUnknownUsageModel(old.Model) && !isUnknownUsageModel(e.Model) {
+					old.Model = e.Model
+					m.usage[e.DedupeKey] = old
+					accepted++
+					continue
+				}
+				duplicates++
+				continue
+			}
+			m.usage[e.DedupeKey] = e
+			accepted++
 		}
-		if _, exists := m.usage[e.DedupeKey]; exists {
-			duplicates++
-			continue
-		}
-		m.usage[e.DedupeKey] = e
-		accepted++
-	}
 	return accepted, duplicates
 }
 

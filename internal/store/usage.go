@@ -202,3 +202,8 @@ func validateGroupBy(g string) string {
 		return "model"
 	}
 }
+
+func isUnknownUsageModel(m string) bool {
+	m = strings.TrimSpace(m)
+	return m == "" || strings.EqualFold(m, "unknown")
+}

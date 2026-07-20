@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS model_prices (
 	}
 	// Best-effort upgrades for existing databases.
 	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN version TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN last_assistant_message TEXT NOT NULL DEFAULT ''`)
 	return s.seedModelPrices()
 }
 
@@ -262,7 +264,10 @@ INSERT INTO usage_events(
   dedupe_key, machine_id, agent, model, session_id, occurred_at,
   input_tokens, output_tokens, reasoning_tokens, cache_write_tokens, cache_hit_tokens, created_at
 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(dedupe_key) DO NOTHING
+ON CONFLICT(dedupe_key) DO UPDATE SET
+  model = excluded.model
+WHERE (usage_events.model = '' OR usage_events.model = 'unknown')
+  AND excluded.model != '' AND excluded.model != 'unknown'
 `, e.DedupeKey, e.MachineID, e.Agent, e.Model, e.SessionID, e.OccurredAt.UTC().Format(time.RFC3339Nano),
 			e.InputTokens, e.OutputTokens, e.ReasoningTokens, e.CacheWriteTokens, e.CacheHitTokens,
 			now.Format(time.RFC3339Nano))
@@ -477,15 +482,17 @@ VALUES(?,?,?,?,?,?,?,?,?)
 			changed = append(changed, sess)
 		}
 		_, err = tx.Exec(`
-INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, updated_at)
-VALUES(?,?,?,?,?,?,?,?)
+INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, cwd, last_assistant_message, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   machine_name=excluded.machine_name,
   display_name=excluded.display_name,
   state=excluded.state,
   message=excluded.message,
+  cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE sessions.cwd END,
+  last_assistant_message=CASE WHEN excluded.last_assistant_message != '' THEN excluded.last_assistant_message ELSE sessions.last_assistant_message END,
   updated_at=excluded.updated_at
-`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.UpdatedAt.Format(time.RFC3339Nano))
+`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, sess.UpdatedAt.Format(time.RFC3339Nano))
 		if err != nil {
 			return nil, false
 		}
@@ -575,9 +582,9 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	var rows *sql.Rows
 	var err error
 	if machineID == "" {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, updated_at FROM sessions`)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), updated_at FROM sessions`)
 	} else {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, updated_at FROM sessions WHERE machine_id=?`, machineID)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), updated_at FROM sessions WHERE machine_id=?`, machineID)
 	}
 	if err != nil {
 		return nil
@@ -587,7 +594,7 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	for rows.Next() {
 		var sess apitypes.Session
 		var st, updated string
-		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &updated); err != nil {
+		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &sess.Cwd, &sess.LastAssistantMessage, &updated); err != nil {
 			continue
 		}
 		sess.State = apitypes.SessionState(st)

@@ -46,7 +46,7 @@ func TestParseCodexUsageFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, _, err := ParseCodexUsageFile(p, 0)
+	ev, off, lastModel, err := ParseCodexUsageFile(p, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,5 +59,38 @@ func TestParseCodexUsageFile(t *testing.T) {
 	}
 	if ev[0].Model != "gpt-5.2" {
 		t.Fatalf("model=%s", ev[0].Model)
+	}
+	if lastModel != "gpt-5.2" {
+		t.Fatalf("lastModel=%s", lastModel)
+	}
+
+	// Append another token_count without a new turn_context; incremental parse
+	// must keep model via startModel / prefix recovery.
+	extra := `{"timestamp":"2026-07-19T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0},"total_token_usage":{"input_tokens":1100,"cached_input_tokens":800,"output_tokens":30,"reasoning_output_tokens":5}}}}
+`
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(extra); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	ev2, _, last2, err := ParseCodexUsageFile(p, off, lastModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev2) != 1 || ev2[0].Model != "gpt-5.2" {
+		t.Fatalf("incremental with startModel: %+v last=%s", ev2, last2)
+	}
+
+	// Without startModel, mid-file parse should recover model from prefix.
+	ev3, _, last3, err := ParseCodexUsageFile(p, off, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev3) != 1 || ev3[0].Model != "gpt-5.2" {
+		t.Fatalf("incremental with prefix recovery: %+v last=%s", ev3, last3)
 	}
 }
