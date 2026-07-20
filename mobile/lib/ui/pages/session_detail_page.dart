@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -232,12 +233,92 @@ class SessionDetailPage extends ConsumerWidget {
                               ),
                             ),
                           )
-                        : SelectableText(
-                            body,
-                            style: const TextStyle(
-                              fontSize: 14.5,
-                              height: 1.55,
-                              color: QingyaColors.textPrimary,
+                        : MarkdownBody(
+                            data: body,
+                            selectable: true,
+                            softLineBreak: true,
+                            styleSheet: MarkdownStyleSheet(
+                              p: const TextStyle(
+                                fontSize: 14.5,
+                                height: 1.55,
+                                color: QingyaColors.textPrimary,
+                              ),
+                              h1: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: QingyaColors.textPrimary,
+                                height: 1.35,
+                              ),
+                              h2: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: QingyaColors.textPrimary,
+                                height: 1.35,
+                              ),
+                              h3: const TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w700,
+                                color: QingyaColors.textPrimary,
+                                height: 1.35,
+                              ),
+                              strong: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: QingyaColors.textPrimary,
+                              ),
+                              em: const TextStyle(
+                                fontStyle: FontStyle.italic,
+                                color: QingyaColors.textPrimary,
+                              ),
+                              code: const TextStyle(
+                                fontSize: 13,
+                                fontFamily: 'monospace',
+                                color: QingyaColors.primaryDark,
+                                backgroundColor: QingyaColors.primarySoft,
+                              ),
+                              codeblockDecoration: BoxDecoration(
+                                color: const Color(0xFFF7F2EE),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: QingyaColors.border),
+                              ),
+                              codeblockPadding: const EdgeInsets.all(12),
+                              blockquote: const TextStyle(
+                                fontSize: 14,
+                                height: 1.5,
+                                color: QingyaColors.textSecondary,
+                              ),
+                              blockquoteDecoration: const BoxDecoration(
+                                border: Border(
+                                  left: BorderSide(
+                                    color: QingyaColors.primary,
+                                    width: 3,
+                                  ),
+                                ),
+                              ),
+                              blockquotePadding:
+                                  const EdgeInsets.fromLTRB(12, 4, 0, 4),
+                              listBullet: const TextStyle(
+                                fontSize: 14.5,
+                                color: QingyaColors.textPrimary,
+                              ),
+                              a: const TextStyle(
+                                color: QingyaColors.device,
+                                decoration: TextDecoration.underline,
+                              ),
+                              tableHead: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: QingyaColors.textPrimary,
+                              ),
+                              tableBody: const TextStyle(
+                                color: QingyaColors.textPrimary,
+                              ),
+                              horizontalRuleDecoration: const BoxDecoration(
+                                border: Border(
+                                  top: BorderSide(
+                                    color: QingyaColors.divider,
+                                    width: 1,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                   ),
