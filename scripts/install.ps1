@@ -161,9 +161,66 @@ function Get-ReleaseTag {
     }
 }
 
+function Stop-RoleProcesses([string]$RoleName) {
+    # 覆盖 exe 前必须释放文件锁（Windows 不允许替换正在运行的二进制）
+    $procName = if ($RoleName -eq 'server') { 'agent-status-server' } else { 'agent-status-monitor' }
+    $dest = Join-Path $BinDir ($procName + '.exe')
+    $stopped = $false
+
+    $pidPath = Get-PidPath $RoleName
+    if (Test-Path $pidPath) {
+        $old = Get-Content $pidPath -ErrorAction SilentlyContinue
+        if ($old) {
+            $p = Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue
+            if ($p) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                $stopped = $true
+            }
+        }
+        Remove-Item $pidPath -Force -ErrorAction SilentlyContinue
+    }
+
+    Get-Process -Name $procName -ErrorAction SilentlyContinue | ForEach-Object {
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        $stopped = $true
+    }
+
+    # 按完整路径再扫一遍（进程名被改过时）
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $dest) } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            $stopped = $true
+        }
+
+    if ($stopped) {
+        Write-Info "已停止运行中的 $RoleName，以便替换二进制"
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+function Copy-BinaryWithRetry([string]$Src, [string]$Dest, [int]$Retries = 5) {
+    $last = $null
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            Copy-Item $Src $Dest -Force -ErrorAction Stop
+            return
+        } catch {
+            $last = $_
+            Start-Sleep -Milliseconds (300 * $i)
+        }
+    }
+    throw "无法写入 $Dest（文件仍被占用）。请先关闭 agent-status 进程后重试。`n$last"
+}
+
 function Install-Binary([string]$RoleName) {
     $destName = if ($RoleName -eq 'server') { 'agent-status-server.exe' } else { 'agent-status-monitor.exe' }
     $dest = Join-Path $BinDir $destName
+
+    # 先停进程，避免 Windows 文件锁
+    if (Test-Path $dest) {
+        Stop-RoleProcesses $RoleName
+    }
 
     if ($LocalBin) {
         $src = Join-Path $LocalBin $destName
@@ -171,8 +228,11 @@ function Install-Binary([string]$RoleName) {
             $src = Join-Path $LocalBin ("agent-status-{0}-windows-amd64.exe" -f $RoleName)
         }
         if (-not (Test-Path $src)) { Die "本地二进制不存在于: $LocalBin" }
-        if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force; Write-Info "已备份 $(Format-PrettyPath "$dest.bak")" }
-        Copy-Item $src $dest -Force
+        if (Test-Path $dest) {
+            Copy-Item $dest "$dest.bak" -Force -ErrorAction SilentlyContinue
+            Write-Info "已备份 $(Format-PrettyPath "$dest.bak")"
+        }
+        Copy-BinaryWithRetry $src $dest
         Write-PathLine '安装到' $dest
         Write-Ok '二进制就绪（本地文件）'
         return
@@ -215,7 +275,6 @@ function Install-Binary([string]$RoleName) {
         }
         Write-Ok ("下载完成  {0}" -f (Format-HumanSize $cur))
     } catch {
-        # fallback
         Write-Info '改用 Invoke-WebRequest 下载...'
         Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
         $cur = (Get-Item $tmp).Length
@@ -223,10 +282,12 @@ function Install-Binary([string]$RoleName) {
     }
 
     if (Test-Path $dest) {
-        Copy-Item $dest "$dest.bak" -Force
+        Copy-Item $dest "$dest.bak" -Force -ErrorAction SilentlyContinue
         Write-Info "已备份 $(Format-PrettyPath "$dest.bak")"
     }
-    Copy-Item $tmp $dest -Force
+    # 再次确保无锁（下载期间可能被计划任务拉起）
+    Stop-RoleProcesses $RoleName
+    Copy-BinaryWithRetry $tmp $dest
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     Write-PathLine '安装到' $dest
     Write-Ok '二进制就绪'
