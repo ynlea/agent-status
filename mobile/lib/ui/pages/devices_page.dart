@@ -358,7 +358,7 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                         : () => showRenameMachineDialog(
                               context,
                               ref,
-                              machine,
+                              machine!,
                             ),
                   ),
                   const SizedBox(height: 14),
