@@ -293,17 +293,34 @@ box_title_row() {
   printf '╮%s\n' "${C_RESET}"
 }
 
-have_tty() { [[ -t 0 || -t 1 ]]; }
+# 是否可交互输入：stdout 在终端，且能从 stdin 或 /dev/tty 读
+# 注意：curl|bash 时 stdin 是管道，不能只靠 -t 1，否则会立刻用默认值“自动装监测端”
+have_tty() { [[ -t 1 ]] && { [[ -t 0 ]] || [[ -r /dev/tty ]]; }; }
+
+# 从真实终端读一行（兼容 curl|bash / process substitution）
+read_tty() {
+  # usage: read_tty varname
+  local __var="$1"
+  local __line=""
+  if [[ -t 0 ]]; then
+    IFS= read -r __line || true
+  elif [[ -r /dev/tty ]]; then
+    IFS= read -r __line < /dev/tty || true
+  else
+    __line=""
+  fi
+  printf -v "$__var" '%s' "$__line"
+}
 
 prompt() {
   local msg="$1" def="${2:-}" ans
   if [[ -n "$def" ]]; then
     printf '  %s?%s  %s %s[%s]%s: ' "${C_A2}${C_BOLD}" "${C_RESET}" "$msg" "${C_DIM}" "$def" "${C_RESET}" >&2
-    read -r ans || true
+    read_tty ans
     printf '%s' "${ans:-$def}"
   else
     printf '  %s?%s  %s: ' "${C_A2}${C_BOLD}" "${C_RESET}" "$msg" >&2
-    read -r ans || true
+    read_tty ans
     printf '%s' "$ans"
   fi
 }
@@ -314,7 +331,7 @@ confirm() {
   have_tty || die "非交互模式请加 --yes"
   local ans
   printf '  %s?%s  %s %s[y/N]%s: ' "${C_YELLOW}${C_BOLD}" "${C_RESET}" "$msg" "${C_DIM}" "${C_RESET}" >&2
-  read -r ans || true
+  read_tty ans
   [[ "$ans" == "y" || "$ans" == "Y" || "$ans" == "yes" ]]
 }
 
@@ -1215,13 +1232,27 @@ interactive_fill() {
     box_row "$C_DIM" "  2  监测端 monitor    扫描会话与用量并上报" "$W"
     box_row "$C_DIM" "  3  两者都装 all      本机完整部署" "$W"
     box_bot "$C_DIM" "$W"
+    # 默认：已有服务端且无监测端 → 服务端；仅有监测端 → 监测端；否则不默认强行装监测端
+    local def_role=""
+    if [[ -f "$CONFIG_DIR/server.env" && ! -f "$CONFIG_DIR/monitor.json" ]]; then
+      def_role="1"
+    elif [[ -f "$CONFIG_DIR/monitor.json" && ! -f "$CONFIG_DIR/server.env" ]]; then
+      def_role="2"
+    elif [[ -f "$CONFIG_DIR/server.env" && -f "$CONFIG_DIR/monitor.json" ]]; then
+      def_role="3"
+    fi
     local c
-    c="$(prompt "请输入序号" "2")"
+    if [[ -n "$def_role" ]]; then
+      c="$(prompt "请输入序号" "$def_role")"
+    else
+      c="$(prompt "请输入序号" "")"
+      [[ -n "$c" ]] || die "请选择角色 1/2/3"
+    fi
     case "$c" in
       1) ROLE=server ;;
       2) ROLE=monitor ;;
       3) ROLE=all ;;
-      *) die "无效选项" ;;
+      *) die "无效选项: $c" ;;
     esac
   fi
   case "$ROLE" in
