@@ -616,3 +616,57 @@ class _SessionSectionHeader extends StatelessWidget {
     );
   }
 }
+
+Future<void> showRenameMachineDialog(
+  BuildContext context,
+  WidgetRef ref,
+  Machine machine,
+) async {
+  final controller = TextEditingController(text: machine.machineName);
+  final name = await showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        title: const Text('给设备起个名字'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+          decoration: const InputDecoration(
+            hintText: '例如：书房电脑 / 公司 Mac',
+            counterText: '',
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      );
+    },
+  );
+  if (name == null || name.isEmpty || name == machine.machineName) return;
+  try {
+    await ref
+        .read(statusRepositoryProvider.notifier)
+        .renameMachine(machine.machineId, name);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已改名为「$name」')),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('改名失败：$e')),
+      );
+    }
+  }
+}
+
