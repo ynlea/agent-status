@@ -570,6 +570,9 @@ cmd_update() {
 
 interactive_fill() {
   local want_server=0 want_monitor=0
+  local keep_server=0 keep_monitor=0
+  local existing_url="" existing_key="" default_url="http://127.0.0.1:29125"
+
   if [[ -z "$ROLE" ]]; then
     have_tty || die "非交互安装请指定 --role 与 --yes"
     log "请选择角色："
@@ -592,37 +595,72 @@ interactive_fill() {
     *) die "--role 只能是 server|monitor|all" ;;
   esac
 
-  if [[ "$want_server" -eq 1 ]]; then
-    if [[ -z "$KEY" ]]; then
-      if have_tty && [[ "$YES" -eq 0 ]]; then
-        KEY="$(prompt "服务端密钥（留空则自动生成）" "")"
+  if [[ -f "$CONFIG_DIR/server.env" ]]; then
+    existing_key="$(sed -n 's/^AGENT_STATUS_KEY=//p' "$CONFIG_DIR/server.env" | head -n1)"
+    [[ "$FORCE_CONFIG" -eq 0 ]] && keep_server=1
+  fi
+  if [[ -f "$CONFIG_DIR/monitor.json" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      existing_url="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("server_url",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+      if [[ -z "$existing_key" ]]; then
+        existing_key="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("key",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
       fi
-      [[ -n "$KEY" ]] || KEY="$(random_key)"
     fi
-    if have_tty && [[ "$YES" -eq 0 ]]; then
-      ADDR="$(prompt "监听地址" "$ADDR")"
+    [[ "$FORCE_CONFIG" -eq 0 ]] && keep_monitor=1
+  fi
+  [[ -n "$existing_url" ]] && default_url="$existing_url"
+
+  if [[ "$want_server" -eq 1 ]]; then
+    if [[ "$keep_server" -eq 1 ]]; then
+      log "复用已有服务端配置"
+      [[ -n "$KEY" ]] || KEY="$existing_key"
+    else
+      if [[ -z "$KEY" ]]; then
+        if have_tty && [[ "$YES" -eq 0 ]]; then
+          if [[ -n "$existing_key" ]]; then
+            KEY="$(prompt "服务端密钥（留空沿用已有）" "$existing_key")"
+          else
+            KEY="$(prompt "服务端密钥（留空则自动生成）" "")"
+          fi
+        elif [[ -n "$existing_key" ]]; then
+          KEY="$existing_key"
+        fi
+        [[ -n "$KEY" ]] || KEY="$(random_key)"
+      fi
+      if have_tty && [[ "$YES" -eq 0 ]]; then
+        ADDR="$(prompt "监听地址" "$ADDR")"
+      fi
     fi
   fi
 
   if [[ "$want_monitor" -eq 1 ]]; then
-    if [[ -z "$SERVER_URL" ]]; then
-      if have_tty && [[ "$YES" -eq 0 ]]; then
-        SERVER_URL="$(prompt "服务端地址" "http://127.0.0.1:29125")"
-      else
-        SERVER_URL="http://127.0.0.1:29125"
+    if [[ "$keep_monitor" -eq 1 ]]; then
+      log "复用已有监测端配置（${default_url}）"
+      [[ -n "$SERVER_URL" ]] || SERVER_URL="$default_url"
+      if [[ -z "$KEY" ]]; then
+        KEY="$existing_key"
       fi
-    fi
-    if [[ -z "$KEY" ]]; then
-      if [[ -f "$CONFIG_DIR/server.env" ]]; then
-        KEY="$(sed -n 's/^AGENT_STATUS_KEY=//p' "$CONFIG_DIR/server.env" | head -n1)"
+    else
+      if [[ -z "$SERVER_URL" ]]; then
+        if have_tty && [[ "$YES" -eq 0 ]]; then
+          SERVER_URL="$(prompt "服务端地址" "$default_url")"
+        else
+          SERVER_URL="$default_url"
+        fi
       fi
-    fi
-    if [[ -z "$KEY" ]]; then
-      if have_tty && [[ "$YES" -eq 0 ]]; then
-        KEY="$(prompt "共享密钥" "")"
+      if [[ -z "$KEY" ]]; then
+        if have_tty && [[ "$YES" -eq 0 ]]; then
+          if [[ -n "$existing_key" ]]; then
+            KEY="$(prompt "共享密钥（留空沿用已有）" "$existing_key")"
+          else
+            KEY="$(prompt "共享密钥" "")"
+          fi
+        else
+          KEY="$existing_key"
+        fi
       fi
+      [[ -n "$KEY" ]] || die "安装监测端需要 --key"
     fi
-    [[ -n "$KEY" ]] || die "安装监测端需要 --key"
   fi
 }
 

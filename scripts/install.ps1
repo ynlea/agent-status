@@ -198,8 +198,11 @@ function Start-Role([string]$RoleName) {
         }
     }
     $info = Get-StartInfo $RoleName
+    # PowerShell 不允许 stdout/stderr 重定向到同一文件，因此拆成 .log / .err.log
     $logOut = $info.Log
-    $logErr = if ($logOut -match '\.log$') { $logOut -replace '\.log$', '.err.log' } else { "$logOut.err" }
+    $logErr = [System.IO.Path]::ChangeExtension($logOut, '.err.log')
+    if ($logOut -eq $logErr) { $logErr = "$logOut.err" }
+    New-Item -ItemType Directory -Force -Path (Split-Path $logOut) | Out-Null
     $p = Start-Process -FilePath $info.FilePath -ArgumentList $info.ArgumentList -WorkingDirectory $InstallRoot `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $logOut -RedirectStandardError $logErr
     Set-Content -Path $pidPath -Value $p.Id -Encoding ascii
@@ -303,6 +306,20 @@ function Show-Status {
     }
 }
 
+function Get-ExistingMonitorConfig {
+    $path = Join-Path $ConfigDir 'monitor.json'
+    if (-not (Test-Path $path)) { return $null }
+    try { return (Get-Content $path -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-ExistingServerKey {
+    $envPath = Join-Path $ConfigDir 'server.env'
+    if (-not (Test-Path $envPath)) { return '' }
+    $line = Get-Content $envPath | Where-Object { $_ -match '^AGENT_STATUS_KEY=' } | Select-Object -First 1
+    if ($line) { return $line.Substring('AGENT_STATUS_KEY='.Length) }
+    return ''
+}
+
 function Fill-Interactive {
     if ([string]::IsNullOrWhiteSpace($Role)) {
         if (-not (Test-Interactive)) { Die '非交互安装请指定 -Role 与 -Yes' }
@@ -321,40 +338,66 @@ function Fill-Interactive {
 
     $wantServer = $Role -eq 'server' -or $Role -eq 'all'
     $wantMonitor = $Role -eq 'monitor' -or $Role -eq 'all'
+    $existingMon = Get-ExistingMonitorConfig
+    $existingKey = Get-ExistingServerKey
+    $keepMonitorCfg = $wantMonitor -and $existingMon -and -not $ForceConfig
+    $keepServerCfg = $wantServer -and (Test-Path (Join-Path $ConfigDir 'server.env')) -and -not $ForceConfig
 
     if ($wantServer) {
-        if (-not $Key) {
-            if (Test-Interactive) {
-                $script:Key = Read-Prompt '服务端密钥（留空则自动生成）' ''
+        if ($keepServerCfg) {
+            Write-Log "复用已有服务端配置"
+            if (-not $Key -and $existingKey) { $script:Key = $existingKey }
+        } else {
+            if (-not $Key) {
+                if ($existingKey) {
+                    if (Test-Interactive) {
+                        $script:Key = Read-Prompt '服务端密钥（留空沿用已有）' $existingKey
+                    } else {
+                        $script:Key = $existingKey
+                    }
+                } elseif (Test-Interactive) {
+                    $script:Key = Read-Prompt '服务端密钥（留空则自动生成）' ''
+                }
+                if (-not $script:Key) { $script:Key = Get-RandomKey }
             }
-            if (-not $script:Key) { $script:Key = Get-RandomKey }
-        }
-        if (Test-Interactive -and -not $Yes) {
-            $script:Addr = Read-Prompt '监听地址' $Addr
+            if (Test-Interactive -and -not $Yes) {
+                $script:Addr = Read-Prompt '监听地址' $Addr
+            }
         }
     }
 
     if ($wantMonitor) {
-        if (-not $ServerUrl) {
-            if (Test-Interactive) {
-                $script:ServerUrl = Read-Prompt '服务端地址' 'http://127.0.0.1:29125'
-            } else {
-                $script:ServerUrl = 'http://127.0.0.1:29125'
+        $defaultUrl = if ($existingMon -and $existingMon.server_url) { [string]$existingMon.server_url } else { 'http://127.0.0.1:29125' }
+        $defaultKey = ''
+        if ($existingMon -and $existingMon.key) { $defaultKey = [string]$existingMon.key }
+        if (-not $defaultKey -and $existingKey) { $defaultKey = $existingKey }
+        if (-not $defaultKey -and $Key) { $defaultKey = $Key }
+
+        if ($keepMonitorCfg) {
+            Write-Log "复用已有监测端配置（$defaultUrl）"
+            if (-not $ServerUrl) { $script:ServerUrl = $defaultUrl }
+            if (-not $Key) { $script:Key = $defaultKey }
+        } else {
+            if (-not $ServerUrl) {
+                if (Test-Interactive) {
+                    $script:ServerUrl = Read-Prompt '服务端地址' $defaultUrl
+                } else {
+                    $script:ServerUrl = $defaultUrl
+                }
             }
-        }
-        if (-not $Key) {
-            $envPath = Join-Path $ConfigDir 'server.env'
-            if (Test-Path $envPath) {
-                $line = Get-Content $envPath | Where-Object { $_ -match '^AGENT_STATUS_KEY=' } | Select-Object -First 1
-                if ($line) { $script:Key = $line.Substring('AGENT_STATUS_KEY='.Length) }
+            if (-not $Key) {
+                if (Test-Interactive) {
+                    if ($defaultKey) {
+                        $script:Key = Read-Prompt '共享密钥（留空沿用已有）' $defaultKey
+                    } else {
+                        $script:Key = Read-Prompt '共享密钥' ''
+                    }
+                } else {
+                    $script:Key = $defaultKey
+                }
             }
+            if (-not $Key) { Die '安装监测端需要 -Key' }
         }
-        if (-not $Key) {
-            if (Test-Interactive) {
-                $script:Key = Read-Prompt '共享密钥' ''
-            }
-        }
-        if (-not $Key) { Die '安装监测端需要 -Key' }
     }
 }
 
