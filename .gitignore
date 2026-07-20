@@ -61,3 +61,8 @@ mobile/**/local.properties
 # --- source design intermediates (keep icons / flutter_assets / metadata) ---
 source/**/boards-generated/
 source/**/boards-normalized/
+
+# --- local node tooling (not part of product) ---
+node_modules/
+package.json
+package-lock.json
