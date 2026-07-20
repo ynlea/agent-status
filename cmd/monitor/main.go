@@ -14,6 +14,7 @@ import (
 
 	"github.com/ynlea/agent-status/internal/monitor"
 	"github.com/ynlea/agent-status/pkg/apitypes"
+	"github.com/ynlea/agent-status/pkg/buildinfo"
 )
 
 type sessionSnap struct {
@@ -44,10 +45,15 @@ func main() {
 	cfgPath := flag.String("config", envOr("AGENT_STATUS_MONITOR_CONFIG", "monitor.json"), "config path")
 	printOnly := flag.Bool("print-sessions", false, "scan once and print sessions JSON, no report")
 	once := flag.Bool("once", false, "report once and exit")
+	showVersion := flag.Bool("version", false, "print monitor version and exit")
 	initLocal := flag.Bool("init", false, "initialize local integrations")
 	initClaude := flag.Bool("claude", false, "configure Claude Code Hooks; requires --init")
 	claudeSettings := flag.String("claude-settings", defaultClaudeSettingsPath(), "Claude Code settings.json path")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.Version)
+		return
+	}
 	if *initLocal || *initClaude {
 		if !*initLocal || !*initClaude {
 			logger.Error("初始化参数不完整，请使用 --init --claude")

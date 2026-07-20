@@ -67,9 +67,44 @@ agent-status 安装与管理工具（Linux）
 EOF
 }
 
-log() { printf '%s\n' "$*"; }
-err() { printf 'error: %s\n' "$*" >&2; }
-die() { err "$*"; exit 1; }
+# --- UI (ANSI colors when TTY) ---
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_CYAN=$'\033[36m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_RED=$'\033[31m'
+  C_MAGENTA=$'\033[35m'
+  C_BLUE=$'\033[34m'
+else
+  C_RESET= C_BOLD= C_DIM= C_CYAN= C_GREEN= C_YELLOW= C_RED= C_MAGENTA= C_BLUE=
+fi
+
+log()  { printf '%s\n' "$*"; }
+info() { printf '%s›%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
+ok()   { printf '%s✓%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
+warn() { printf '%s!%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
+err()  { printf '%s✗%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2; }
+die()  { err "$*"; exit 1; }
+step() { printf '\n%s▸%s %s%s%s\n' "${C_MAGENTA}" "${C_RESET}" "${C_BOLD}" "$*" "${C_RESET}"; }
+
+print_banner() {
+  local title="${1:-agent-status}"
+  printf '\n'
+  printf '%s' "${C_CYAN}${C_BOLD}"
+  cat <<'BANNER'
+   ╔══════════════════════════════════════╗
+   ║                                      ║
+   ║         ✦  agent-status  ✦           ║
+   ║     会话监测 · 用量统计 · 安装器       ║
+   ║                                      ║
+   ╚══════════════════════════════════════╝
+BANNER
+  printf '%s' "${C_RESET}"
+  printf '  %s%s%s\n\n' "${C_DIM}" "$title" "${C_RESET}"
+}
 
 have_tty() { [[ -t 0 || -t 1 ]]; }
 
@@ -118,7 +153,11 @@ random_key() {
 download() {
   local url="$1" dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest"
+    if [[ -t 1 ]]; then
+      curl -fL --progress-bar "$url" -o "$dest"
+    else
+      curl -fsSL "$url" -o "$dest"
+    fi
   elif command -v wget >/dev/null 2>&1; then
     wget -qO "$dest" "$url"
   else
@@ -166,7 +205,7 @@ install_binary_from_release() {
     dest="$BIN_DIR/agent-status-monitor"
   fi
   tmp="$(mktemp)"
-  log "正在下载 $name（$tag）"
+  info "下载 $name（$tag）"
   if ! download "$(asset_url "$tag" "$name")" "$tmp"; then
     rm -f "$tmp"
     die "下载失败: $name"
@@ -176,7 +215,7 @@ install_binary_from_release() {
   fi
   install -m 755 "$tmp" "$dest"
   rm -f "$tmp"
-  log "已安装 $dest"
+  ok "已安装 $dest"
 }
 
 install_binary_local() {
@@ -556,15 +595,17 @@ cmd_uninstall() {
 }
 
 cmd_update() {
+  print_banner "更新二进制"
   local r
   ROLE="${ROLE:-all}"
   while IFS= read -r r; do
-    log "---- 更新 $r ----"
+    step "更新 $r"
     systemctl --user stop "$(unit_for_role "$r")" 2>/dev/null || true
     install_binary "$r"
     systemctl --user start "$(unit_for_role "$r")" 2>/dev/null || true
-    log "已更新 $r"
+    ok "已更新 $r"
   done < <(roles_expand "$ROLE")
+  printf '\n%s✦ 更新完成%s\n\n' "${C_GREEN}${C_BOLD}" "${C_RESET}"
   cmd_status
 }
 
@@ -665,6 +706,7 @@ interactive_fill() {
 }
 
 cmd_install() {
+  print_banner "安装向导"
   ensure_dirs
   interactive_fill
 
@@ -676,16 +718,21 @@ cmd_install() {
   esac
 
   if [[ "$want_server" -eq 1 ]]; then
+    step "安装服务端"
     install_binary server
     write_server_env "$KEY" "$ADDR"
     write_systemd_server
+    ok "服务端就绪"
   fi
   if [[ "$want_monitor" -eq 1 ]]; then
+    step "安装监测端"
     install_binary monitor
     write_monitor_json "$SERVER_URL" "$KEY"
     write_systemd_monitor
+    ok "监测端就绪"
   fi
 
+  step "启用并启动"
   systemd_reload
   persist_self
   link_shim
@@ -697,12 +744,14 @@ cmd_install() {
     [[ "$want_server" -eq 1 ]] && systemctl --user restart agent-status-server.service 2>/dev/null || systemctl --user start agent-status-server.service || true
     [[ "$want_monitor" -eq 1 ]] && systemctl --user restart agent-status-monitor.service 2>/dev/null || systemctl --user start agent-status-monitor.service || true
   fi
+  ok "服务已启动"
 
   if [[ "$want_monitor" -eq 1 && "$NO_INIT_AGENTS" -eq 0 ]]; then
+    step "初始化 Agent"
     init_agents || true
   fi
 
-  log "安装完成，目录：$INSTALL_ROOT"
+  printf '\n%s✦ 安装完成%s  目录：%s\n\n' "${C_GREEN}${C_BOLD}" "${C_RESET}" "$INSTALL_ROOT"
   cmd_status
 }
 

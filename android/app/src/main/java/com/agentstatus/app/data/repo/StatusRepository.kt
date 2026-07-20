@@ -138,7 +138,14 @@ class StatusRepository(
         sessions.clear()
         val meta = mutableMapOf<String, MachineUi>()
         for (m in machines) {
-            meta[m.machineId] = MachineUi(m.machineId, m.machineName, m.platform, m.online, emptyList())
+            meta[m.machineId] = MachineUi(
+                id = m.machineId,
+                name = m.machineName,
+                platform = m.platform,
+                online = m.online,
+                sessions = emptyList(),
+                version = m.version,
+            )
             rest.listSessions(url, key, m.machineId).onSuccess { list ->
                 list.forEach { putSession(it) }
             }
@@ -157,6 +164,7 @@ class StatusRepository(
                 platform = "",
                 online = true,
                 sessions = emptyList(),
+                version = "",
             ))
         }
     }

@@ -45,6 +45,7 @@ data class MachineDto(
     @SerialName("machine_id") val machineId: String,
     @SerialName("machine_name") val machineName: String = "",
     val platform: String = "",
+    val version: String = "",
     val online: Boolean = false,
     @SerialName("last_seen_at") val lastSeenAt: String = "",
 )
@@ -97,6 +98,7 @@ data class MachineUi(
     val platform: String,
     val online: Boolean,
     val sessions: List<SessionUi>,
+    val version: String = "",
 )
 
 data class SessionUi(

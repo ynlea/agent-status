@@ -69,6 +69,7 @@ type ReportRequest struct {
 	MachineID   string    `json:"machine_id"`
 	MachineName string    `json:"machine_name"`
 	Platform    string    `json:"platform"` // linux | windows
+	Version     string    `json:"version,omitempty"` // monitor binary version
 	Sessions    []Session `json:"sessions"`
 	ReportedAt  time.Time `json:"reported_at"`
 }
@@ -77,6 +78,7 @@ type Machine struct {
 	MachineID   string    `json:"machine_id"`
 	MachineName string    `json:"machine_name"`
 	Platform    string    `json:"platform"`
+	Version     string    `json:"version,omitempty"` // last reported monitor version
 	Online      bool      `json:"online"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 }

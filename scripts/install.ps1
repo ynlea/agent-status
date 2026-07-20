@@ -40,7 +40,28 @@ $LogDir = Join-Path $InstallRoot 'logs'
 $StateDir = Join-Path $InstallRoot 'state'
 
 function Write-Log([string]$Message) { Write-Host $Message }
-function Die([string]$Message) { throw $Message }
+function Write-Info([string]$Message) { Write-Host "› $Message" -ForegroundColor Cyan }
+function Write-Ok([string]$Message) { Write-Host "✓ $Message" -ForegroundColor Green }
+function Write-Warn([string]$Message) { Write-Host "! $Message" -ForegroundColor Yellow }
+function Write-Step([string]$Message) {
+    Write-Host ""
+    Write-Host "▸ $Message" -ForegroundColor Magenta
+}
+function Write-Banner([string]$Title = '安装向导') {
+    Write-Host ""
+    Write-Host '   ╔══════════════════════════════════════╗' -ForegroundColor Cyan
+    Write-Host '   ║                                      ║' -ForegroundColor Cyan
+    Write-Host '   ║         ✦  agent-status  ✦           ║' -ForegroundColor Cyan
+    Write-Host '   ║     会话监测 · 用量统计 · 安装器       ║' -ForegroundColor Cyan
+    Write-Host '   ║                                      ║' -ForegroundColor Cyan
+    Write-Host '   ╚══════════════════════════════════════╝' -ForegroundColor Cyan
+    Write-Host "  $Title" -ForegroundColor DarkGray
+    Write-Host ""
+}
+function Die([string]$Message) {
+    Write-Host "✗ $Message" -ForegroundColor Red
+    throw $Message
+}
 
 function Ensure-Dirs {
     @(
@@ -96,7 +117,7 @@ function Install-Binary([string]$RoleName) {
         if (-not (Test-Path $src)) { Die "本地二进制不存在于: $LocalBin" }
         if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force }
         Copy-Item $src $dest -Force
-        Write-Log "已安装 $dest（本地文件）"
+        Write-Ok "已安装 $dest（本地文件）"
         return
     }
 
@@ -108,12 +129,12 @@ function Install-Binary([string]$RoleName) {
     }
     $url = "https://github.com/$Repo/releases/download/$tag/$asset"
     $tmp = Join-Path $env:TEMP $asset
-    Write-Log "正在下载 $asset（$tag）"
+    Write-Info "下载 $asset（$tag）"
     Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
     if (Test-Path $dest) { Copy-Item $dest "$dest.bak" -Force }
     Copy-Item $tmp $dest -Force
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    Write-Log "已安装 $dest"
+    Write-Ok "已安装 $dest"
 }
 
 function Write-ServerEnv([string]$KeyValue, [string]$AddrValue) {
@@ -402,20 +423,26 @@ function Fill-Interactive {
 }
 
 function Invoke-Install {
+    Write-Banner '安装向导'
     Ensure-Dirs
     Fill-Interactive
     $wantServer = $Role -eq 'server' -or $Role -eq 'all'
     $wantMonitor = $Role -eq 'monitor' -or $Role -eq 'all'
 
     if ($wantServer) {
+        Write-Step '安装服务端'
         Install-Binary server
         Write-ServerEnv $Key $Addr
+        Write-Ok '服务端就绪'
     }
     if ($wantMonitor) {
+        Write-Step '安装监测端'
         Install-Binary monitor
         Write-MonitorJson $ServerUrl $Key
+        Write-Ok '监测端就绪'
     }
 
+    Write-Step '启用并启动'
     if (-not $NoEnable) {
         if ($wantServer) { Enable-Role server; Start-Role server }
         if ($wantMonitor) { Enable-Role monitor; Start-Role monitor }
@@ -423,9 +450,11 @@ function Invoke-Install {
         if ($wantServer) { Start-Role server }
         if ($wantMonitor) { Start-Role monitor }
     }
+    Write-Ok '服务已启动'
 
     if ($wantMonitor -and -not $NoInitAgents) {
-        try { Init-Agents } catch { Write-Log "init-agents: $_" }
+        Write-Step '初始化 Agent'
+        try { Init-Agents } catch { Write-Warn "init-agents: $_" }
     }
 
     # Persist manager script for later status/start/stop
@@ -442,7 +471,7 @@ function Invoke-Install {
         Write-Log "警告：无法保存 install.ps1: $_"
     }
 
-    Write-Log "安装完成，目录：$InstallRoot"
+    Write-Host ""; Write-Host "✦ 安装完成  目录：$InstallRoot" -ForegroundColor Green; Write-Host ""
     Show-Status
 }
 
@@ -523,14 +552,18 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Update {
+    Write-Banner '更新二进制'
     $roles = Expand-Roles $(if ($Role) { $Role } else { 'all' })
     foreach ($r in $roles) {
-        Write-Log "---- 更新 $r ----"
+        Write-Step "更新 $r"
         Stop-Role $r
         Install-Binary $r
         Start-Role $r
-        Write-Log "已更新 $r"
+        Write-Ok "已更新 $r"
     }
+    Write-Host ""
+    Write-Host '✦ 更新完成' -ForegroundColor Green
+    Write-Host ""
     Show-Status
 }
 

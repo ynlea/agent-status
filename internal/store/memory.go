@@ -73,10 +73,15 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 	prev, ok := m.machines[req.MachineID]
 	wasOnline = ok && prev.Online
 
+	ver := req.Version
+	if ver == "" && ok {
+		ver = prev.Version
+	}
 	m.machines[req.MachineID] = apitypes.Machine{
 		MachineID:   req.MachineID,
 		MachineName: req.MachineName,
 		Platform:    req.Platform,
+		Version:     ver,
 		Online:      true,
 		LastSeenAt:  now,
 	}

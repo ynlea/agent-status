@@ -13,6 +13,13 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
+VERSION_TAG="${AGENT_STATUS_VERSION:-${GITHUB_REF_NAME:-}}"
+if [[ -z "$VERSION_TAG" ]]; then
+  VERSION_TAG="$(git -C "$ROOT" describe --tags --always 2>/dev/null || echo dev)"
+fi
+LDFLAGS="-s -w -X github.com/ynlea/agent-status/pkg/buildinfo.Version=${VERSION_TAG}"
+echo "buildinfo.Version=$VERSION_TAG"
+
 build_one() {
   local goos="$1" goarch="$2" bin="$3" pkg="$4"
   local ext=""
@@ -23,7 +30,7 @@ build_one() {
   echo "building $name"
   (
     cd "$ROOT"
-    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$OUT/$name" "$pkg"
+    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="$LDFLAGS" -o "$OUT/$name" "$pkg"
   )
 }
 

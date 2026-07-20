@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS model_prices (
 	if err != nil {
 		return err
 	}
+	// Best-effort upgrades for existing databases.
+	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN version TEXT NOT NULL DEFAULT ''`)
 	return s.seedModelPrices()
 }
 
@@ -424,14 +426,15 @@ func (s *SQLiteStore) ApplyReport(req apitypes.ReportRequest) (changed []apitype
 	}
 
 	_, err = tx.Exec(`
-INSERT INTO machines(machine_id, machine_name, platform, online, last_seen_at)
-VALUES(?,?,?,?,?)
+INSERT INTO machines(machine_id, machine_name, platform, version, online, last_seen_at)
+VALUES(?,?,?,?,?,?)
 ON CONFLICT(machine_id) DO UPDATE SET
   machine_name=excluded.machine_name,
   platform=excluded.platform,
+  version=CASE WHEN excluded.version != '' THEN excluded.version ELSE machines.version END,
   online=1,
   last_seen_at=excluded.last_seen_at
-`, req.MachineID, req.MachineName, req.Platform, 1, now.Format(time.RFC3339Nano))
+`, req.MachineID, req.MachineName, req.Platform, req.Version, 1, now.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, false
 	}
@@ -545,7 +548,7 @@ DELETE FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
 }
 
 func (s *SQLiteStore) ListMachines() []apitypes.Machine {
-	rows, err := s.db.Query(`SELECT machine_id, machine_name, platform, online, last_seen_at FROM machines`)
+	rows, err := s.db.Query(`SELECT machine_id, machine_name, platform, COALESCE(version,''), online, last_seen_at FROM machines`)
 	if err != nil {
 		return nil
 	}
@@ -555,7 +558,7 @@ func (s *SQLiteStore) ListMachines() []apitypes.Machine {
 		var m apitypes.Machine
 		var online int
 		var last string
-		if err := rows.Scan(&m.MachineID, &m.MachineName, &m.Platform, &online, &last); err != nil {
+		if err := rows.Scan(&m.MachineID, &m.MachineName, &m.Platform, &m.Version, &online, &last); err != nil {
 			continue
 		}
 		m.Online = online == 1

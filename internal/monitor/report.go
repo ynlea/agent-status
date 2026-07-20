@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ynlea/agent-status/pkg/apitypes"
+	"github.com/ynlea/agent-status/pkg/buildinfo"
 )
 
 type Reporter struct {
@@ -84,6 +85,7 @@ func (r *Reporter) Report(sessions []apitypes.Session) error {
 		MachineID:   r.Cfg.MachineID,
 		MachineName: r.Cfg.MachineName,
 		Platform:    r.platform(),
+		Version:     buildinfo.Version,
 		Sessions:    sessions,
 		ReportedAt:  time.Now().UTC(),
 	}

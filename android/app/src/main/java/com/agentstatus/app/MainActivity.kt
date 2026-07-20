@@ -727,7 +727,15 @@ private fun MachineHero(machine: MachineUi, counts: StatusCounts) {
                 Column(Modifier.weight(1f)) {
                     Text(machine.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "${if (machine.online) "在线" else "离线"} · ${machine.platform.ifBlank { "unknown" }}",
+                        buildString {
+                            append(if (machine.online) "在线" else "离线")
+                            append(" · ")
+                            append(machine.platform.ifBlank { "unknown" })
+                            if (machine.version.isNotBlank()) {
+                                append(" · ")
+                                append(machine.version)
+                            }
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -763,7 +771,14 @@ private fun MachineCard(machine: MachineUi, onClick: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(machine.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "${machine.platform.ifBlank { "unknown" }} · 会话 ${machine.sessions.size}",
+                        buildString {
+                            append(machine.platform.ifBlank { "unknown" })
+                            if (machine.version.isNotBlank()) {
+                                append(" · ")
+                                append(machine.version)
+                            }
+                            append(" · 会话 ${machine.sessions.size}")
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
