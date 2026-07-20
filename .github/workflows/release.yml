@@ -28,6 +28,10 @@ jobs:
           set -euo pipefail
           out=dist/release
           mkdir -p "$out"
+          # 把 tag 打进二进制，安装器/更新才能读到真实版本（否则默认 dev）
+          ver="${GITHUB_REF_NAME}"
+          ldflags="-s -w -X github.com/ynlea/agent-status/pkg/buildinfo.Version=${ver}"
+          echo "buildinfo.Version=${ver}"
 
           build_one() {
             local goos="$1" goarch="$2" bin="$3" pkg="$4"
@@ -36,7 +40,7 @@ jobs:
             local name="${bin}-${goos}-${goarch}${ext}"
             echo "building $name"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -ldflags="-s -w" -o "$out/$name" "$pkg"
+              go build -trimpath -ldflags="$ldflags" -o "$out/$name" "$pkg"
           }
 
           build_one linux amd64 agent-status-server ./cmd/server
@@ -45,6 +49,15 @@ jobs:
           build_one linux arm64 agent-status-monitor ./cmd/monitor
           build_one windows amd64 agent-status-server ./cmd/server
           build_one windows amd64 agent-status-monitor ./cmd/monitor
+
+          # 冒烟：确认 linux amd64 monitor 版本已注入
+          chmod +x "$out/agent-status-monitor-linux-amd64"
+          got="$("$out/agent-status-monitor-linux-amd64" -version | tr -d '\r\n')"
+          echo "monitor -version => ${got}"
+          if [ "$got" != "$ver" ]; then
+            echo "version inject failed: want ${ver}, got ${got}" >&2
+            exit 1
+          fi
 
           (cd "$out" && sha256sum agent-status-* > sha256sums.txt)
           ls -la "$out"
