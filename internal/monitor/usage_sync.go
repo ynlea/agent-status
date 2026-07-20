@@ -19,6 +19,7 @@ type fileCursor struct {
 }
 
 type usageState struct {
+	ServerURL        string                `json:"server_url,omitempty"`
 	BackfillDone     bool                  `json:"backfill_done"`
 	LastDiscoverUnix int64                 `json:"last_discover_unix,omitempty"`
 	Files            map[string]fileCursor `json:"files"`
@@ -51,7 +52,41 @@ func NewUsageSyncer(cfg *Config, rep *Reporter, logger *slog.Logger) *UsageSynce
 	u := &UsageSyncer{Cfg: cfg, Rep: rep, Logger: logger, path: path}
 	u.state.Files = map[string]fileCursor{}
 	_ = u.load()
+	u.rebindServerIfNeeded()
 	return u
+}
+
+func normalizeServerURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	for strings.HasSuffix(s, "/") {
+		s = strings.TrimSuffix(s, "/")
+	}
+	return s
+}
+
+// rebindServerIfNeeded resets local cursors when the configured server changes,
+// so a fresh/empty server receives a full historical backfill.
+func (u *UsageSyncer) rebindServerIfNeeded() {
+	target := ""
+	if u.Cfg != nil {
+		target = normalizeServerURL(u.Cfg.ServerURL)
+	}
+	if target == "" {
+		return
+	}
+	if normalizeServerURL(u.state.ServerURL) == target {
+		return
+	}
+	u.Logger.Info("用量游标绑定服务端已变化，将全量重传",
+		"原服务地址", u.state.ServerURL,
+		"新服务地址", target,
+		"原文件数", len(u.state.Files),
+	)
+	u.state = usageState{
+		ServerURL:    target,
+		BackfillDone: false,
+		Files:        map[string]fileCursor{},
+	}
 }
 
 func (u *UsageSyncer) load() error {
@@ -122,6 +157,8 @@ func (u *UsageSyncer) SyncOnce() error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
+	u.rebindServerIfNeeded()
+
 	now := time.Now().UTC()
 	dirty := false
 	doDiscover := u.shouldDiscover(now)
@@ -135,6 +172,21 @@ func (u *UsageSyncer) SyncOnce() error {
 	}
 
 	var batch []apitypes.UsageEvent
+	// pending holds file advances that must not stick if their events fail to upload.
+	type pendingAdvance struct {
+		path string
+		cur  fileCursor
+	}
+	var pending []pendingAdvance
+
+	commitPending := func() {
+		for _, p := range pending {
+			u.state.Files[p.path] = p.cur
+			dirty = true
+		}
+		pending = pending[:0]
+	}
+
 	flush := func(force bool) error {
 		if len(batch) == 0 {
 			return nil
@@ -154,6 +206,8 @@ func (u *UsageSyncer) SyncOnce() error {
 				return err
 			}
 		}
+		// Only advance file cursors after the related batches uploaded successfully.
+		commitPending()
 		return nil
 	}
 
@@ -197,22 +251,45 @@ func (u *UsageSyncer) SyncOnce() error {
 			u.Logger.Warn("解析用量日志失败", "路径", path, "错误", err)
 			continue
 		}
+		next := fileCursor{Offset: newOff, Size: info.Size(), Kind: kind}
 		if len(events) > 0 {
 			batch = append(batch, events...)
+			pending = append(pending, pendingAdvance{path: path, cur: next})
 			if err := flush(false); err != nil {
+				// Keep successful progress; never mark backfill complete on failure.
+				u.state.BackfillDone = false
+				if dirty {
+					if saveErr := u.save(); saveErr != nil {
+						u.Logger.Warn("保存用量游标失败", "错误", saveErr)
+					}
+				}
 				return err
 			}
+		} else {
+			// No events: advancing offset is local-only and safe.
+			u.state.Files[path] = next
+			dirty = true
 		}
-		u.state.Files[path] = fileCursor{Offset: newOff, Size: info.Size(), Kind: kind}
-		dirty = true
 	}
 
 	if err := flush(true); err != nil {
+		u.state.BackfillDone = false
+		if dirty {
+			if saveErr := u.save(); saveErr != nil {
+				u.Logger.Warn("保存用量游标失败", "错误", saveErr)
+			}
+		}
 		return err
 	}
 	if !u.state.BackfillDone {
 		u.state.BackfillDone = true
 		dirty = true
+	}
+	if u.Cfg != nil {
+		if norm := normalizeServerURL(u.Cfg.ServerURL); norm != "" && u.state.ServerURL != norm {
+			u.state.ServerURL = norm
+			dirty = true
+		}
 	}
 	if dirty {
 		if err := u.save(); err != nil {

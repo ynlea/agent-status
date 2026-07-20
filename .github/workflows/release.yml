@@ -156,13 +156,6 @@ jobs:
               if git rev-parse "${prev}" >/dev/null 2>&1; then
                 git log --reverse --pretty=format:'- %s (%h)' "${prev}..${tag}"
                 echo
-                echo
-                # 变更文件摘要（避免过长，最多 80 行）
-                echo "### 变更文件"
-                echo
-                echo '```'
-                git diff --name-status "${prev}..${tag}" | head -n 80
-                echo '```'
               else
                 echo "- （无法解析上一标签，改为列出本 tag 指向提交）"
                 git log -1 --pretty=format:'- %s (%h)'
