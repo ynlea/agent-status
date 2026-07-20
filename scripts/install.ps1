@@ -4,6 +4,7 @@
 #   .\install.ps1 install -Role monitor -ServerUrl http://127.0.0.1:29125 -Key KEY -Yes
 #   .\install.ps1 update  -Role all -Version v0.1.1 -Yes
 #   .\install.ps1 status  -Role all
+#   .\install.ps1 uninstall -Purge -Yes
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -757,18 +758,145 @@ function Invoke-Config {
     }
 }
 
+function Remove-ClaudeHooks {
+    $settings = Join-Path $env:USERPROFILE '.claude\settings.json'
+    if (-not (Test-Path $settings)) {
+        Write-Info '未找到 Claude settings，跳过 hooks 清理'
+        return
+    }
+    try {
+        $doc = Get-Content $settings -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Warn "无法解析 Claude settings: $_"
+        return
+    }
+    if (-not $doc.hooks) {
+        Write-Info 'Claude settings 中无 hooks'
+        return
+    }
+    $changed = 0
+    $hookObj = $doc.hooks
+    $props = @($hookObj.PSObject.Properties.Name)
+    foreach ($event in $props) {
+        $groups = @($hookObj.$event)
+        if ($groups.Count -eq 0) { continue }
+        $newGroups = @()
+        foreach ($g in $groups) {
+            if (-not $g.hooks) { $newGroups += $g; continue }
+            $kept = @()
+            foreach ($h in @($g.hooks)) {
+                $cmd = [string]$h.command
+                if ($cmd -match 'agent-status-monitor' -and $cmd -match 'claude-hook') {
+                    $changed++
+                    continue
+                }
+                $kept += $h
+            }
+            if ($kept.Count -gt 0) {
+                $g.hooks = $kept
+                $newGroups += $g
+            }
+        }
+        if ($newGroups.Count -gt 0) {
+            $hookObj | Add-Member -NotePropertyName $event -NotePropertyValue $newGroups -Force
+        } else {
+            $hookObj.PSObject.Properties.Remove($event)
+        }
+    }
+    if ($changed -eq 0) {
+        Write-Info 'Claude settings 中无 agent-status hooks'
+        return
+    }
+    $bak = "$settings.agent-status.uninstall.bak"
+    Copy-Item $settings $bak -Force
+    $doc.hooks = $hookObj
+    $doc | ConvertTo-Json -Depth 20 | Set-Content -Path $settings -Encoding UTF8
+    Write-PathLine '设置文件' $settings
+    Write-PathLine '备份' $bak
+    Write-Ok "已移除 $changed 条 agent-status hooks"
+}
+
 function Invoke-Uninstall {
-    $roles = Expand-Roles $(if ($Role) { $Role } else { 'all' })
-    foreach ($r in $roles) {
-        Stop-Role $r
-        Disable-Role $r
-    }
-    if ($Purge) {
-        Remove-Item -Recurse -Force $InstallRoot -ErrorAction SilentlyContinue
-        Write-Log "已删除安装目录 $InstallRoot"
+    Write-Banner '卸载'
+    $roles = @()
+    if ([string]::IsNullOrWhiteSpace($Role) -or $Role -eq 'all') {
+        if (Test-Path (Join-Path $BinDir 'agent-status-server.exe')) { $roles += 'server' }
+        if (Test-Path (Join-Path $BinDir 'agent-status-monitor.exe')) { $roles += 'monitor' }
+        # 计划任务也可能还在
+        if (-not $roles) {
+            $roles = @('server', 'monitor')
+        }
     } else {
-        Write-Log "已保留 $InstallRoot（加 -Purge 可删除）"
+        $roles = @($Role)
     }
+
+    if ($Purge) {
+        Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor Yellow
+        Write-Host '  │  将彻底删除：服务进程 / 计划任务 / 安装目录           │' -ForegroundColor Yellow
+        Write-Host '  │  以及用量游标与 Claude hooks                          │' -ForegroundColor Yellow
+        Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Yellow
+        if (-not $Yes) {
+            $ans = Read-Host '  确认彻底卸载并清理全部数据? [y/N]'
+            if ($ans -notmatch '^(y|yes|Y)$') {
+                Write-Info '已取消卸载'
+                return
+            }
+        }
+    } else {
+        Write-Info '标准卸载：停止服务并移除开机任务，保留安装目录'
+        Write-Info '彻底清理请加：-Purge -Yes'
+    }
+
+    $script:UiStepCur = 0
+    $script:UiStepTotal = if ($Purge) { 5 } else { 2 }
+
+    Write-Step '停止进程'
+    foreach ($r in $roles) {
+        Stop-RoleProcesses $r
+        Stop-Role $r
+        Write-Ok "已停止 $r"
+    }
+
+    Write-Step '移除开机任务'
+    foreach ($r in $roles) {
+        Disable-Role $r
+        Write-Ok "已移除任务 $(Get-TaskName $r)"
+    }
+
+    if ($Purge) {
+        Write-Step '删除安装目录'
+        if (Test-Path $InstallRoot) {
+            # 再确保无残留锁
+            foreach ($r in $roles) { Stop-RoleProcesses $r }
+            Start-Sleep -Milliseconds 300
+            Remove-Item -Recurse -Force $InstallRoot -ErrorAction SilentlyContinue
+            if (Test-Path $InstallRoot) {
+                Write-Warn "部分文件未能删除（可能仍被占用）：$InstallRoot"
+            } else {
+                Write-PathLine '已删除' $InstallRoot
+                Write-Ok '安装目录已清理'
+            }
+        } else {
+            Write-Info '安装目录不存在，跳过'
+        }
+
+        Write-Step '清理用量游标'
+        $asHome = Join-Path $env:USERPROFILE '.agent-status'
+        if (Test-Path $asHome) {
+            Remove-Item -Recurse -Force $asHome -ErrorAction SilentlyContinue
+            Write-PathLine '已删除' $asHome
+            Write-Ok '用量游标目录已清理'
+        } else {
+            Write-Info '无 ~/.agent-status，跳过'
+        }
+
+        Write-Step '清理 Claude Code hooks'
+        Remove-ClaudeHooks
+    } else {
+        Write-Info "已保留安装目录：$(Format-PrettyPath $InstallRoot)"
+    }
+
+    Write-Done '卸载完成'
 }
 
 function Invoke-Update {

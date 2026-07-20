@@ -5,6 +5,7 @@
 #   ./install.sh install --role server --key KEY --yes
 #   ./install.sh install --role monitor --server-url URL --key KEY --yes
 #   ./install.sh status|start|stop|restart --role all
+#   ./install.sh uninstall --purge -y
 set -euo pipefail
 
 REPO="${AGENT_STATUS_REPO:-ynlea/agent-status}"
@@ -49,7 +50,7 @@ agent-status 安装与管理工具（Linux）
   enable|disable      开机自启（systemd --user）
   config get|set      查看或更新配置
   init-agents         探测本机 Agent 并初始化 Claude hooks
-  uninstall           停止服务；默认保留配置，加 --purge 删除安装目录
+  uninstall           卸载服务；加 --purge 清理全部相关文件
 
 选项：
   --role server|monitor|all
@@ -62,7 +63,7 @@ agent-status 安装与管理工具（Linux）
   --no-enable         不安自启（仍会尝试启动）
   --local-bin DIR     使用本地二进制，跳过下载
   --force-config      安装时覆盖已有配置
-  --purge             卸载时删除安装目录
+  --purge             彻底清理：安装目录、命令入口、用量游标、Claude hooks
   -h, --help
 EOF
 }
@@ -884,20 +885,188 @@ PY
 }
 
 cmd_uninstall() {
-  local r
+  print_banner "卸载"
+  local W=52
   ROLE="${ROLE:-all}"
-  while IFS= read -r r; do
-    systemctl --user disable --now "$(unit_for_role "$r")" 2>/dev/null || true
-    rm -f "$SYSTEMD_USER_DIR/$(unit_for_role "$r")"
-    log "已移除服务单元: $r"
-  done < <(roles_expand "$ROLE")
-  systemd_reload
-  if [[ "$PURGE" -eq 1 ]]; then
-    rm -rf "$INSTALL_ROOT"
-    log "已删除安装目录 $INSTALL_ROOT"
+
+  # 即使二进制已删，也尽量枚举角色
+  local roles=()
+  if [[ "$ROLE" == "all" || -z "$ROLE" ]]; then
+    [[ -x "$BIN_DIR/agent-status-server" || -f "$SYSTEMD_USER_DIR/agent-status-server.service" ]] && roles+=(server)
+    [[ -x "$BIN_DIR/agent-status-monitor" || -f "$SYSTEMD_USER_DIR/agent-status-monitor.service" ]] && roles+=(monitor)
+    if [[ ${#roles[@]} -eq 0 ]]; then
+      roles=(server monitor)
+    fi
   else
-    log "已保留 $INSTALL_ROOT（加 --purge 可删除）"
+    roles=("$ROLE")
   fi
+
+  if [[ "$PURGE" -eq 1 ]]; then
+    box_top "$C_YELLOW" "$W"
+    box_row "$C_YELLOW" "  将彻底删除以下内容：" "$W"
+    box_row "$C_YELLOW" "  · 服务单元 / 进程" "$W"
+    box_row "$C_YELLOW" "  · 安装目录  $(pretty_path "$INSTALL_ROOT")" "$W"
+    box_row "$C_YELLOW" "  · 命令入口  $(pretty_path "$LOCAL_BIN/agent-status")" "$W"
+    box_row "$C_YELLOW" "  · 用量游标  ~/.agent-status" "$W"
+    box_row "$C_YELLOW" "  · Claude settings 中的 agent-status hooks" "$W"
+    box_bot "$C_YELLOW" "$W"
+    if ! confirm "确认彻底卸载并清理全部数据"; then
+      info "已取消卸载"
+      return 0
+    fi
+  else
+    info "标准卸载：停止服务并移除单元，保留安装目录"
+    info "彻底清理请加：--purge -y"
+  fi
+
+  UI_STEP_CUR=0
+  UI_STEP_TOTAL=3
+  [[ "$PURGE" -eq 1 ]] && UI_STEP_TOTAL=5
+
+  step "停止并禁用服务"
+  local r unit
+  for r in "${roles[@]}"; do
+    unit="$(unit_for_role "$r" 2>/dev/null || true)"
+    [[ -z "$unit" ]] && continue
+    systemctl --user disable --now "$unit" 2>/dev/null || true
+    # 兜底杀进程
+    pkill -f "$BIN_DIR/agent-status-$r" 2>/dev/null || true
+    ok "已停止 $r"
+  done
+
+  step "移除服务单元"
+  for r in "${roles[@]}"; do
+    unit="$(unit_for_role "$r" 2>/dev/null || true)"
+    [[ -n "$unit" ]] && rm -f "$SYSTEMD_USER_DIR/$unit"
+    path_line "已删单元" "$SYSTEMD_USER_DIR/${unit:-$r}"
+  done
+  systemd_reload
+  ok "systemd 用户单元已清理"
+
+  if [[ "$PURGE" -eq 1 ]]; then
+    step "删除安装目录与命令入口"
+    if [[ -e "$INSTALL_ROOT" ]]; then
+      rm -rf "$INSTALL_ROOT"
+      path_line "已删除" "$INSTALL_ROOT"
+    else
+      info "安装目录不存在，跳过"
+    fi
+    if [[ -L "$LOCAL_BIN/agent-status" || -f "$LOCAL_BIN/agent-status" ]]; then
+      rm -f "$LOCAL_BIN/agent-status"
+      path_line "已删除" "$LOCAL_BIN/agent-status"
+    fi
+    ok "安装文件已清理"
+
+    step "清理用量游标与本地状态"
+    local as_home="${HOME}/.agent-status"
+    if [[ -d "$as_home" ]]; then
+      rm -rf "$as_home"
+      path_line "已删除" "$as_home"
+      ok "用量游标目录已清理"
+    else
+      info "无 ~/.agent-status，跳过"
+    fi
+
+    step "清理 Claude Code hooks"
+    remove_claude_hooks || true
+  else
+    info "已保留安装目录：$(pretty_path "$INSTALL_ROOT")"
+    info "配置 / 日志 / 数据库仍在，可再次 install 复用"
+  fi
+
+  print_done "卸载完成"
+}
+
+remove_claude_hooks() {
+  local settings="${HOME}/.claude/settings.json"
+  if [[ ! -f "$settings" ]]; then
+    info "未找到 Claude settings，跳过 hooks 清理"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "无 python3，无法自动清理 hooks，请手动编辑 $(pretty_path "$settings")"
+    return 0
+  fi
+  local result
+  result="$(python3 - "$settings" <<'PY'
+import json, sys, copy, os
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    doc = json.load(f)
+hooks = doc.get("hooks")
+if not isinstance(hooks, dict):
+    print("SKIP|no-hooks")
+    raise SystemExit(0)
+
+def is_ours(cmd: str) -> bool:
+    c = (cmd or "").replace("\\", "/")
+    return "agent-status-monitor" in c and "claude-hook" in c
+
+changed = 0
+new_hooks = {}
+for event, groups in hooks.items():
+    if not isinstance(groups, list):
+        new_hooks[event] = groups
+        continue
+    kept_groups = []
+    for g in groups:
+        if not isinstance(g, dict):
+            kept_groups.append(g)
+            continue
+        hs = g.get("hooks")
+        if not isinstance(hs, list):
+            kept_groups.append(g)
+            continue
+        kept_h = []
+        for h in hs:
+            if isinstance(h, dict) and is_ours(str(h.get("command", ""))):
+                changed += 1
+                continue
+            kept_h.append(h)
+        if kept_h:
+            ng = dict(g)
+            ng["hooks"] = kept_h
+            kept_groups.append(ng)
+        else:
+            # 整组清空则丢弃
+            changed += 0
+    if kept_groups:
+        new_hooks[event] = kept_groups
+
+if changed == 0:
+    print("SKIP|none")
+    raise SystemExit(0)
+
+# backup then write
+bak = path + ".agent-status.uninstall.bak"
+import shutil
+shutil.copy2(path, bak)
+doc["hooks"] = new_hooks
+# drop empty hooks object keys? keep structure
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(doc, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+print(f"OK|{changed}|{bak}")
+PY
+)" || true
+  case "$result" in
+    OK\|*)
+      local n bak
+      n="$(printf '%s' "$result" | cut -d'|' -f2)"
+      bak="$(printf '%s' "$result" | cut -d'|' -f3)"
+      path_line "设置文件" "$settings"
+      path_line "备份" "$bak"
+      ok "已移除 ${n} 条 agent-status hooks"
+      ;;
+    SKIP\|*)
+      info "Claude settings 中无 agent-status hooks"
+      ;;
+    *)
+      warn "清理 hooks 时出现问题，请检查 $(pretty_path "$settings")"
+      ;;
+  esac
 }
 
 cmd_update() {
