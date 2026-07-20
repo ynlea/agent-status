@@ -113,7 +113,8 @@ step() {
   UI_STEP_CUR=$((UI_STEP_CUR + 1))
   local label="$*"
   local n="$UI_STEP_CUR" t="$UI_STEP_TOTAL"
-  printf '\n'
+  printf '
+'
   hr
   if [[ "$t" -gt 0 ]]; then
     printf '  %s●%s %s步骤 %s/%s%s  %s%s%s\n' \
@@ -130,31 +131,39 @@ step() {
 
 print_banner() {
   local title="${1:-agent-status}"
-  printf '\n'
-  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_A4}" "${C_RESET}"
-  printf '  %s│%s                                                      %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s █████╗  ███████╗%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A1}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s██╔══██╗ ██╔════╝%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A2}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s███████║ ███████╗%s  agent-status                  %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A3}${C_BOLD}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s██╔══██║ ╚════██║%s  会话监测 · 用量统计 · 安装器    %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s██║  ██║ ███████║%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A5}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s╚═╝  ╚═╝ ╚══════╝%s                                %s│%s\n' "${C_A4}" "${C_RESET}" "${C_MAGENTA}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s                                                      %s│%s\n' "${C_A4}" "${C_RESET}" "${C_A4}" "${C_RESET}"
-  printf '  %s│%s   %s▸%s %-48s %s│%s\n' "${C_A4}" "${C_RESET}" "${C_GREEN}" "${C_RESET}" "$title" "${C_A4}" "${C_RESET}"
-  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A4}" "${C_RESET}"
-  printf '\n'
+  local W=52
+  printf '
+'
+  box_top "$C_A4" "$W"
+  box_blank "$C_A4" "$W"
+  # logo 行：左 AS 字标 + 右侧说明，全部按显示宽度对齐
+  box_row "$C_A4" "  █████╗  ███████╗" "$W"
+  box_row "$C_A4" " ██╔══██╗ ██╔════╝" "$W"
+  box_row "$C_A4" " ███████║ ███████╗   agent-status" "$W"
+  box_row "$C_A4" " ██╔══██║ ╚════██║   会话监测 · 用量统计 · 安装器" "$W"
+  box_row "$C_A4" " ██║  ██║ ███████║" "$W"
+  box_row "$C_A4" " ╚═╝  ╚═╝ ╚══════╝" "$W"
+  box_blank "$C_A4" "$W"
+  box_row "$C_A4" "  ▸ ${title}" "$W"
+  box_bot "$C_A4" "$W"
+  printf '
+'
 }
 
 print_done() {
   local msg="${1:-完成}" dir="${2:-}"
-  printf '\n'
-  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_GREEN}" "${C_RESET}"
-  printf '  %s│%s  %s✦  %s%s%s\n' "${C_GREEN}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}${C_BOLD}" "$msg" "${C_RESET}"
+  local W=52
+  printf '
+'
+  box_top "$C_GREEN" "$W"
+  box_row "$C_GREEN" "  ✦  ${msg}" "$W"
   if [[ -n "$dir" ]]; then
-    printf '  %s│%s  %s目录%s  %s\n' "${C_GREEN}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "$dir"
+    box_row "$C_GREEN" "  目录  $(pretty_path "$dir")" "$W"
   fi
-  printf '  %s│%s  %s提示%s  agent-status status | update | restart\n' "${C_GREEN}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
-  printf '  %s╰──────────────────────────────────────────────────────╯%s\n\n' "${C_GREEN}" "${C_RESET}"
+  box_row "$C_GREEN" "  提示  agent-status status | update | restart" "$W"
+  box_bot "$C_GREEN" "$W"
+  printf '
+'
 }
 
 kv() {
@@ -216,6 +225,70 @@ draw_bar() {
   printf '   '
 }
 
+
+
+# 显示宽度（中文等宽字符计 2），并渲染对齐边框
+vis_width() {
+  # usage: vis_width "文本"
+  local s="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sys,re,unicodedata
+s=sys.argv[1]
+s=re.sub(r"\x1b\[[0-9;]*m","",s)
+w=0
+for ch in s:
+    w += 2 if unicodedata.east_asian_width(ch) in ("F","W") else 1
+print(w)' "$s" 2>/dev/null && return
+  fi
+  printf '%s' "${#s}"
+}
+
+pad_vis() {
+  # pad_vis "文本" 目标显示宽度 → stdout
+  local s="$1" target="$2" w pad
+  w="$(vis_width "$s")"
+  pad=$((target - w))
+  (( pad < 0 )) && pad=0
+  printf '%s%*s' "$s" "$pad" ''
+}
+
+# 画一行：  左框 + 内文(已按宽度补齐) + 右框
+# box_row COLOR "纯文本内容" [INNER_WIDTH=52]
+box_row() {
+  local color="${1:-$C_A4}" content="${2:-}" width="${3:-52}"
+  printf '  %s│%s %s%s│%s\n' "$color" "${C_RESET}" "$(pad_vis "$content" "$width")" "$color" "${C_RESET}"
+}
+
+box_top() {
+  local color="${1:-$C_A4}" width="${2:-52}" i
+  printf '  %s╭' "$color"
+  for ((i=0; i<width+2; i++)); do printf '─'; done
+  printf '╮%s\n' "${C_RESET}"
+}
+
+box_bot() {
+  local color="${1:-$C_A4}" width="${2:-52}" i
+  printf '  %s╰' "$color"
+  for ((i=0; i<width+2; i++)); do printf '─'; done
+  printf '╯%s\n' "${C_RESET}"
+}
+
+box_blank() {
+  box_row "${1:-$C_A4}" "" "${2:-52}"
+}
+
+box_title_row() {
+  # 左边标题条：─ Title ────────
+  local color="${1:-$C_A5}" title="$2" width="${3:-52}"
+  local plain="─ ${title} "
+  local w pad i
+  w="$(vis_width "$plain")"
+  pad=$((width + 2 - w))
+  (( pad < 0 )) && pad=0
+  printf '  %s╭%s' "$color" "$plain"
+  for ((i=0; i<pad; i++)); do printf '─'; done
+  printf '╮%s\n' "${C_RESET}"
+}
 
 have_tty() { [[ -t 0 || -t 1 ]]; }
 
@@ -297,7 +370,8 @@ download() {
           cur="$(wc -c <"$dest" 2>/dev/null | tr -d ' ' || echo 0)"
         fi
         draw_bar "$cur" "$total"
-        printf '\n'
+        printf '
+'
         [[ "$err" -eq 0 ]] || return "$err"
         ok "下载完成  $(human_size "$cur")"
         return 0
@@ -594,39 +668,52 @@ init_agents() {
   [[ -x "$mon" ]] || die "监测端二进制不存在，请先 install --role monitor"
   [[ -f "$cfg" ]] || die "监测端配置不存在: $cfg"
 
-  local claude_ok=0 codex_ok=0
+  local claude_ok=0 codex_ok=0 W=52
   detect_claude && claude_ok=1
   detect_codex && codex_ok=1
 
-  printf '\n'
-  printf '  %s╭─ Agent 探测 ──────────────────────────────────────────╮%s\n' "${C_A5}" "${C_RESET}"
+  printf '
+'
+  box_title_row "$C_A5" "Agent 探测" "$W"
   if [[ "$claude_ok" -eq 1 ]]; then
-    printf '  %s│%s  %s●%s  %-12s  %s已发现%s' "${C_A5}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}" "Claude Code" "${C_GREEN}" "${C_RESET}"
-    if [[ -d "$HOME/.claude" ]]; then
-      printf '  %s%s%s' "${C_DIM}" "$(pretty_path "$HOME/.claude")" "${C_RESET}"
-    fi
-    printf '\n'
+    box_row "$C_A5" "  ●  Claude Code    已发现  $(pretty_path "$HOME/.claude")" "$W"
   else
-    printf '  %s│%s  %s○%s  %-12s  %s未发现%s\n' "${C_A5}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "Claude Code" "${C_DIM}" "${C_RESET}"
+    box_row "$C_A5" "  ○  Claude Code    未发现" "$W"
   fi
   if [[ "$codex_ok" -eq 1 ]]; then
-    printf '  %s│%s  %s●%s  %-12s  %s已发现%s' "${C_A5}" "${C_RESET}" "${C_GREEN}${C_BOLD}" "${C_RESET}" "Codex" "${C_GREEN}" "${C_RESET}"
-    if [[ -d "$HOME/.codex" ]]; then
-      printf '  %s%s%s' "${C_DIM}" "$(pretty_path "$HOME/.codex")" "${C_RESET}"
-    fi
-    printf '\n'
+    box_row "$C_A5" "  ●  Codex          已发现  $(pretty_path "$HOME/.codex")" "$W"
   else
-    printf '  %s│%s  %s○%s  %-12s  %s未发现%s\n' "${C_A5}" "${C_RESET}" "${C_DIM}" "${C_RESET}" "Codex" "${C_DIM}" "${C_RESET}"
+    box_row "$C_A5" "  ○  Codex          未发现" "$W"
   fi
-  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A5}" "${C_RESET}"
+  box_bot "$C_A5" "$W"
 
   if [[ "$claude_ok" -eq 1 ]]; then
     info "初始化 Claude Code hooks..."
-    if "$mon" --init --claude --config "$cfg"; then
-      path_line "设置文件" "${HOME}/.claude/settings.json"
-      ok "Claude hooks 已配置"
+    local out rc=0
+    # 吞掉 slog 原始日志，成功时只展示摘要
+    out="$("$mon" --init --claude --config "$cfg" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      local settings_path="${HOME}/.claude/settings.json"
+      # 尝试从输出提取设置文件路径
+      if printf '%s' "$out" | grep -q '设置文件='; then
+        settings_path="$(printf '%s' "$out" | sed -n 's/.*设置文件=\([^ ]*\).*/\1/p' | head -n1)"
+      fi
+      local added updated
+      added="$(printf '%s' "$out" | sed -n 's/.*新增事件数=\([0-9]*\).*/\1/p' | head -n1)"
+      updated="$(printf '%s' "$out" | sed -n 's/.*更新事件数=\([0-9]*\).*/\1/p' | head -n1)"
+      path_line "设置文件" "$settings_path"
+      if [[ -n "$added" || -n "$updated" ]]; then
+        ok "Claude hooks 已配置  新增 ${added:-0} · 更新 ${updated:-0}"
+      else
+        ok "Claude hooks 已配置"
+      fi
     else
-      warn "Claude hooks 初始化失败（可稍后 agent-status init-agents 重试）"
+      warn "Claude hooks 初始化失败"
+      # 失败时折叠显示原始输出
+      if [[ -n "$out" ]]; then
+        printf '  %s── 详情 ──────────────────────────────────────────────%s\n' "${C_DIM}" "${C_RESET}"
+        printf '%s\n' "$out" | sed 's/^/  │ /'
+      fi
     fi
   else
     info "跳过 Claude hooks（未检测到 Claude Code）"
@@ -638,13 +725,16 @@ init_agents() {
 
 cmd_status() {
   local r unit active
-  printf '\n'
-  printf '  %s╭──────────────────────────────────────────────────────╮%s\n' "${C_A3}" "${C_RESET}"
-  printf '  %s│%s  %s系统状态%s                                           %s│%s\n' "${C_A3}" "${C_RESET}" "${C_BOLD}" "${C_RESET}" "${C_A3}" "${C_RESET}"
-  printf '  %s╰──────────────────────────────────────────────────────╯%s\n' "${C_A3}" "${C_RESET}"
+  local W=52
+  printf '
+'
+  box_top "$C_A3" "$W"
+  box_row "$C_A3" "  系统状态" "$W"
+  box_bot "$C_A3" "$W"
 
   while IFS= read -r r; do
-    printf '\n'
+    printf '
+'
     printf '  %s◆ %s%s%s\n' "${C_A5}${C_BOLD}" "${C_RESET}${C_BOLD}" "$r" "${C_RESET}"
     hr "·"
 
@@ -697,7 +787,8 @@ cmd_status() {
       printf '  %s%-10s%s %s○ %s%s  %s\n' "${C_DIM}" "服务" "${C_RESET}" "${C_YELLOW}" "$active" "${C_RESET}" "$unit"
     fi
   done < <(roles_expand "$ROLE")
-  printf '\n'
+  printf '
+'
 }
 
 cmd_control() {
@@ -835,18 +926,14 @@ interactive_fill() {
 
   if [[ -z "$ROLE" ]]; then
     have_tty || die "非交互安装请指定 --role 与 --yes"
+    local W=52
     printf '  %s选择要安装的角色%s
 ' "${C_BOLD}" "${C_RESET}"
-    printf '  %s┌────────────────────────────────────────────────────┐%s
-' "${C_DIM}" "${C_RESET}"
-    printf '  %s│%s  %s1%s  服务端 server     接收上报、WebSocket、API      %s│%s
-' "${C_DIM}" "${C_RESET}" "${C_A1}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
-    printf '  %s│%s  %s2%s  监测端 monitor    扫描会话 / 用量并上报         %s│%s
-' "${C_DIM}" "${C_RESET}" "${C_A2}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
-    printf '  %s│%s  %s3%s  两者都装 all      本机完整部署                  %s│%s
-' "${C_DIM}" "${C_RESET}" "${C_A5}${C_BOLD}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
-    printf '  %s└────────────────────────────────────────────────────┘%s
-' "${C_DIM}" "${C_RESET}"
+    box_top "$C_DIM" "$W"
+    box_row "$C_DIM" "  1  服务端 server     接收上报 / WebSocket / API" "$W"
+    box_row "$C_DIM" "  2  监测端 monitor    扫描会话与用量并上报" "$W"
+    box_row "$C_DIM" "  3  两者都装 all      本机完整部署" "$W"
+    box_bot "$C_DIM" "$W"
     local c
     c="$(prompt "请输入序号" "2")"
     case "$c" in

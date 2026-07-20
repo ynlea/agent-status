@@ -394,25 +394,30 @@ function Init-Agents {
     Write-Host ''
     Write-Host '  ╭─ Agent 探测 ──────────────────────────────────────────╮' -ForegroundColor Magenta
     if ($claudeOk) {
-        Write-Host '  │  ●  Claude Code   已发现' -NoNewline -ForegroundColor Green
-        if (Test-Path $claudeDir) { Write-Host ("  {0}" -f (Format-PrettyPath $claudeDir)) -ForegroundColor DarkGray } else { Write-Host '' }
+        $p = if (Test-Path $claudeDir) { '  ' + (Format-PrettyPath $claudeDir) } else { '' }
+        Write-Host ("  │  ●  Claude Code    已发现{0}" -f $p) -ForegroundColor Green
     } else {
-        Write-Host '  │  ○  Claude Code   未发现' -ForegroundColor DarkGray
+        Write-Host '  │  ○  Claude Code    未发现' -ForegroundColor DarkGray
     }
     if ($codexOk) {
-        Write-Host '  │  ●  Codex         已发现' -NoNewline -ForegroundColor Green
-        if (Test-Path $codexDir) { Write-Host ("  {0}" -f (Format-PrettyPath $codexDir)) -ForegroundColor DarkGray } else { Write-Host '' }
+        $p = if (Test-Path $codexDir) { '  ' + (Format-PrettyPath $codexDir) } else { '' }
+        Write-Host ("  │  ●  Codex          已发现{0}" -f $p) -ForegroundColor Green
     } else {
-        Write-Host '  │  ○  Codex         未发现' -ForegroundColor DarkGray
+        Write-Host '  │  ○  Codex          未发现' -ForegroundColor DarkGray
     }
     Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Magenta
 
     if ($claudeOk) {
         Write-Info '初始化 Claude Code hooks...'
         try {
-            & $mon --init --claude --config $cfg
-            Write-PathLine '设置文件' (Join-Path $claudeDir 'settings.json')
-            Write-Ok 'Claude hooks 已配置'
+            $out = & $mon --init --claude --config $cfg 2>&1 | Out-String
+            if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw $out }
+            $settings = Join-Path $claudeDir 'settings.json'
+            if ($out -match '设置文件=([^\s]+)') { $settings = $Matches[1] }
+            $added = if ($out -match '新增事件数=(\d+)') { $Matches[1] } else { '0' }
+            $updated = if ($out -match '更新事件数=(\d+)') { $Matches[1] } else { '0' }
+            Write-PathLine '设置文件' $settings
+            Write-Ok ("Claude hooks 已配置  新增 {0} · 更新 {1}" -f $added, $updated)
         } catch {
             Write-Warn "Claude hooks 初始化失败: $_"
         }
