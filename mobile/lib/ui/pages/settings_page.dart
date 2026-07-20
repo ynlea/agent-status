@@ -236,13 +236,12 @@ class _SettingsValueRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Row(
           children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(fontSize: 13, color: c.textPrimary),
-              ),
+            Text(
+              label,
+              style: TextStyle(fontSize: 13, color: c.textPrimary),
             ),
-            Flexible(
+            const SizedBox(width: 12),
+            Expanded(
               child: Text(
                 value,
                 maxLines: 1,
@@ -252,7 +251,7 @@ class _SettingsValueRow extends StatelessWidget {
               ),
             ),
             if (onTap != null) ...[
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               QingyaTintIcon(QingyaAssets.chevron, size: 14),
             ],
           ],

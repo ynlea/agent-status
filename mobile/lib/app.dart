@@ -70,6 +70,19 @@ final routerProvider = Provider<GoRouter>((ref) {
                     builder: (_, state) => DeviceDetailPage(
                       machineId: state.pathParameters['machineId']!,
                     ),
+                    routes: [
+                      // Nested under device so back returns to session list;
+                      // root navigator keeps full-screen (no tab bar).
+                      GoRoute(
+                        path: 'sessions/:agent/:sessionId',
+                        parentNavigatorKey: _rootKey,
+                        builder: (_, state) => SessionDetailPage(
+                          machineId: state.pathParameters['machineId']!,
+                          agent: state.pathParameters['agent']!,
+                          sessionId: state.pathParameters['sessionId']!,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

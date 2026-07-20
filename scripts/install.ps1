@@ -44,6 +44,17 @@ function Write-Log([string]$Message) { Write-Host $Message }
 function Write-Info([string]$Message) { Write-Host "  ›  $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "  ✓  $Message" -ForegroundColor Green }
 function Write-Warn([string]$Message) { Write-Host "  !  $Message" -ForegroundColor Yellow }
+
+# Windows PowerShell 5.1 的 Set-Content -Encoding UTF8 会写 BOM（EF BB BF），
+# Go 的 encoding/json 不接受 BOM，导致 monitor 启动即退出。统一无 BOM 写入。
+function Write-Utf8NoBom([string]$Path, [string]$Content) {
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8)
+}
 function Write-Hr([string]$Char = '─') {
     $line = ($Char * 54)
     Write-Host "  $line" -ForegroundColor DarkGray
@@ -337,11 +348,12 @@ function Write-ServerEnv([string]$KeyValue, [string]$AddrValue) {
         Copy-Item $path ("$path.bak-{0:yyyyMMddHHmmss}" -f (Get-Date)) -Force
     }
     $db = Join-Path $DataDir 'agent-status.db'
-    @"
+    $content = @"
 AGENT_STATUS_ADDR=$AddrValue
 AGENT_STATUS_KEY=$KeyValue
 AGENT_STATUS_DB=$db
-"@ | Set-Content -Path $path -Encoding UTF8
+"@
+    Write-Utf8NoBom $path $content
     Write-PathLine '写入' $path; Write-Ok '配置已就绪'
 }
 
@@ -366,7 +378,7 @@ function Write-MonitorJson([string]$Url, [string]$KeyValue) {
         codex_sessions_dir   = ''
         state_file           = ''
     }
-    $obj | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
+    Write-Utf8NoBom $path ($obj | ConvertTo-Json)
     Write-PathLine '写入' $path; Write-Ok '配置已就绪'
 }
 
@@ -772,7 +784,7 @@ function Invoke-Config {
                 if ($_ -match "^$k=") { $found = $true; "$k=$v" } else { $_ }
             }
             if (-not $found) { $lines += "$k=$v" }
-            $lines | Set-Content $p -Encoding UTF8
+            Write-Utf8NoBom $p (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
             Write-Log "已更新 $p 的 $k"
         } else {
             $p = Join-Path $ConfigDir 'monitor.json'
@@ -785,7 +797,7 @@ function Invoke-Config {
             }
             $j = Get-Content $p -Raw | ConvertFrom-Json
             $j | Add-Member -NotePropertyName $k -NotePropertyValue $v -Force
-            $j | ConvertTo-Json | Set-Content $p -Encoding UTF8
+            Write-Utf8NoBom $p ($j | ConvertTo-Json)
             Write-Log "已更新 $p 的 $k"
         }
     }
@@ -843,7 +855,7 @@ function Remove-ClaudeHooks {
     $bak = "$settings.agent-status.uninstall.bak"
     Copy-Item $settings $bak -Force
     $doc.hooks = $hookObj
-    $doc | ConvertTo-Json -Depth 20 | Set-Content -Path $settings -Encoding UTF8
+    Write-Utf8NoBom $settings ($doc | ConvertTo-Json -Depth 20)
     Write-PathLine '设置文件' $settings
     Write-PathLine '备份' $bak
     Write-Ok "已移除 $changed 条 agent-status hooks"

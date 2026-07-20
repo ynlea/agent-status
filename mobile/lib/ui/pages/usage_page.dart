@@ -139,12 +139,12 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                 ],
               ),
               const SizedBox(height: 8),
-              // 筛选：下拉
+              // 筛选：日期 / 设备 / 渠道 同一行
               Row(
                 children: [
                   Expanded(
                     child: _DropdownBox<UsageRangePreset>(
-                      label: '时间',
+                      label: '日期',
                       value: q.preset,
                       items: [
                         for (final p in UsageRangePreset.values)
@@ -163,7 +163,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: _DropdownBox<String>(
                       label: '设备',
@@ -189,11 +189,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                       },
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
+                  const SizedBox(width: 6),
                   Expanded(
                     child: _DropdownBox<String>(
                       label: '渠道',
@@ -210,22 +206,6 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                         } else {
                           await _apply(q.copyWith(agent: v));
                         }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _DropdownBox<String>(
-                      label: '明细',
-                      value: q.groupBy,
-                      items: const [
-                        DropdownMenuItem(value: 'model', child: Text('按模型')),
-                        DropdownMenuItem(value: 'agent', child: Text('按渠道')),
-                        DropdownMenuItem(value: 'machine', child: Text('按设备')),
-                      ],
-                      onChanged: (v) async {
-                        if (v == null) return;
-                        await _apply(q.copyWith(groupBy: v));
                       },
                     ),
                   ),
@@ -284,13 +264,22 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   fmtCost: _fmtCost,
                 ),
                 const SizedBox(height: 10),
-                Text(
-                  '明细',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: context.qingya.textPrimary,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '明细',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: context.qingya.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    _GroupByToggle(
+                      value: q.groupBy,
+                      onChanged: (v) => _apply(q.copyWith(groupBy: v)),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 for (final g
@@ -312,6 +301,75 @@ class _UsagePageState extends ConsumerState<UsagePage> {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupByToggle extends StatelessWidget {
+  const _GroupByToggle({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  static const _options = <(String, String)>[
+    ('model', '模型'),
+    ('machine', '设备'),
+    ('agent', '渠道'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    final selected = _options.any((e) => e.$1 == value) ? value : 'model';
+    return Material(
+      color: c.card,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: c.border.withValues(alpha: 0.9)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (key, label) in _options)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    if (key != selected) onChanged(key);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: key == selected ? c.primarySoft : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight:
+                            key == selected ? FontWeight.w700 : FontWeight.w500,
+                        color:
+                            key == selected ? c.primary : c.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -342,58 +400,83 @@ class _DropdownBox<T> extends StatelessWidget {
             surface: c.card,
             onSurface: c.textPrimary,
           ),
-      dropdownMenuTheme: DropdownMenuThemeData(
-        menuStyle: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(c.card),
-        ),
+      listTileTheme: ListTileThemeData(
+        textColor: c.textPrimary,
+        iconColor: c.textSecondary,
+        dense: true,
       ),
     );
 
     return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 34,
+      padding: const EdgeInsets.only(left: 8, right: 4),
       decoration: BoxDecoration(
-        color: context.qingya.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.qingya.border),
+        color: c.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.border.withValues(alpha: 0.9)),
       ),
       child: Theme(
         data: menuTheme,
         child: DropdownButtonHideUnderline(
           child: DropdownButton<T>(
             isExpanded: true,
+            isDense: true,
             value: value,
-            dropdownColor: context.qingya.card,
-            focusColor: context.qingya.primarySoft,
+            dropdownColor: c.card,
+            elevation: 6,
+            menuMaxHeight: 280,
+            focusColor: c.primarySoft,
             icon: Icon(
               Icons.keyboard_arrow_down_rounded,
-              size: 18,
-              color: context.qingya.textSecondary,
+              size: 16,
+              color: c.textSecondary,
             ),
             style: TextStyle(
-              fontSize: 13,
-              color: context.qingya.textPrimary,
+              fontSize: 12,
+              color: c.textPrimary,
               fontWeight: FontWeight.w600,
             ),
             borderRadius: BorderRadius.circular(12),
+            selectedItemBuilder: (context) => [
+              for (final item in items)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: DefaultTextStyle(
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: c.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    child: item.child,
+                  ),
+                ),
+            ],
             items: [
               for (final item in items)
                 DropdownMenuItem<T>(
                   value: item.value,
-                  child: DefaultTextStyle(
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.qingya.textPrimary,
-                      fontWeight: FontWeight.w500,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: DefaultTextStyle(
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: c.textPrimary,
+                        fontWeight: item.value == value
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                      child: item.child,
                     ),
-                    child: item.child,
                   ),
                 ),
             ],
             onChanged: onChanged,
             hint: Text(
               label,
-              style: TextStyle(color: context.qingya.textSecondary),
+              style: TextStyle(fontSize: 12, color: c.textSecondary),
             ),
           ),
         ),

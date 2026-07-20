@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,6 +57,8 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Strip UTF-8 BOM written by some Windows editors / PowerShell 5.1 UTF8.
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)

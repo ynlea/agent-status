@@ -387,7 +387,7 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                   return TaskCard(
                     session: session,
                     onTap: () => context.push(
-                      '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+                      '/devices/${session.machineId}/sessions/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
                     ),
                   );
                 },
@@ -419,7 +419,7 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                   return TaskCard(
                     session: session,
                     onTap: () => context.push(
-                      '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+                      '/devices/${session.machineId}/sessions/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
                     ),
                   );
                 },
@@ -445,130 +445,127 @@ class _DetailHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
     final title = machine?.machineName ?? fallbackId;
-    return SizedBox(
-      height: 150,
-      child: Stack(
-        children: [
-          Positioned(
-            left: 0,
-            top: 2,
-            child: IconButton(
-              onPressed: () => context.pop(),
-              icon: Icon(
-                Icons.arrow_back_ios_new_rounded,
-                size: 20,
-                color: context.qingya.textPrimary,
+    final version = (machine?.version ?? '').trim();
+    final heartbeat = machine?.online == true
+        ? '最后心跳：1 分钟前'
+        : _lastSeen(machine?.lastSeenAt);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 112, bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                onPressed: () => context.pop(),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                icon: Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 20,
+                  color: c.textPrimary,
+                ),
               ),
-            ),
-          ),
-          Positioned(
-            left: 0,
-            top: 54,
-            right: 120,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: context.qingya.textPrimary,
-                        ),
-                      ),
-                    ),
-                    if (onRename != null)
-                      IconButton(
-                        onPressed: onRename,
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          Icons.edit_outlined,
-                          size: 18,
-                          color: context.qingya.textSecondary,
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 7),
-                Row(
-                  children: [
-                    OnlineDot(online: machine?.online == true, size: 8),
-                    const SizedBox(width: 6),
-                    Text(
-                      machine?.online == true ? '在线' : '离线',
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: machine?.online == true
-                            ? context.qingya.online
-                            : context.qingya.offline,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: c.textPrimary,
+                        height: 1.2,
                       ),
                     ),
-                    Text(
-                      ' · ',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.qingya.textSecondary,
+                  ),
+                  if (onRename != null)
+                    IconButton(
+                      onPressed: onRename,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.edit_outlined,
+                        size: 18,
+                        color: c.textSecondary,
                       ),
                     ),
-                    Flexible(
-                      child: Text(
-                        [
-                          platformLabel(machine?.platform),
-                          if ((machine?.version ?? '').isNotEmpty)
-                            machine!.version,
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.qingya.textSecondary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if ((machine?.version ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 7),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OnlineDot(online: machine?.online == true, size: 8),
+                  const SizedBox(width: 6),
                   Text(
-                    '监测端 ${machine!.version}',
+                    machine?.online == true ? '在线' : '离线',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: context.qingya.textSecondary,
-                      fontWeight: FontWeight.w500,
+                      color: machine?.online == true ? c.online : c.offline,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    ' · ',
+                    style: TextStyle(fontSize: 12, color: c.textSecondary),
+                  ),
+                  Flexible(
+                    child: Text(
+                      platformLabel(machine?.platform),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: c.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
-                const SizedBox(height: 7),
+              ),
+              if (version.isNotEmpty) ...[
+                const SizedBox(height: 6),
                 Text(
-                  machine?.online == true
-                      ? '最后心跳：1 分钟前'
-                      : _lastSeen(machine?.lastSeenAt),
+                  '监测端 $version',
                   style: TextStyle(
-                      fontSize: 11, color: context.qingya.textSecondary),
+                    fontSize: 12,
+                    color: c.textSecondary,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
                 ),
               ],
-            ),
+              const SizedBox(height: 6),
+              Text(
+                heartbeat,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: c.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+            ],
           ),
-          Positioned(
-            right: 4,
-            bottom: 0,
-            child: Image.asset(
-              QingyaAssets.catDetailPeekV3,
-              width: 128,
-              height: 128,
-              fit: BoxFit.contain,
-            ),
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Image.asset(
+            QingyaAssets.catDetailPeekV3,
+            width: 118,
+            height: 118,
+            fit: BoxFit.contain,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
