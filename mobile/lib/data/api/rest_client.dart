@@ -60,6 +60,30 @@ class RestClient {
         .toList();
   }
 
+  /// 修改设备显示名（服务端锁定，监测端上报不再覆盖）。
+  Future<Machine> renameMachine(String machineId, String name) async {
+    final res = await http
+        .patch(
+          _u('/api/v1/machines/${Uri.encodeComponent(machineId)}'),
+          headers: {
+            ..._headers,
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'machine_name': name}),
+        )
+        .timeout(const Duration(seconds: 20));
+    _ensureOk(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final m = body['machine'];
+    if (m is Map<String, dynamic>) {
+      return Machine.fromJson(m);
+    }
+    return Machine.fromJson({
+      'machine_id': machineId,
+      'machine_name': name,
+    });
+  }
+
   Future<UsageSummary> fetchUsageSummary({
     required DateTime from,
     required DateTime to,

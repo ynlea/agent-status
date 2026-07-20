@@ -133,6 +133,46 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
     }
   }
 
+  Future<void> renameMachine(String machineId, String name) async {
+    final s = _settings;
+    name = name.trim();
+    if (name.isEmpty) {
+      throw Exception('名称不能为空');
+    }
+    if (s.demoMode) {
+      final machines = [
+        for (final m in state.machines)
+          if (m.machineId == machineId) m.copyWith(machineName: name) else m,
+      ];
+      final sessions = [
+        for (final sess in state.sessions)
+          if (sess.machineId == machineId)
+            sess.copyWith(machineName: name)
+          else
+            sess,
+      ];
+      state = state.copyWith(machines: machines, sessions: sessions);
+      return;
+    }
+    if (!s.isConfigured) {
+      throw Exception('未配置服务器');
+    }
+    final client = RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
+    final updated = await client.renameMachine(machineId, name);
+    final machines = [
+      for (final m in state.machines)
+        if (m.machineId == machineId) updated else m,
+    ];
+    final sessions = [
+      for (final sess in state.sessions)
+        if (sess.machineId == machineId)
+          sess.copyWith(machineName: updated.machineName)
+        else
+          sess,
+    ];
+    state = state.copyWith(machines: machines, sessions: sessions);
+  }
+
   Future<void> _softRefresh() async {
     final s = _settings;
     if (!s.isConfigured || s.demoMode) return;

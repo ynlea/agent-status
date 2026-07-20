@@ -146,19 +146,48 @@ func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMachineSub(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
-		return
-	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/machines/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 2 || parts[1] != "sessions" || parts[0] == "" {
-		writeErr(w, http.StatusNotFound, "not_found", "use /api/v1/machines/{id}/sessions")
+	if len(parts) == 0 || parts[0] == "" {
+		writeErr(w, http.StatusNotFound, "not_found", "machine id required")
+		return
+	}
+	machineID := parts[0]
+
+	// PATCH /api/v1/machines/{id}  body: {"machine_name":"..."}
+	if len(parts) == 1 && r.Method == http.MethodPatch {
+		var body struct {
+			MachineName string `json:"machine_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+			return
+		}
+		m, err := s.Store.RenameMachine(machineID, body.MachineName)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeErr(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"machine": m})
+		return
+	}
+
+	// GET /api/v1/machines/{id}/sessions
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or PATCH required")
+		return
+	}
+	if len(parts) != 2 || parts[1] != "sessions" {
+		writeErr(w, http.StatusNotFound, "not_found", "use /api/v1/machines/{id}/sessions or PATCH /api/v1/machines/{id}")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"machine_id": parts[0],
-		"sessions":   s.Store.ListSessions(parts[0]),
+		"machine_id": machineID,
+		"sessions":   s.Store.ListSessions(machineID),
 	})
 }
 

@@ -74,9 +74,14 @@ class Machine {
     );
   }
 
-  Machine copyWith({bool? online, String? version}) => Machine(
+  Machine copyWith({
+    bool? online,
+    String? version,
+    String? machineName,
+  }) =>
+      Machine(
         machineId: machineId,
-        machineName: machineName,
+        machineName: machineName ?? this.machineName,
         platform: platform,
         online: online ?? this.online,
         lastSeenAt: lastSeenAt,

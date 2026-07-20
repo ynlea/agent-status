@@ -90,6 +90,11 @@ class DevicesPage extends ConsumerWidget {
                             index: index,
                             onTap: () =>
                                 context.push('/devices/${machine.machineId}'),
+                            onRename: () => showRenameMachineDialog(
+                              context,
+                              ref,
+                              machine,
+                            ),
                           );
                         },
                       ),
@@ -108,12 +113,14 @@ class _DeviceTile extends StatelessWidget {
     required this.activeCount,
     required this.index,
     required this.onTap,
+    required this.onRename,
   });
 
   final Machine machine;
   final int activeCount;
   final int index;
   final VoidCallback onTap;
+  final VoidCallback onRename;
 
   String get _deviceAsset {
     final value = '${machine.platform} ${machine.machineName}'.toLowerCase();
@@ -147,6 +154,7 @@ class _DeviceTile extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
+        onLongPress: onRename,
         child: Container(
           height: 94,
           padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
@@ -180,15 +188,33 @@ class _DeviceTile extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      machine.machineName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: QingyaColors.textPrimary,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            machine.machineName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: QingyaColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: onRename,
+                          behavior: HitTestBehavior.opaque,
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.edit_outlined,
+                              size: 15,
+                              color: QingyaColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 5),
                     Row(
@@ -324,7 +350,17 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               sliver: SliverList.list(
                 children: [
-                  _DetailHeader(machine: machine, fallbackId: widget.machineId),
+                  _DetailHeader(
+                    machine: machine,
+                    fallbackId: widget.machineId,
+                    onRename: machine == null
+                        ? null
+                        : () => showRenameMachineDialog(
+                              context,
+                              ref,
+                              machine,
+                            ),
+                  ),
                   const SizedBox(height: 14),
                   _SessionSectionHeader(label: '活跃会话', count: active.length),
                   const SizedBox(height: 8),
@@ -397,10 +433,15 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
 }
 
 class _DetailHeader extends StatelessWidget {
-  const _DetailHeader({required this.machine, required this.fallbackId});
+  const _DetailHeader({
+    required this.machine,
+    required this.fallbackId,
+    this.onRename,
+  });
 
   final Machine? machine;
   final String fallbackId;
+  final VoidCallback? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -428,15 +469,31 @@ class _DetailHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: QingyaColors.textPrimary,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: QingyaColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (onRename != null)
+                      IconButton(
+                        onPressed: onRename,
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: QingyaColors.textSecondary,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 7),
                 Row(

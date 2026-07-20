@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,13 +17,14 @@ type sessionKey struct {
 
 // Memory is an in-memory store for the contract mock server.
 type Memory struct {
-	mu       sync.RWMutex
-	machines map[string]apitypes.Machine
-	sessions map[sessionKey]apitypes.Session
-	history  []apitypes.HistoryEntry
-	usage    map[string]apitypes.UsageEvent // dedupe_key -> event
-	maxHist  int
-	prices   *priceCache
+	mu         sync.RWMutex
+	machines   map[string]apitypes.Machine
+	nameLocked map[string]bool
+	sessions   map[sessionKey]apitypes.Session
+	history    []apitypes.HistoryEntry
+	usage      map[string]apitypes.UsageEvent // dedupe_key -> event
+	maxHist    int
+	prices     *priceCache
 }
 
 func NewMemory(maxHistory int) *Memory {
@@ -29,12 +32,13 @@ func NewMemory(maxHistory int) *Memory {
 		maxHistory = 50
 	}
 	m := &Memory{
-		machines: make(map[string]apitypes.Machine),
-		sessions: make(map[sessionKey]apitypes.Session),
-		history:  make([]apitypes.HistoryEntry, 0, maxHistory),
-		usage:    make(map[string]apitypes.UsageEvent),
-		maxHist:  maxHistory,
-		prices:   newPriceCache(),
+		machines:   make(map[string]apitypes.Machine),
+		nameLocked: make(map[string]bool),
+		sessions:   make(map[sessionKey]apitypes.Session),
+		history:    make([]apitypes.HistoryEntry, 0, maxHistory),
+		usage:      make(map[string]apitypes.UsageEvent),
+		maxHist:    maxHistory,
+		prices:     newPriceCache(),
 	}
 	for _, p := range bundledPublicPrices {
 		m.prices.upsert(p, SourceBundled)
@@ -77,9 +81,13 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 	if ver == "" && ok {
 		ver = prev.Version
 	}
+	name := req.MachineName
+	if ok && m.nameLocked[req.MachineID] && prev.MachineName != "" {
+		name = prev.MachineName
+	}
 	m.machines[req.MachineID] = apitypes.Machine{
 		MachineID:   req.MachineID,
-		MachineName: req.MachineName,
+		MachineName: name,
 		Platform:    req.Platform,
 		Version:     ver,
 		Online:      true,
@@ -159,6 +167,32 @@ func (m *Memory) appendHistoryLocked(e apitypes.HistoryEntry) {
 	if len(m.history) > m.maxHist {
 		m.history = m.history[len(m.history)-m.maxHist:]
 	}
+}
+
+func (m *Memory) RenameMachine(machineID, name string) (apitypes.Machine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name = strings.TrimSpace(name)
+	if machineID == "" {
+		return apitypes.Machine{}, fmt.Errorf("machine_id required")
+	}
+	if name == "" {
+		return apitypes.Machine{}, fmt.Errorf("name required")
+	}
+	prev, ok := m.machines[machineID]
+	if !ok {
+		return apitypes.Machine{}, fmt.Errorf("machine not found")
+	}
+	prev.MachineName = name
+	m.machines[machineID] = prev
+	m.nameLocked[machineID] = true
+	for k, s := range m.sessions {
+		if k.MachineID == machineID {
+			s.MachineName = name
+			m.sessions[k] = s
+		}
+	}
+	return prev, nil
 }
 
 func (m *Memory) ListMachines() []apitypes.Machine {

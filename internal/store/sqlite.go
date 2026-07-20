@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS model_prices (
 	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN version TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN last_assistant_message TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN name_locked INTEGER NOT NULL DEFAULT 0`)
 	return s.seedModelPrices()
 }
 
@@ -248,7 +249,11 @@ func (s *SQLiteStore) ApplyUsageReport(req apitypes.UsageReportRequest) (accepte
 INSERT INTO machines(machine_id, machine_name, platform, online, last_seen_at)
 VALUES(?,?,?,?,?)
 ON CONFLICT(machine_id) DO UPDATE SET
-  machine_name=CASE WHEN excluded.machine_name != '' THEN excluded.machine_name ELSE machines.machine_name END,
+  machine_name=CASE
+    WHEN machines.name_locked = 1 THEN machines.machine_name
+    WHEN excluded.machine_name != '' THEN excluded.machine_name
+    ELSE machines.machine_name
+  END,
   platform=CASE WHEN excluded.platform != '' THEN excluded.platform ELSE machines.platform END,
   online=1,
   last_seen_at=excluded.last_seen_at
@@ -434,7 +439,7 @@ func (s *SQLiteStore) ApplyReport(req apitypes.ReportRequest) (changed []apitype
 INSERT INTO machines(machine_id, machine_name, platform, version, online, last_seen_at)
 VALUES(?,?,?,?,?,?)
 ON CONFLICT(machine_id) DO UPDATE SET
-  machine_name=excluded.machine_name,
+  machine_name=CASE WHEN machines.name_locked = 1 THEN machines.machine_name ELSE excluded.machine_name END,
   platform=excluded.platform,
   version=CASE WHEN excluded.version != '' THEN excluded.version ELSE machines.version END,
   online=1,
@@ -552,6 +557,41 @@ DELETE FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
 		return nil, false
 	}
 	return changed, wasOnline
+}
+
+
+func (s *SQLiteStore) RenameMachine(machineID, name string) (apitypes.Machine, error) {
+	name = strings.TrimSpace(name)
+	if machineID == "" {
+		return apitypes.Machine{}, fmt.Errorf("machine_id required")
+	}
+	if name == "" {
+		return apitypes.Machine{}, fmt.Errorf("name required")
+	}
+	res, err := s.db.Exec(`
+UPDATE machines SET machine_name=?, name_locked=1 WHERE machine_id=?
+`, name, machineID)
+	if err != nil {
+		return apitypes.Machine{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return apitypes.Machine{}, fmt.Errorf("machine not found")
+	}
+	_, _ = s.db.Exec(`UPDATE sessions SET machine_name=? WHERE machine_id=?`, name, machineID)
+	var m apitypes.Machine
+	var online int
+	var last string
+	err = s.db.QueryRow(`
+SELECT machine_id, machine_name, platform, COALESCE(version,''), online, last_seen_at
+FROM machines WHERE machine_id=?
+`, machineID).Scan(&m.MachineID, &m.MachineName, &m.Platform, &m.Version, &online, &last)
+	if err != nil {
+		return apitypes.Machine{}, err
+	}
+	m.Online = online == 1
+	m.LastSeenAt, _ = time.Parse(time.RFC3339Nano, last)
+	return m, nil
 }
 
 func (s *SQLiteStore) ListMachines() []apitypes.Machine {

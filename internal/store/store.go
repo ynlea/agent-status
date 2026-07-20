@@ -6,6 +6,8 @@ import "github.com/ynlea/agent-status/pkg/apitypes"
 type Store interface {
 	ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Session, wasOnline bool)
 	ListMachines() []apitypes.Machine
+	// RenameMachine sets a user-facing machine name and locks it against monitor overwrites.
+	RenameMachine(machineID, name string) (apitypes.Machine, error)
 	ListSessions(machineID string) []apitypes.Session
 	ListHistory(limit int) []apitypes.HistoryEntry
 	// Cleanup removes history older than maxAge and trims to maxCount; marks stale machines offline.
