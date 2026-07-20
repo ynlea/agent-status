@@ -120,6 +120,7 @@ class UsageSnapshot {
     this.summary,
     this.breakdown,
     this.trend,
+    this.heatmap,
     this.loading = false,
     this.fromCache = false,
     this.error,
@@ -129,6 +130,8 @@ class UsageSnapshot {
   final UsageSummary? summary;
   final UsageBreakdown? breakdown;
   final UsageBreakdown? trend;
+  /// 近 16 周按日用量（GitHub 风格热力图）。
+  final UsageBreakdown? heatmap;
   final bool loading;
   final bool fromCache;
   final String? error;
@@ -138,6 +141,7 @@ class UsageSnapshot {
     UsageSummary? summary,
     UsageBreakdown? breakdown,
     UsageBreakdown? trend,
+    UsageBreakdown? heatmap,
     bool? loading,
     bool? fromCache,
     String? error,
@@ -149,6 +153,7 @@ class UsageSnapshot {
       summary: clearData ? null : (summary ?? this.summary),
       breakdown: clearData ? null : (breakdown ?? this.breakdown),
       trend: clearData ? null : (trend ?? this.trend),
+      heatmap: clearData ? null : (heatmap ?? this.heatmap),
       loading: loading ?? this.loading,
       fromCache: fromCache ?? this.fromCache,
       error: clearError ? null : (error ?? this.error),
@@ -201,6 +206,7 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
           summary: cached.summary,
           breakdown: cached.breakdown,
           trend: cached.trend,
+          heatmap: cached.heatmap,
           clearError: true,
         );
         if (cached.isFresh) {
@@ -222,6 +228,7 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
         summary: _demoSummary(from, to),
         breakdown: _demoBreakdown(from, to, q.groupBy),
         trend: _demoTrend(trendFrom, trendTo, byHour: q.trendByHour),
+        heatmap: _demoHeatmap(),
         clearError: true,
       );
       return;
@@ -242,6 +249,10 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
 
     try {
       final client = RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
+      final n = DateTime.now();
+      final heatTo = n;
+      final heatFrom = DateTime(n.year, n.month, n.day)
+          .subtract(const Duration(days: 16 * 7 - 1));
       final results = await Future.wait([
         client.fetchUsageSummary(
           from: from,
@@ -263,17 +274,26 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
           machineId: q.machineId,
           agent: q.agent,
         ),
+        client.fetchUsageBreakdown(
+          from: heatFrom,
+          to: heatTo,
+          groupBy: 'day',
+          machineId: q.machineId,
+          agent: q.agent,
+        ),
       ]);
       if (seq != _reqSeq) return;
       final summary = results[0] as UsageSummary;
       final breakdown = results[1] as UsageBreakdown;
       final trend = results[2] as UsageBreakdown;
+      final heatmap = results[3] as UsageBreakdown;
       state = state.copyWith(
         loading: false,
         fromCache: false,
         summary: summary,
         breakdown: breakdown,
         trend: trend,
+        heatmap: heatmap,
         clearError: true,
       );
       await _cache.write(
@@ -283,6 +303,7 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
           summary: summary,
           breakdown: breakdown,
           trend: trend,
+          heatmap: heatmap,
         ),
       );
     } catch (e) {
@@ -378,6 +399,47 @@ UsageBreakdown _demoTrend(DateTime from, DateTime to, {required bool byHour}) {
     ));
   }
   return UsageBreakdown(from: from, to: to, groupBy: 'day', groups: groups);
+}
+
+
+UsageBreakdown _demoHeatmap() {
+  final n = DateTime.now();
+  final end = DateTime(n.year, n.month, n.day);
+  final start = end.subtract(const Duration(days: 16 * 7 - 1));
+  final groups = <UsageBreakdownGroup>[];
+  var day = start;
+  var i = 0;
+  while (!day.isAfter(end)) {
+    final mid = DateTime(day.year, day.month, day.day, 12).toUtc();
+    final key =
+        '${mid.year.toString().padLeft(4, '0')}-${mid.month.toString().padLeft(2, '0')}-${mid.day.toString().padLeft(2, '0')}';
+    final weekend =
+        day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
+    final usage = weekend
+        ? ((i % 9 == 0) ? 2500 : 0)
+        : (6000 + (i * 173) % 45000);
+    if (usage > 0) {
+      groups.add(UsageBreakdownGroup(
+        key: key,
+        metrics: UsageMetrics(
+          inputTokens: usage ~/ 2,
+          outputTokens: usage ~/ 3,
+          realUsage: usage,
+          eventCount: usage ~/ 1500 + 1,
+          priced: true,
+          estimatedCostUsd: usage / 1e6 * 3,
+        ),
+      ));
+    }
+    day = day.add(const Duration(days: 1));
+    i++;
+  }
+  return UsageBreakdown(
+    from: start,
+    to: end,
+    groupBy: 'day',
+    groups: groups,
+  );
 }
 
 final usageRepositoryProvider =

@@ -270,6 +270,11 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                _ActivityHeatmap(
+                  data: snap.heatmap,
+                  fmtInt: _fmtInt,
+                ),
+                const SizedBox(height: 10),
                 _TrendCard(
                   trend: snap.trend,
                   byHour: q.trendByHour,
@@ -552,6 +557,209 @@ class _SmallStat extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+/// GitHub 风格活跃热力图（紧凑，高度接近汇总卡）。
+class _ActivityHeatmap extends StatefulWidget {
+  const _ActivityHeatmap({
+    required this.data,
+    required this.fmtInt,
+  });
+
+  final UsageBreakdown? data;
+  final String Function(int) fmtInt;
+
+  @override
+  State<_ActivityHeatmap> createState() => _ActivityHeatmapState();
+}
+
+class _ActivityHeatmapState extends State<_ActivityHeatmap> {
+  String? _tip;
+
+  /// 服务端按 UTC 日切桶；用本地中午映射。
+  String _dayKey(DateTime localDay) {
+    final mid = DateTime(localDay.year, localDay.month, localDay.day, 12).toUtc();
+    final y = mid.year.toString().padLeft(4, '0');
+    final m = mid.month.toString().padLeft(2, '0');
+    final d = mid.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  Color _colorFor(int value, int maxV) {
+    if (value <= 0 || maxV <= 0) {
+      return const Color(0xFFF0EBE6);
+    }
+    final t = (value / maxV).clamp(0.0, 1.0);
+    // 浅 → 青芽橙绿
+    if (t < 0.25) return const Color(0xFFFFE4D6);
+    if (t < 0.5) return const Color(0xFFFFC2A8);
+    if (t < 0.75) return const Color(0xFFFF9A7A);
+    return const Color(0xFFE9685F);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = DateTime.now();
+    final end = DateTime(n.year, n.month, n.day);
+    // 对齐到周：GitHub 列是周，行是周日→周六。这里用 周一→周日 更符合国内习惯。
+    final start = end.subtract(const Duration(days: 16 * 7 - 1));
+    // 向左对齐到周一
+    final gridStart = start.subtract(Duration(days: start.weekday - 1));
+    final weeks = 16;
+    final byKey = <String, int>{
+      for (final g in widget.data?.groups ?? const <UsageBreakdownGroup>[])
+        g.key: g.metrics.realUsage,
+    };
+
+    final cells = <({DateTime day, int value})>[];
+    var maxV = 0;
+    for (var w = 0; w < weeks; w++) {
+      for (var d = 0; d < 7; d++) {
+        final day = gridStart.add(Duration(days: w * 7 + d));
+        if (day.isAfter(end)) {
+          cells.add((day: day, value: -1)); // 未来空
+          continue;
+        }
+        if (day.isBefore(start)) {
+          cells.add((day: day, value: -1));
+          continue;
+        }
+        final v = byKey[_dayKey(day)] ?? 0;
+        if (v > maxV) maxV = v;
+        cells.add((day: day, value: v));
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: QingyaColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: QingyaColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '活跃热力',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: QingyaColors.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _tip ?? '近 16 周 · 按真实用量',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: QingyaColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, c) {
+              // 7 行 × 16 列，尽量塞进汇总卡类似高度
+              const gap = 2.5;
+              final cell = ((c.maxWidth - gap * 15) / 16).clamp(8.0, 12.0);
+              final height = cell * 7 + gap * 6;
+              return SizedBox(
+                height: height,
+                child: Row(
+                  children: [
+                    for (var w = 0; w < weeks; w++) ...[
+                      if (w > 0) SizedBox(width: gap),
+                      Column(
+                        children: [
+                          for (var d = 0; d < 7; d++) ...[
+                            if (d > 0) SizedBox(height: gap),
+                            Builder(
+                              builder: (_) {
+                                final cellData = cells[w * 7 + d];
+                                final v = cellData.value;
+                                final empty = v < 0;
+                                final color = empty
+                                    ? Colors.transparent
+                                    : _colorFor(v, maxV);
+                                return GestureDetector(
+                                  onTap: empty
+                                      ? null
+                                      : () {
+                                          final day = cellData.day;
+                                          final label =
+                                              '${day.month}/${day.day}';
+                                          setState(() {
+                                            _tip = v <= 0
+                                                ? '$label · 无用量'
+                                                : '$label · ${widget.fmtInt(v)}';
+                                          });
+                                        },
+                                  child: Container(
+                                    width: cell,
+                                    height: cell,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      borderRadius: BorderRadius.circular(2),
+                                      border: empty
+                                          ? null
+                                          : Border.all(
+                                              color: const Color(0x14000000),
+                                              width: 0.5,
+                                            ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                '少',
+                style: TextStyle(fontSize: 10, color: QingyaColors.textSecondary),
+              ),
+              const SizedBox(width: 4),
+              for (final c in const [
+                Color(0xFFF0EBE6),
+                Color(0xFFFFE4D6),
+                Color(0xFFFFC2A8),
+                Color(0xFFFF9A7A),
+                Color(0xFFE9685F),
+              ]) ...[
+                Container(
+                  width: 9,
+                  height: 9,
+                  margin: const EdgeInsets.only(right: 3),
+                  decoration: BoxDecoration(
+                    color: c,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
+              const Text(
+                '多',
+                style: TextStyle(fontSize: 10, color: QingyaColors.textSecondary),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

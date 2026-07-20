@@ -9,7 +9,7 @@ class UsageDiskCache {
   UsageDiskCache(this._prefs);
 
   final SharedPreferences _prefs;
-  static const _prefix = 'usage_cache_v1:';
+  static const _prefix = 'usage_cache_v2:';
   static const ttl = Duration(minutes: 10);
 
   String key({
@@ -30,6 +30,7 @@ class UsageDiskCache {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       final savedAt = DateTime.tryParse('${map['saved_at']}');
       if (savedAt == null) return null;
+      final heatRaw = map['heatmap'];
       return CachedUsage(
         savedAt: savedAt,
         summary: UsageSummary.fromJson(
@@ -41,6 +42,9 @@ class UsageDiskCache {
         trend: UsageBreakdown.fromJson(
           (map['trend'] as Map).cast<String, dynamic>(),
         ),
+        heatmap: heatRaw is Map
+            ? UsageBreakdown.fromJson(heatRaw.cast<String, dynamic>())
+            : null,
       );
     } catch (_) {
       return null;
@@ -53,6 +57,7 @@ class UsageDiskCache {
       'summary': _summaryJson(data.summary),
       'breakdown': _breakdownJson(data.breakdown),
       'trend': _breakdownJson(data.trend),
+      if (data.heatmap != null) 'heatmap': _breakdownJson(data.heatmap!),
     };
     await _prefs.setString(key, jsonEncode(payload));
   }
@@ -92,12 +97,14 @@ class CachedUsage {
     required this.summary,
     required this.breakdown,
     required this.trend,
+    this.heatmap,
   });
 
   final DateTime savedAt;
   final UsageSummary summary;
   final UsageBreakdown breakdown;
   final UsageBreakdown trend;
+  final UsageBreakdown? heatmap;
 
   bool get isFresh => DateTime.now().difference(savedAt) <= UsageDiskCache.ttl;
 }
