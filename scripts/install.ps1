@@ -915,8 +915,48 @@ function Invoke-Update {
     Show-Status
 }
 
+
+function Read-ActionMenu {
+    Write-Banner '管理面板'
+    Write-Host '  请选择操作' -ForegroundColor White
+    Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor DarkGray
+    Write-Host '  │  1  安装 / 重装 install                               │' -ForegroundColor DarkGray
+    Write-Host '  │  2  更新二进制   update                               │' -ForegroundColor DarkGray
+    Write-Host '  │  3  查看状态     status                               │' -ForegroundColor DarkGray
+    Write-Host '  │  4  启动服务     start                                │' -ForegroundColor DarkGray
+    Write-Host '  │  5  停止服务     stop                                 │' -ForegroundColor DarkGray
+    Write-Host '  │  6  重启服务     restart                              │' -ForegroundColor DarkGray
+    Write-Host '  │  7  卸载         uninstall                            │' -ForegroundColor DarkGray
+    Write-Host '  │  8  彻底清理     uninstall -Purge                     │' -ForegroundColor DarkGray
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor DarkGray
+    $c = Read-Prompt '请输入序号' '1'
+    switch ($c) {
+        '1' { return @{ Command = 'install'; Purge = $false } }
+        '2' { return @{ Command = 'update'; Purge = $false } }
+        '3' { return @{ Command = 'status'; Purge = $false } }
+        '4' { return @{ Command = 'start'; Purge = $false } }
+        '5' { return @{ Command = 'stop'; Purge = $false } }
+        '6' { return @{ Command = 'restart'; Purge = $false } }
+        '7' { return @{ Command = 'uninstall'; Purge = $false } }
+        '8' { return @{ Command = 'uninstall'; Purge = $true } }
+        default { Die "无效选项: $c" }
+    }
+}
+
+
 # When piped via irm | iex, $PSCommandPath may be empty; still allow running as function-like
 if ([string]::IsNullOrWhiteSpace($Command)) { $Command = 'install' }
+
+# 无显式命令参数 + 交互终端：弹出操作菜单（含卸载）
+$autoCommand = -not $PSBoundParameters.ContainsKey('Command')
+if ((Test-Interactive) -and $autoCommand -and -not $Yes) {
+    $pick = Read-ActionMenu
+    $Command = $pick.Command
+    if ($pick.Purge) { $Purge = $true }
+    if ($Command -in @('update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'uninstall') -and [string]::IsNullOrWhiteSpace($Role)) {
+        $Role = 'all'
+    }
+}
 
 switch ($Command) {
     'install' { Invoke-Install }

@@ -1088,6 +1088,48 @@ cmd_update() {
   cmd_status
 }
 
+interactive_pick_command() {
+  # 无参数交互启动时选择操作
+  local W=52 c
+  print_banner "管理面板"
+  printf '  %s请选择操作%s\n' "${C_BOLD}" "${C_RESET}"
+  box_top "$C_DIM" "$W"
+  box_row "$C_DIM" "  1  安装 / 重装 install" "$W"
+  box_row "$C_DIM" "  2  更新二进制   update" "$W"
+  box_row "$C_DIM" "  3  查看状态     status" "$W"
+  box_row "$C_DIM" "  4  启动服务     start" "$W"
+  box_row "$C_DIM" "  5  停止服务     stop" "$W"
+  box_row "$C_DIM" "  6  重启服务     restart" "$W"
+  box_row "$C_DIM" "  7  卸载         uninstall" "$W"
+  box_row "$C_DIM" "  8  彻底清理     uninstall --purge" "$W"
+  box_bot "$C_DIM" "$W"
+  c="$(prompt "请输入序号" "1")"
+  case "$c" in
+    1) CMD="install" ;;
+    2) CMD="update" ;;
+    3) CMD="status" ;;
+    4) CMD="start" ;;
+    5) CMD="stop" ;;
+    6) CMD="restart" ;;
+    7) CMD="uninstall"; PURGE=0 ;;
+    8)
+      CMD="uninstall"
+      PURGE=1
+      ;;
+    *) die "无效选项: $c" ;;
+  esac
+  # 需要角色的命令：未指定时默认 all（安装仍会再问）
+  case "$CMD" in
+    update|status|start|stop|restart|enable|disable)
+      [[ -z "$ROLE" ]] && ROLE="all"
+      ;;
+    uninstall)
+      [[ -z "$ROLE" ]] && ROLE="all"
+      ;;
+  esac
+}
+
+
 interactive_fill() {
   local want_server=0 want_monitor=0
   local keep_server=0 keep_monitor=0
@@ -1302,7 +1344,12 @@ parse_args() {
 }
 
 main() {
+  local argc=$#
   parse_args "$@"
+  # 无参数 + 交互终端：弹出操作菜单（含卸载）
+  if [[ "$argc" -eq 0 ]] && have_tty && [[ "$YES" -eq 0 ]]; then
+    interactive_pick_command
+  fi
   case "$CMD" in
     install) cmd_install ;;
     update)  cmd_update ;;
