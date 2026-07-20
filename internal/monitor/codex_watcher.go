@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -51,7 +52,13 @@ func NewCodexFileSource(root string, logger *slog.Logger, opts CodexFileWatchOpt
 		logger = slog.Default()
 	}
 	if opts.RescanInterval <= 0 {
-		opts.RescanInterval = time.Minute
+		// Windows file notifications are easier to miss under bursty appends;
+		// keep a tighter light rescan so detail updates do not wait a full minute.
+		if runtime.GOOS == "windows" {
+			opts.RescanInterval = 15 * time.Second
+		} else {
+			opts.RescanInterval = time.Minute
+		}
 	}
 	return &CodexFileSource{
 		root:           root,
@@ -177,7 +184,9 @@ func (s *CodexFileSource) handleEvent(w *fsnotify.Watcher, event fsnotify.Event)
 		s.removeFile(event.Name)
 		return
 	}
-	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+	// Write is the normal append path. On some Windows setups appends also
+	// surface as Chmod-only notifications; treat both as content changes.
+	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Chmod) != 0 {
 		s.updateFile(event.Name)
 	}
 }
@@ -415,5 +424,8 @@ func sameCodexSession(old apitypes.Session, oldPresent bool, next apitypes.Sessi
 		old.SessionID == next.SessionID &&
 		old.DisplayName == next.DisplayName &&
 		old.State == next.State &&
-		old.Message == next.Message
+		old.Message == next.Message &&
+		old.Cwd == next.Cwd &&
+		// Detail text streams in while state stays "working"; must trigger report.
+		old.LastAssistantMessage == next.LastAssistantMessage
 }

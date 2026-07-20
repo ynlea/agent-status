@@ -156,3 +156,35 @@ func assertWatcherStates(t *testing.T, sessions []apitypes.Session, want map[str
 		}
 	}
 }
+
+
+func TestCodexFileSourceNotifiesOnAssistantDetail(t *testing.T) {
+	root := t.TempDir()
+	path := writeWatcherRollout(t, root, "rollout-session-detail.jsonl", `{"type":"event_msg","payload":{"type":"task_started"}}`+"\n")
+	source := NewCodexFileSource(root, nil, CodexFileWatchOptions{RescanInterval: time.Hour})
+	if err := source.rescan(); err != nil {
+		t.Fatal(err)
+	}
+	// Drain any startup notify.
+	select {
+	case <-source.Changes():
+	default:
+	}
+
+	appendWatcherLine(t, path, `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello detail"}]}}`+"\n")
+	source.updateFile(path)
+
+	select {
+	case <-source.Changes():
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("expected change notify when last assistant message updates")
+	}
+	sessions := source.Snapshot()
+	if len(sessions) != 1 || sessions[0].LastAssistantMessage == "" {
+		t.Fatalf("sessions=%+v", sessions)
+	}
+	if sessions[0].LastAssistantMessage != "hello detail" {
+		t.Fatalf("last=%q", sessions[0].LastAssistantMessage)
+	}
+}
