@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Agent Status</string>
-    <string name="channel_name">会话状态提醒</string>
-    <string name="channel_desc">确认 / 工作中 / 完成 等状态变化（含震动）</string>
-    <string name="ongoing_channel_name">后台监听</string>
-    <string name="ongoing_channel_desc">保持 WebSocket 连接的前台服务通知</string>
-    <string name="ongoing_title">Agent Status 后台监听</string>
-</resources>

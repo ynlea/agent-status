@@ -105,9 +105,14 @@ go build -o bin/agent-status-monitor ./cmd/monitor
 
 日志字段 `source`：`codex-file-watch` / `codex-file` / `claude-hook`。
 
-## 3. Android
+## 3. 轻芽 App（Flutter）
 
-见 `android/README.md`。用 Android Studio 打开 `android/` 编译安装。
+见 `mobile/README.md`。客户端在 `mobile/`：
+
+```bash
+export PATH="$HOME/flutter/bin:$PATH"
+cd mobile && flutter pub get && flutter run
+```
 
 1. 服务 URL：局域网可用 `http://电脑IP:8080`；外出需 VPN / 隧道 / 反代 HTTPS  
 2. 密钥与服务端一致  
@@ -115,6 +120,8 @@ go build -o bin/agent-status-monitor ./cmd/monitor
 4. 只读：手机上不能远程确认 Agent  
 
 省电：把 App 加入厂商「无限制后台」/ 白名单，否则 WebSocket 可能被杀导致漏通知。首版无 FCM，依赖长连接与重连轮询。
+
+发布用 APK 见 `docs/install.md`（`qingya-android-release.apk`）。
 
 ## 4. 外出访问
 

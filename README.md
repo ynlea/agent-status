@@ -10,8 +10,7 @@
 | 服务端 | `cmd/server` | Go + SQLite |
 | Mock | `cmd/mock` | 内存态联调 |
 | 监控端 | `cmd/monitor` | Codex 扫描 + Claude hook + 上报 |
-| 轻芽 App（Flutter） | `mobile/` | **主客户端**，对齐原型图 |
-| Android（旧） | `android/` | Kotlin Compose 原型，暂留 |
+| 轻芽 App（Flutter） | `mobile/` | 只读客户端，对齐原型图 |
 | 部署说明 | `docs/deploy.md` | 从零安装 |
 
 ## 最短路径

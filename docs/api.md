@@ -1,6 +1,6 @@
 # Agent Status API Contract (v1)
 
-Frozen for first integration of monitor, server, and Android. Mock implementation: `cmd/mock`.
+Frozen for first integration of monitor, server, and mobile client. Mock implementation: `cmd/mock`.
 
 ## Auth
 

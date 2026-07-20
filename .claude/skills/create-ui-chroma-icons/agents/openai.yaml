@@ -1,4 +1,0 @@
-interface:
-  display_name: "UI 绿幕图标工作流"
-  short_description: "调研 UI 图标需求，生成 2x2 绿幕图板并批量抠图"
-  default_prompt: "使用 $create-ui-chroma-icons 调研指定 UI 的真实图标需求，按四图一组绘制绿幕图板，并抠出通过校验的透明 PNG 图标。"

@@ -4,7 +4,11 @@
 !.env.example
 monitor.json
 projects.lnk
-.claude/settings.local.json
+
+# --- agent / IDE tooling (local only) ---
+.agents/
+.claude/
+.codex/
 
 # --- runtime data ---
 *.db
@@ -39,12 +43,7 @@ Thumbs.db
 # --- local agent / tooling state ---
 .mindfs/
 
-# --- Android (legacy) ---
-android/local.properties
-android/.gradle/
-android/**/build/
-android/captures/
-android/.cxx/
+# --- mobile build artifacts / signing ---
 *.apk
 *.ap_
 *.aab
