@@ -214,7 +214,7 @@ function Enable-Role([string]$RoleName) {
     $info = Get-StartInfo $RoleName
     $arg = ($info.ArgumentList -join ' ')
     $action = New-ScheduledTaskAction -Execute $info.FilePath -Argument $arg -WorkingDirectory $InstallRoot
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
     Write-Log "已启用开机任务 $task"
