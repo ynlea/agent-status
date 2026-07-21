@@ -251,15 +251,19 @@ Pre-shared key required on all routes. Snapshots never include plaintext API key
 
 ### Monitor
 
-- `POST /api/v1/providers/report` — redacted provider snapshot for codex/claude
+- `POST /api/v1/providers/report` — redacted provider snapshot + readiness (`cc_switch_available`, `cc_switch_cli_ready`, `cc_switch_bin`)
 - `POST /api/v1/commands/pull` — lease pending commands for `machine_id` (serial running)
 - `POST /api/v1/commands/{id}/result` — report `succeeded`/`failed`; optional `providers_report`
 
 ### App
 
-- `GET /api/v1/machines/{id}/providers?app=codex|claude|all`
-- `POST /api/v1/machines/{id}/commands` — body `{app,type,payload}` where type is `switch_provider` or `update_provider`
+- `GET /api/v1/machines/{id}/providers?app=codex|claude|all` — includes readiness flags
+- `POST /api/v1/machines/{id}/commands` — `switch_provider` / `update_provider` / `refresh_providers`
 - `GET /api/v1/commands/{id}` — poll status (`queued|running|succeeded|failed|timed_out|cancelled`)
 
+`refresh_providers` forces the monitor to re-scan local cc-switch and push a new snapshot (use for App pull-to-refresh).
+
 Command payload fields (update): `provider_id`, optional `name`/`base_url`/`api_key`, codex `model`, claude `model_alias` + `anthropic_model` + `default_*_model`. Empty `api_key` means leave unchanged.
+
+App should disable switch/edit when readiness is false.
 
