@@ -510,8 +510,13 @@ func (s *Server) handleMonitorWS(w http.ResponseWriter, r *http.Request) {
 	// Deliver any queued work immediately on connect.
 	s.notifyMonitorCommands(machineID)
 
-	// Keepalive read loop: client may send pings/hello; any read error ends session.
+	// Keepalive: monitor sends WebSocket pings; reset deadline on any frame.
 	_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
+	c.SetPingHandler(func(appData string) error {
+		_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
+		// default pong reply
+		return c.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+	})
 	c.SetPongHandler(func(string) error {
 		_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
 		return nil

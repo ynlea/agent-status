@@ -71,6 +71,7 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
       _error = null;
     });
     try {
+      final prevUpdated = _data?.updatedAt;
       if (forceRemote) {
         // Ask monitor to re-scan local cc-switch and push a fresh snapshot.
         final cmd = await client.runCommandAndWait(
@@ -79,7 +80,7 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
           type: 'refresh_providers',
           payload: const {},
           timeout: const Duration(seconds: 45),
-          interval: const Duration(milliseconds: 800),
+          interval: const Duration(milliseconds: 500),
         );
         if (!cmd.isSuccess && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -99,6 +100,17 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
         _data = data;
         _loading = false;
       });
+      if (forceRemote && mounted) {
+        final same = prevUpdated != null &&
+            data.updatedAt != null &&
+            !data.updatedAt!.isAfter(prevUpdated);
+        final msg = !data.canManage
+            ? '本机无 cc-switch 数据'
+            : (same
+                ? '已刷新，但快照时间未更新（请确认改的是当前这台设备）'
+                : '已从本机重新拉取');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

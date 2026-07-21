@@ -126,12 +126,18 @@ func (a *Adapter) openDB() (*sql.DB, error) {
 	if !a.Available() {
 		return nil, fmt.Errorf("cc-switch db not found: %s", a.DBPath)
 	}
-	// read-write for patch; short-lived connections
-	db, err := sql.Open("sqlite", a.DBPath)
+	// Short-lived connections; busy_timeout helps when cc-switch GUI holds the WAL.
+	dsn := "file:" + a.DBPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	// Ensure we can talk to the DB (surface lock errors early).
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 

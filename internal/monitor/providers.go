@@ -400,13 +400,50 @@ func (p *ProviderController) runOne(cmd apitypes.MachineCommand) {
 			CcSwitchBin:       p.Adapter.ResolvedBin(),
 		}
 		if p.Adapter.Available() {
-			if listed, err := p.Adapter.ListApps(); err == nil {
+			listed, err := p.listAppsRetry(3)
+			if err != nil {
+				p.log().Warn("采集供应商快照失败", "命令标识", cmd.ID, "错误", err)
+				// refresh must fail if we cannot re-read local DB
+				if cmd.Type == apitypes.CommandTypeRefreshProviders && status == apitypes.CommandStatusSucceeded {
+					status = apitypes.CommandStatusFailed
+					errMsg = "refresh succeeded but list failed: " + err.Error()
+					if len(errMsg) > 400 {
+						errMsg = errMsg[:400]
+					}
+				}
+			} else {
 				rep.Apps = listed
+				p.log().Info("已采集供应商快照",
+					"命令标识", cmd.ID,
+					"应用数", len(listed),
+				)
 			}
 		}
-		report = rep
+		// Only attach report when we have apps or meta-only is intentional (DB missing).
+		if len(rep.Apps) > 0 || !p.Adapter.Available() {
+			report = rep
+		} else if status == apitypes.CommandStatusSucceeded {
+			// avoid uploading empty apps that would look like a wipe
+			report = rep
+			report.Apps = nil
+		} else {
+			report = rep
+		}
 	}
 	if err := p.Rep.CompleteCommand(cmd.ID, status, errMsg, report); err != nil {
 		p.log().Warn("回报命令结果失败", "命令标识", cmd.ID, "错误", err)
 	}
+}
+
+func (p *ProviderController) listAppsRetry(times int) ([]apitypes.ProviderAppSnapshot, error) {
+	var last error
+	for i := 0; i < times; i++ {
+		listed, err := p.Adapter.ListApps()
+		if err == nil {
+			return listed, nil
+		}
+		last = err
+		time.Sleep(time.Duration(150*(i+1)) * time.Millisecond)
+	}
+	return nil, last
 }
