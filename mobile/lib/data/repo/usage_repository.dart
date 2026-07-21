@@ -6,7 +6,7 @@ import '../prefs/settings_store.dart';
 import 'status_repository.dart';
 import 'usage_cache.dart';
 
-enum UsageRangePreset { today, day1, day7, day30, custom }
+enum UsageRangePreset { today, day1, day7, day30, all, custom }
 
 class UsageQueryState {
   const UsageQueryState({
@@ -60,6 +60,9 @@ class UsageQueryState {
         return (n.subtract(const Duration(days: 7)), n);
       case UsageRangePreset.day30:
         return (n.subtract(const Duration(days: 30)), n);
+      case UsageRangePreset.all:
+        // Earliest practical bound; server returns whatever exists.
+        return (DateTime(2024, 1, 1), n);
       case UsageRangePreset.custom:
         final from = customFrom ?? DateTime(n.year, n.month, n.day);
         final to = customTo ?? n;
@@ -94,15 +97,38 @@ class UsageQueryState {
       ];
     }
     final (from, to) = window(n);
-    var t = DateTime(from.year, from.month, from.day);
+    final start = DateTime(from.year, from.month, from.day);
     final end = DateTime(to.year, to.month, to.day);
+    // 「全部」压成固定 20 个桶，避免曲线点过密。
+    if (preset == UsageRangePreset.all) {
+      return _evenBucketStarts(start, end, 20);
+    }
     final out = <DateTime>[];
+    var t = start;
     while (!t.isAfter(end) && out.length < 90) {
       out.add(t);
       t = t.add(const Duration(days: 1));
     }
     return out;
   }
+
+  /// Evenly spaced bucket start days in [start, end] (inclusive day range).
+  static List<DateTime> _evenBucketStarts(DateTime start, DateTime end, int buckets) {
+    if (buckets <= 1) return [start];
+    final totalDays = end.difference(start).inDays + 1;
+    if (totalDays <= 0) return [start];
+    if (totalDays <= buckets) {
+      return [
+        for (var i = 0; i < totalDays; i++) start.add(Duration(days: i)),
+      ];
+    }
+    return [
+      for (var i = 0; i < buckets; i++)
+        start.add(Duration(days: (i * totalDays / buckets).floor())),
+    ];
+  }
+
+  bool get trendBucketed => preset == UsageRangePreset.all && !trendByHour;
 
   /// ≤ 1 天 → 按小时；更长 → 按天。
   bool get trendByHour {

@@ -53,6 +53,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
         UsageRangePreset.day1 => '近一天',
         UsageRangePreset.day7 => '近7天',
         UsageRangePreset.day30 => '近30天',
+        UsageRangePreset.all => '全部',
         UsageRangePreset.custom => '自定义',
       };
 
@@ -258,6 +259,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                 _TrendCard(
                   trend: snap.trend,
                   byHour: q.trendByHour,
+                  bucketed: q.trendBucketed,
                   slots: q.trendSlots(),
                   fmtInt: _fmtInt,
                   fmtRate: _fmtRate,
@@ -415,22 +417,23 @@ class _DropdownBox<T> extends StatelessWidget {
       Rect.fromPoints(topLeft, bottomRight),
       Offset.zero & overlay.size,
     );
-    final menuWidth = math.max(box.size.width, 148.0);
+    // Keep popup width identical to the closed chip.
+    final menuWidth = box.size.width;
 
     final selected = await showMenu<T>(
       context: context,
       position: position,
       color: c.card,
       surfaceTintColor: Colors.transparent,
-      elevation: 10,
-      shadowColor: c.shadow.withValues(alpha: 0.35),
+      elevation: 8,
+      shadowColor: c.shadow.withValues(alpha: 0.28),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: c.border.withValues(alpha: 0.9)),
       ),
       constraints: BoxConstraints(
         minWidth: menuWidth,
-        maxWidth: menuWidth + 40,
+        maxWidth: menuWidth,
         maxHeight: 280,
       ),
       items: [
@@ -698,22 +701,37 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
     return '$y-$m-$d';
   }
 
-  Color _colorFor(int value, int maxV) {
+  /// Ordered 5-step scale (empty → max), single primary hue family.
+  List<Color> _scaleColors() {
     final c = context.qingya;
-    if (value <= 0 || maxV <= 0) {
-      return c.idleSoft;
-    }
-    // Log scale so a single huge day (e.g. 1e9) does not wash out mid days.
-    // Any non-zero day gets a visible floor intensity.
-    final ratio = math.log(1 + value) / math.log(1 + maxV);
-    final t = (0.28 + 0.72 * ratio).clamp(0.0, 1.0);
-    if (t < 0.4) {
-      return Color.lerp(c.primarySoft, c.primary, (t - 0.28) / 0.12)!;
-    }
-    if (t < 0.7) {
-      return Color.lerp(c.primary, c.primaryDark, (t - 0.4) / 0.3)!;
-    }
-    return Color.lerp(c.primaryDark, c.device, (t - 0.7) / 0.3)!;
+    return [
+      c.idleSoft, // 0
+      Color.lerp(c.idleSoft, c.primary, 0.32)!, // 1
+      Color.lerp(c.idleSoft, c.primary, 0.55)!, // 2
+      Color.lerp(c.primary, c.primaryDark, 0.45)!, // 3
+      c.primaryDark, // 4
+    ];
+  }
+
+  /// Cap color scale at ~p90 of positive days so one extreme day
+  /// does not crush the rest. Values above cap still paint as max.
+  int _scaleCap(Iterable<int> values) {
+    final positives = values.where((v) => v > 0).toList()..sort();
+    if (positives.isEmpty) return 0;
+    if (positives.length == 1) return positives.first;
+    final idx = ((positives.length - 1) * 0.90).round().clamp(0, positives.length - 1);
+    final p90 = positives[idx];
+    // Guard: if p90 is still tiny vs absolute max, keep p90 (outlier ignored).
+    return p90 <= 0 ? positives.last : p90;
+  }
+
+  Color _colorFor(int value, int cap) {
+    final levels = _scaleColors();
+    if (value <= 0 || cap <= 0) return levels[0];
+    // Linear within [0, cap]; above cap → top step.
+    final t = (value / cap).clamp(0.0, 1.0);
+    final idx = (1 + (t * 3.999).floor()).clamp(1, 4);
+    return levels[idx];
   }
 
   @override
@@ -731,7 +749,7 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
     };
 
     final cells = <({DateTime day, int value})>[];
-    var maxV = 0;
+    final positiveValues = <int>[];
     for (var w = 0; w < weeks; w++) {
       for (var d = 0; d < 7; d++) {
         final day = gridStart.add(Duration(days: w * 7 + d));
@@ -744,10 +762,11 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
           continue;
         }
         final v = byKey[_dayKey(day)] ?? 0;
-        if (v > maxV) maxV = v;
+        if (v > 0) positiveValues.add(v);
         cells.add((day: day, value: v));
       }
     }
+    final cap = _scaleCap(positiveValues);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -771,7 +790,7 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
               ),
               const Spacer(),
               Text(
-                _tip ?? '近 16 周 · 按真实用量',
+                _tip ?? '近 16 周 · 色阶按约九成日封顶',
                 style: TextStyle(
                   fontSize: 11,
                   color: context.qingya.textSecondary,
@@ -807,7 +826,7 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
                                     final empty = v < 0;
                                     final color = empty
                                         ? Colors.transparent
-                                        : _colorFor(v, maxV);
+                                        : _colorFor(v, cap);
                                     return GestureDetector(
                                       onTap: empty
                                           ? null
@@ -856,13 +875,7 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
                 style: TextStyle(fontSize: 10, color: context.qingya.textSecondary),
               ),
               const SizedBox(width: 4),
-              for (final c in [
-                context.qingya.idleSoft,
-                context.qingya.primarySoft,
-                context.qingya.primary,
-                context.qingya.primaryDark,
-                context.qingya.device,
-              ]) ...[
+              for (final c in _scaleColors()) ...[
                 Container(
                   width: 9,
                   height: 9,
@@ -889,6 +902,7 @@ class _TrendCard extends StatefulWidget {
   const _TrendCard({
     required this.trend,
     required this.byHour,
+    this.bucketed = false,
     required this.slots,
     required this.fmtInt,
     required this.fmtRate,
@@ -897,7 +911,9 @@ class _TrendCard extends StatefulWidget {
 
   final UsageBreakdown? trend;
   final bool byHour;
-  /// 本地时区整点/整日槽位。
+  /// When true, [slots] are bucket starts; aggregate daily metrics into each bucket.
+  final bool bucketed;
+  /// 本地时区整点/整日槽位（或桶起点）。
   final List<DateTime> slots;
   final String Function(int) fmtInt;
   final String Function(double?) fmtRate;
@@ -930,14 +946,129 @@ class _TrendCardState extends State<_TrendCard> {
     return '$y-$m-$d';
   }
 
+
+  DateTime? _parseServerDayKey(String key) {
+    // YYYY-MM-DD
+    if (key.length < 10) return null;
+    final y = int.tryParse(key.substring(0, 4));
+    final m = int.tryParse(key.substring(5, 7));
+    final d = int.tryParse(key.substring(8, 10));
+    if (y == null || m == null || d == null) return null;
+    return DateTime(y, m, d);
+  }
+
+  List<DateTime> _evenBucketStarts(DateTime start, DateTime end, int buckets) {
+    if (buckets <= 1) return [start];
+    final totalDays = end.difference(start).inDays + 1;
+    if (totalDays <= 0) return [start];
+    if (totalDays <= buckets) {
+      return [
+        for (var i = 0; i < totalDays; i++) start.add(Duration(days: i)),
+      ];
+    }
+    return [
+      for (var i = 0; i < buckets; i++)
+        start.add(Duration(days: (i * totalDays / buckets).floor())),
+    ];
+  }
+
+  UsageMetrics _sumMetrics(Iterable<UsageMetrics> list) {
+    var input = 0, output = 0, reasoning = 0, cw = 0, ch = 0, real = 0, events = 0;
+    double cost = 0;
+    var hasCost = false;
+    var priced = false;
+    for (final m in list) {
+      input += m.inputTokens;
+      output += m.outputTokens;
+      reasoning += m.reasoningTokens;
+      cw += m.cacheWriteTokens;
+      ch += m.cacheHitTokens;
+      real += m.realUsage;
+      events += m.eventCount;
+      if (m.estimatedCostUsd != null) {
+        cost += m.estimatedCostUsd!;
+        hasCost = true;
+      }
+      if (m.priced) priced = true;
+    }
+    final denom = ch + input;
+    return UsageMetrics(
+      inputTokens: input,
+      outputTokens: output,
+      reasoningTokens: reasoning,
+      cacheWriteTokens: cw,
+      cacheHitTokens: ch,
+      realUsage: real,
+      cacheHitRate: denom > 0 ? ch / denom : null,
+      estimatedCostUsd: hasCost ? cost : null,
+      eventCount: events,
+      priced: priced,
+    );
+  }
+
   List<_TrendPoint> _buildPoints() {
     final raw = [...(widget.trend?.groups ?? const <UsageBreakdownGroup>[])];
     final byKey = <String, UsageMetrics>{
       for (final g in raw) g.key: g.metrics,
     };
 
+    if (widget.bucketed) {
+      // Start from first day that actually has data → today, then 20 buckets.
+      final dataDays = <DateTime>[];
+      for (final e in byKey.entries) {
+        final m = e.value;
+        if (m.realUsage <= 0 && m.eventCount <= 0 && m.inputTokens <= 0) {
+          continue;
+        }
+        final parsed = _parseServerDayKey(e.key);
+        if (parsed != null) dataDays.add(parsed);
+      }
+      if (dataDays.isEmpty) {
+        return const <_TrendPoint>[];
+      }
+      dataDays.sort();
+      // If idle gap > 30 days appears, drop earlier sparse segment(s);
+      // keep only from the first data day after the last long gap → today.
+      var start = DateTime(dataDays.first.year, dataDays.first.month, dataDays.first.day);
+      for (var i = 1; i < dataDays.length; i++) {
+        final prev = dataDays[i - 1];
+        final cur = dataDays[i];
+        final gapDays = cur.difference(prev).inDays;
+        if (gapDays > 30) {
+          start = DateTime(cur.year, cur.month, cur.day);
+        }
+      }
+      final now = DateTime.now();
+      final endDay = DateTime(now.year, now.month, now.day);
+      final slots = _evenBucketStarts(start, endDay, 20);
+      final lastEnd = endDay.add(const Duration(days: 1));
+      final out = <_TrendPoint>[];
+      for (var i = 0; i < slots.length; i++) {
+        final bStart = slots[i];
+        final bEnd = i + 1 < slots.length ? slots[i + 1] : lastEnd;
+        final bucket = <UsageMetrics>[];
+        var day = bStart;
+        while (day.isBefore(bEnd)) {
+          final m = byKey[_serverDayKey(day)];
+          if (m != null) bucket.add(m);
+          day = day.add(const Duration(days: 1));
+        }
+        final endLabel = bEnd.subtract(const Duration(days: 1));
+        out.add(
+          _TrendPoint(
+            label: '${bStart.month}/${bStart.day}',
+            title:
+                '${bStart.year}-${bStart.month.toString().padLeft(2, '0')}-${bStart.day.toString().padLeft(2, '0')}'
+                ' ~ '
+                '${endLabel.year}-${endLabel.month.toString().padLeft(2, '0')}-${endLabel.day.toString().padLeft(2, '0')}',
+            metrics: _sumMetrics(bucket),
+          ),
+        );
+      }
+      return out;
+    }
+
     // 严格按本地槽位补齐：今天 0:00→当前整点；近1天 24 个整点。
-    // 数据用本地槽位对应的 UTC key 去匹配服务端。
     return [
       for (final slot in widget.slots)
         _TrendPoint(
@@ -990,7 +1121,9 @@ class _TrendCardState extends State<_TrendCard> {
           Row(
             children: [
               Text(
-                widget.byHour ? '用量趋势（按小时）' : '用量趋势（按天）',
+                widget.byHour
+                    ? '用量趋势（按小时）'
+                    : (widget.bucketed ? '用量趋势（分桶）' : '用量趋势（按天）'),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -1001,7 +1134,7 @@ class _TrendCardState extends State<_TrendCard> {
               Text(
                 widget.byHour
                     ? '${points.length} 个时点'
-                    : '${points.length} 天',
+                    : (widget.bucketed ? '${points.length} 段' : '${points.length} 天'),
                 style: TextStyle(
                   fontSize: 11,
                   color: context.qingya.textSecondary,
