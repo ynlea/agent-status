@@ -562,6 +562,84 @@ EOF
   ok "配置已就绪"
 }
 
+find_cc_switch_bin() {
+  if command -v cc-switch >/dev/null 2>&1; then
+    command -v cc-switch
+    return 0
+  fi
+  local home="${HOME:-}"
+  local c
+  for c in \
+    "$home/.local/bin/cc-switch" \
+    "$home/bin/cc-switch"
+  do
+    if [[ -n "$c" && -x "$c" ]]; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_cc_switch_db() {
+  local home="${HOME:-}"
+  local p="$home/.cc-switch/cc-switch.db"
+  if [[ -f "$p" ]]; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+  return 1
+}
+
+# 探测并补写 cc-switch 路径（新建与保留旧配置都会跑）。
+ensure_monitor_cc_switch() {
+  local path="$CONFIG_DIR/monitor.json"
+  [[ -f "$path" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || {
+    warn "无 python3，跳过 cc-switch 配置探测"
+    return 0
+  }
+  local bin_found="" db_found="" out
+  bin_found="$(find_cc_switch_bin 2>/dev/null || true)"
+  db_found="$(find_cc_switch_db 2>/dev/null || true)"
+  out="$(python3 - "$path" "$bin_found" "$db_found" <<'PY'
+import json, sys
+path, bin_found, db_found = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as f:
+    d = json.load(f)
+changed = False
+if not (d.get("cc_switch_bin") or "").strip() and bin_found:
+    d["cc_switch_bin"] = bin_found
+    changed = True
+if not (d.get("cc_switch_db") or "").strip() and db_found:
+    d["cc_switch_db"] = db_found
+    changed = True
+if changed:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+print(d.get("cc_switch_bin", ""))
+print(d.get("cc_switch_db", ""))
+print("1" if changed else "0")
+PY
+)" || true
+  local bin_line db_line changed_line
+  bin_line="$(printf '%s\n' "$out" | sed -n '1p')"
+  db_line="$(printf '%s\n' "$out" | sed -n '2p')"
+  changed_line="$(printf '%s\n' "$out" | sed -n '3p')"
+  if [[ "$changed_line" == "1" ]]; then
+    path_line "已写入 cc-switch" "$path"
+  fi
+  if [[ -n "$bin_line" ]]; then
+    kv "cc-switch" "$bin_line"
+  else
+    kv "cc-switch" "未发现（切换供应商需安装 CLI，或配置 cc_switch_bin）"
+  fi
+  if [[ -n "$db_line" ]]; then
+    kv "cc-switch.db" "$db_line"
+  fi
+}
+
 write_monitor_json() {
   local path="$CONFIG_DIR/monitor.json"
   local server_url="$1" key="$2"
@@ -571,6 +649,7 @@ write_monitor_json() {
   platform="linux"
   if [[ -f "$path" && "$FORCE_CONFIG" -eq 0 ]]; then
     path_line "保留配置" "$path"
+    ensure_monitor_cc_switch
     return
   fi
   if [[ -f "$path" ]]; then
@@ -591,6 +670,7 @@ write_monitor_json() {
 EOF
   chmod 600 "$path"
   path_line "写入" "$path"
+  ensure_monitor_cc_switch
   ok "配置已就绪"
 }
 
@@ -833,10 +913,15 @@ cmd_status() {
           url="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("server_url",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
           machine="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("machine_name") or d.get("machine_id",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
           platform="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("platform",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+          local ccbin ccdb
+          ccbin="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("cc_switch_bin",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
+          ccdb="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("cc_switch_db",""))' "$CONFIG_DIR/monitor.json" 2>/dev/null || true)"
           [[ -n "$url" ]] && kv "URL" "$url"
           [[ -n "$machine" ]] && kv "机器" "$machine"
           [[ -n "$platform" ]] && kv "平台" "$platform"
           kv "KEY" "****"
+          if [[ -n "$ccbin" ]]; then kv "cc-switch" "$ccbin"; else kv "cc-switch" "未配置（将尝试自动探测）"; fi
+          [[ -n "$ccdb" ]] && kv "cc-switch.db" "$ccdb"
         fi
         ;;
     esac
@@ -1161,12 +1246,19 @@ cmd_update() {
     VERSION="$target"
     systemctl --user stop "$(unit_for_role "$r")" 2>/dev/null || true
     install_binary "$r"
+    if [[ "$r" == "monitor" ]]; then
+      ensure_monitor_cc_switch
+    fi
     systemctl --user start "$(unit_for_role "$r")" 2>/dev/null || true
     VERSION="$prev_version"
     local_ver="$(local_binary_version "$r")"
     ok "已更新 $r → ${local_ver:-$target}"
     updated=$((updated + 1))
   done
+  # 即使二进制已是最新，也补写一次 cc-switch 探测结果
+  if printf '%s\n' "${roles[@]}" | grep -qx 'monitor'; then
+    ensure_monitor_cc_switch
+  fi
   if [[ "$updated" -eq 0 && "$skipped" -gt 0 ]]; then
     print_done "已是最新，无需更新"
   else

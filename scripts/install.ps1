@@ -357,16 +357,102 @@ AGENT_STATUS_DB=$db
     Write-PathLine '写入' $path; Write-Ok '配置已就绪'
 }
 
+function Find-CcSwitchBin {
+    $candidates = @()
+    try {
+        $cmd = Get-Command cc-switch.exe -ErrorAction SilentlyContinue
+        if (-not $cmd) { $cmd = Get-Command cc-switch -ErrorAction SilentlyContinue }
+        if ($cmd -and $cmd.Source) { $candidates += [string]$cmd.Source }
+    } catch {}
+    if ($env:LOCALAPPDATA) {
+        $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\cc-switch-cli\cc-switch.exe')
+    }
+    if ($env:USERPROFILE) {
+        $candidates += (Join-Path $env:USERPROFILE 'AppData\Local\Programs\cc-switch-cli\cc-switch.exe')
+        $candidates += (Join-Path $env:USERPROFILE '.local\bin\cc-switch.exe')
+        $candidates += (Join-Path $env:USERPROFILE 'bin\cc-switch.exe')
+    }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+    }
+    return ''
+}
+
+function Find-CcSwitchDb {
+    if ($env:USERPROFILE) {
+        $p = Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db'
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    return ''
+}
+
+# 探测并补写 cc-switch 路径（新建与保留旧配置都会跑）。
+function Ensure-MonitorCcSwitch {
+    $path = Join-Path $ConfigDir 'monitor.json'
+    if (-not (Test-Path $path)) { return }
+
+    try {
+        $j = Get-Content $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Warn "无法解析 monitor.json，跳过 cc-switch 探测"
+        return
+    }
+
+    $changed = $false
+    $bin = ''
+    if ($j.PSObject.Properties.Name -contains 'cc_switch_bin') {
+        $bin = [string]$j.cc_switch_bin
+    }
+    if ([string]::IsNullOrWhiteSpace($bin)) {
+        $found = Find-CcSwitchBin
+        if ($found) {
+            $j | Add-Member -NotePropertyName cc_switch_bin -NotePropertyValue $found -Force
+            $bin = $found
+            $changed = $true
+        }
+    }
+
+    $db = ''
+    if ($j.PSObject.Properties.Name -contains 'cc_switch_db') {
+        $db = [string]$j.cc_switch_db
+    }
+    if ([string]::IsNullOrWhiteSpace($db)) {
+        $foundDb = Find-CcSwitchDb
+        if ($foundDb) {
+            $j | Add-Member -NotePropertyName cc_switch_db -NotePropertyValue $foundDb -Force
+            $db = $foundDb
+            $changed = $true
+        }
+    }
+
+    if ($changed) {
+        Write-Utf8NoBom $path ($j | ConvertTo-Json)
+        Write-PathLine '已写入 cc-switch' $path
+    }
+
+    if ($bin) {
+        Write-Kv 'cc-switch' $bin
+    } else {
+        Write-Kv 'cc-switch' '未发现（切换供应商需安装 CLI，或手动配置 cc_switch_bin）'
+    }
+    if ($db) {
+        Write-Kv 'cc-switch.db' $db
+    }
+}
+
 function Write-MonitorJson([string]$Url, [string]$KeyValue) {
     $path = Join-Path $ConfigDir 'monitor.json'
     if ((Test-Path $path) -and -not $ForceConfig) {
         Write-PathLine '保留配置' $path
+        Ensure-MonitorCcSwitch
         return
     }
     if (Test-Path $path) {
         Copy-Item $path ("$path.bak-{0:yyyyMMddHHmmss}" -f (Get-Date)) -Force
     }
     $machine = $env:COMPUTERNAME
+    $bin = Find-CcSwitchBin
+    $db = Find-CcSwitchDb
     $obj = [ordered]@{
         server_url           = $Url
         key                  = $KeyValue
@@ -378,8 +464,13 @@ function Write-MonitorJson([string]$Url, [string]$KeyValue) {
         codex_sessions_dir   = ''
         state_file           = ''
     }
+    if ($bin) { $obj['cc_switch_bin'] = $bin }
+    if ($db) { $obj['cc_switch_db'] = $db }
     Write-Utf8NoBom $path ($obj | ConvertTo-Json)
-    Write-PathLine '写入' $path; Write-Ok '配置已就绪'
+    Write-PathLine '写入' $path
+    if ($bin) { Write-Kv 'cc-switch' $bin } else { Write-Kv 'cc-switch' '未发现（可稍后写入 cc_switch_bin）' }
+    if ($db) { Write-Kv 'cc-switch.db' $db }
+    Write-Ok '配置已就绪'
 }
 
 function Get-PidPath([string]$RoleName) {
@@ -580,6 +671,9 @@ function Show-Status {
             if ($hostName) { Write-Kv '机器' $hostName }
             if ($j.platform) { Write-Kv '平台' $j.platform }
             Write-Kv 'KEY' '****'
+            if ($j.cc_switch_bin) { Write-Kv 'cc-switch' $j.cc_switch_bin }
+            else { Write-Kv 'cc-switch' '未配置（将尝试自动探测）' }
+            if ($j.cc_switch_db) { Write-Kv 'cc-switch.db' $j.cc_switch_db }
         }
     }
     Write-Host ""
@@ -969,11 +1063,18 @@ function Invoke-Update {
         $script:Version = $target
         Stop-Role $r
         Install-Binary $r
+        if ($r -eq 'monitor') {
+            Ensure-MonitorCcSwitch
+        }
         Start-Role $r
         $script:Version = $prevVersion
         $local2 = Get-LocalBinaryVersion $r
         if ($local2) { Write-Ok "已更新 $r → $local2" } else { Write-Ok "已更新 $r → $target" }
         $updated++
+    }
+    # 即使二进制已是最新，也补写一次 cc-switch 探测结果（旧配置可能缺字段）
+    if ($roles -contains 'monitor' -or $roles -contains 'all') {
+        Ensure-MonitorCcSwitch
     }
     if ($updated -eq 0 -and $skipped -gt 0) {
         Write-Done '已是最新，无需更新'
