@@ -65,3 +65,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 会话文案与列表优化发版
+
+**Date**: 2026-07-21
+**Task**: 会话文案与列表优化发版
+**Branch**: `main`
+
+### Summary
+
+完成任务改会话、SessionCard 中等紧凑与时长/用量字段；修复通知设备名；发 v0.1.12，更新 yueya 服务端与本机 monitor，adb 覆盖安装 App。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7c1610e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
