@@ -160,6 +160,94 @@ class RestClient {
     return _u(path).replace(queryParameters: q);
   }
 
+  Future<ProvidersListResponse> fetchProviders(
+    String machineId, {
+    String app = 'all',
+  }) async {
+    final uri = _u(
+      '/api/v1/machines/${Uri.encodeComponent(machineId)}/providers',
+    ).replace(queryParameters: {'app': app});
+    final res = await http
+        .get(uri, headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    _ensureOk(res);
+    return ProvidersListResponse.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<String> enqueueCommand({
+    required String machineId,
+    required String app,
+    required String type,
+    required Map<String, dynamic> payload,
+  }) async {
+    final res = await http
+        .post(
+          _u('/api/v1/machines/${Uri.encodeComponent(machineId)}/commands'),
+          headers: {
+            ..._headers,
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'app': app,
+            'type': type,
+            'payload': payload,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    _ensureOk(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return '${body['command_id'] ?? ''}';
+  }
+
+  Future<MachineCommand> fetchCommand(String commandId) async {
+    final res = await http
+        .get(
+          _u('/api/v1/commands/${Uri.encodeComponent(commandId)}'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 20));
+    _ensureOk(res);
+    return MachineCommand.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Enqueue and poll until terminal status (or timeout).
+  Future<MachineCommand> runCommandAndWait({
+    required String machineId,
+    required String app,
+    required String type,
+    required Map<String, dynamic> payload,
+    Duration timeout = const Duration(seconds: 90),
+    Duration interval = const Duration(seconds: 2),
+  }) async {
+    final id = await enqueueCommand(
+      machineId: machineId,
+      app: app,
+      type: type,
+      payload: payload,
+    );
+    if (id.isEmpty) {
+      throw RestException(500, '服务端未返回 command_id');
+    }
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final cmd = await fetchCommand(id);
+      if (cmd.isTerminal) return cmd;
+      await Future<void>.delayed(interval);
+    }
+    return MachineCommand(
+      id: id,
+      machineId: machineId,
+      app: app,
+      type: type,
+      status: 'timed_out',
+      errorMessage: '等待命令结果超时',
+    );
+  }
+
   void _ensureOk(http.Response res) {
     if (res.statusCode >= 200 && res.statusCode < 300) return;
     if (res.statusCode == 401) {

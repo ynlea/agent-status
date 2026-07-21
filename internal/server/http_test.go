@@ -214,3 +214,124 @@ func TestUsageReportAndQuery(t *testing.T) {
 		t.Fatalf("bd=%+v", bd)
 	}
 }
+
+func TestProvidersAndCommandsHTTP(t *testing.T) {
+	srv := &Server{
+		Key:   "dev-secret",
+		Store: store.NewMemory(20),
+		Hub:   NewHub(),
+	}
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	auth := func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer dev-secret")
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// unauthorized
+	res, err := http.Post(ts.URL+"/api/v1/providers/report", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauth status=%d", res.StatusCode)
+	}
+
+	// report providers
+	body := map[string]interface{}{
+		"machine_id": "m1",
+		"apps": []map[string]interface{}{{
+			"app": "codex", "current_id": "p1",
+			"providers": []map[string]interface{}{{
+				"id": "p1", "name": "one", "has_api_key": true,
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/providers/report", bytes.NewReader(raw))
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("report status=%d", res.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/machines/m1/providers?app=codex", nil)
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list apitypes.ProvidersListResponse
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	res.Body.Close()
+	if len(list.Apps) != 1 || list.Apps[0].CurrentID != "p1" {
+		t.Fatalf("list=%+v", list)
+	}
+
+	// enqueue
+	raw, _ = json.Marshal(map[string]interface{}{
+		"app": "codex", "type": "switch_provider",
+		"payload": map[string]string{"provider_id": "p1", "api_key": "secret"},
+	})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/v1/machines/m1/commands", bytes.NewReader(raw))
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var enq apitypes.EnqueueCommandResponse
+	_ = json.NewDecoder(res.Body).Decode(&enq)
+	res.Body.Close()
+	if enq.CommandID == "" || enq.Status != "queued" {
+		t.Fatalf("enq=%+v", enq)
+	}
+
+	// pull
+	raw, _ = json.Marshal(map[string]interface{}{"machine_id": "m1", "limit": 1})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/v1/commands/pull", bytes.NewReader(raw))
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pull apitypes.CommandsPullResponse
+	_ = json.NewDecoder(res.Body).Decode(&pull)
+	res.Body.Close()
+	if len(pull.Commands) != 1 || pull.Commands[0].Status != "running" {
+		t.Fatalf("pull=%+v", pull)
+	}
+
+	// result
+	raw, _ = json.Marshal(map[string]interface{}{
+		"machine_id": "m1", "status": "succeeded",
+	})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/v1/commands/"+enq.CommandID+"/result", bytes.NewReader(raw))
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("result status=%d", res.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/commands/"+enq.CommandID, nil)
+	auth(req)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmd apitypes.MachineCommand
+	_ = json.NewDecoder(res.Body).Decode(&cmd)
+	res.Body.Close()
+	if cmd.Status != "succeeded" || cmd.Payload.APIKey != "" {
+		t.Fatalf("cmd=%+v", cmd)
+	}
+}

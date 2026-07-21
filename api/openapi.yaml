@@ -68,6 +68,77 @@ paths:
           description: history newest first
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/providers/report:
+    post:
+      summary: Monitor redacted cc-switch provider snapshot
+      responses:
+        "200":
+          description: accepted
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/commands/pull:
+    post:
+      summary: Monitor pull/lease pending commands
+      responses:
+        "200":
+          description: leased commands (serial per machine)
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/commands/{id}:
+    get:
+      summary: Get command status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: command (api_key stripped)
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/commands/{id}/result:
+    post:
+      summary: Monitor report command result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: accepted
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/machines/{id}/providers:
+    get:
+      summary: List cached provider snapshots
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: app
+          in: query
+          schema: { type: string, enum: [codex, claude, all] }
+      responses:
+        "200":
+          description: snapshots
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/machines/{id}/commands:
+    post:
+      summary: Enqueue switch_provider or update_provider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: queued
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/ws:
     get:
       summary: WebSocket event stream

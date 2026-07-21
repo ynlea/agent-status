@@ -1,6 +1,10 @@
 package store
 
-import "github.com/ynlea/agent-status/pkg/apitypes"
+import (
+	"time"
+
+	"github.com/ynlea/agent-status/pkg/apitypes"
+)
 
 // Store is the persistence boundary for server and mock.
 type Store interface {
@@ -26,6 +30,22 @@ type Store interface {
 	UpsertModelPrice(p ModelPrice, source string) error
 	// ListModelPrices returns a snapshot of known prices.
 	ListModelPrices() []ModelPrice
+
+	// ApplyProvidersReport replaces provider snapshots for the machine (per app).
+	ApplyProvidersReport(req apitypes.ProvidersReportRequest) error
+	// ListProviders returns cached snapshots; app empty or "all" returns every app.
+	ListProviders(machineID, app string) (apitypes.ProvidersListResponse, error)
+
+	// EnqueueCommand queues a remote command for a machine (FIFO).
+	EnqueueCommand(machineID string, req apitypes.EnqueueCommandRequest) (apitypes.MachineCommand, error)
+	// PullCommands leases up to limit queued commands (serial: at most one running per machine).
+	PullCommands(machineID string, limit int) ([]apitypes.MachineCommand, error)
+	// CompleteCommand records monitor result and strips api_key from stored payload.
+	CompleteCommand(id string, req apitypes.CommandResultRequest) (apitypes.MachineCommand, error)
+	// GetCommand returns a command by id.
+	GetCommand(id string) (apitypes.MachineCommand, error)
+	// ExpireCommands marks timed-out queued/running commands; returns how many flipped.
+	ExpireCommands(now time.Time) int
 
 	Close() error
 }

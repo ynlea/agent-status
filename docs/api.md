@@ -244,3 +244,22 @@ Then POST a report in another terminal; expect `session_upsert` and `notificatio
 ## Shared Go types
 
 `pkg/apitypes` — importable by mock, real server, and monitor.
+
+## Remote cc-switch providers (v1)
+
+Pre-shared key required on all routes. Snapshots never include plaintext API keys (`has_api_key` only).
+
+### Monitor
+
+- `POST /api/v1/providers/report` — redacted provider snapshot for codex/claude
+- `POST /api/v1/commands/pull` — lease pending commands for `machine_id` (serial running)
+- `POST /api/v1/commands/{id}/result` — report `succeeded`/`failed`; optional `providers_report`
+
+### App
+
+- `GET /api/v1/machines/{id}/providers?app=codex|claude|all`
+- `POST /api/v1/machines/{id}/commands` — body `{app,type,payload}` where type is `switch_provider` or `update_provider`
+- `GET /api/v1/commands/{id}` — poll status (`queued|running|succeeded|failed|timed_out|cancelled`)
+
+Command payload fields (update): `provider_id`, optional `name`/`base_url`/`api_key`, codex `model`, claude `model_alias` + `anthropic_model` + `default_*_model`. Empty `api_key` means leave unchanged.
+

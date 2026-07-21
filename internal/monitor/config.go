@@ -36,6 +36,15 @@ type Config struct {
 	// UsageDiscoverSec is how often to walk trees for new usage files (default 600).
 	// Keep this slower than UsageIntervalSec so 1-minute ticks stay cheap.
 	UsageDiscoverSec int `json:"usage_discover_sec,omitempty"`
+
+	// CcSwitchDB overrides default ~/.cc-switch/cc-switch.db
+	CcSwitchDB string `json:"cc_switch_db,omitempty"`
+	// CcSwitchBin is the cc-switch executable (default: cc-switch on PATH)
+	CcSwitchBin string `json:"cc_switch_bin,omitempty"`
+	// CommandPollSec is how often to pull remote commands (default 5). 0 disables.
+	CommandPollSec int `json:"command_poll_sec,omitempty"`
+	// ProviderReportSec is how often to push provider snapshots (default = report_interval_sec).
+	ProviderReportSec int `json:"provider_report_sec,omitempty"`
 }
 
 func (c *Config) UsageScanEnabled() bool {
@@ -98,5 +107,35 @@ func LoadConfig(path string) (*Config, error) {
 	if c.UsageDiscoverSec <= 0 {
 		c.UsageDiscoverSec = 600
 	}
+	// CommandPollSec default 5; explicit 0 disables command execution.
+	if c.CommandPollSec < 0 {
+		c.CommandPollSec = 5
+	} else if c.CommandPollSec == 0 && !commandPollExplicitlyZero(data) {
+		c.CommandPollSec = 5
+	}
+	if c.CcSwitchBin == "" {
+		c.CcSwitchBin = "cc-switch"
+	}
+	if c.CcSwitchDB == "" {
+		home, _ := os.UserHomeDir()
+		c.CcSwitchDB = filepath.Join(home, ".cc-switch", "cc-switch.db")
+	}
 	return &c, nil
+}
+
+// commandPollExplicitlyZero detects `"command_poll_sec": 0` in raw JSON.
+func commandPollExplicitlyZero(data []byte) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	v, ok := raw["command_poll_sec"]
+	if !ok {
+		return false
+	}
+	var n int
+	if err := json.Unmarshal(v, &n); err != nil {
+		return false
+	}
+	return n == 0
 }

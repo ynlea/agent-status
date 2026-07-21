@@ -385,3 +385,146 @@ List<Session> sortActiveSessions(Iterable<Session> input) {
   });
   return list;
 }
+
+/// Redacted cc-switch provider row from server snapshot.
+class ProviderInfo {
+  const ProviderInfo({
+    required this.id,
+    required this.name,
+    this.baseUrl = '',
+    this.model = '',
+    this.modelAlias = '',
+    this.anthropicModel = '',
+    this.defaultHaikuModel = '',
+    this.defaultSonnetModel = '',
+    this.defaultOpusModel = '',
+    this.category = '',
+    this.hasApiKey = false,
+  });
+
+  final String id;
+  final String name;
+  final String baseUrl;
+  final String model;
+  final String modelAlias;
+  final String anthropicModel;
+  final String defaultHaikuModel;
+  final String defaultSonnetModel;
+  final String defaultOpusModel;
+  final String category;
+  final bool hasApiKey;
+
+  String modelSummary(String app) {
+    if (app == 'codex') {
+      return model.trim();
+    }
+    final parts = <String>[
+      if (modelAlias.trim().isNotEmpty) modelAlias.trim(),
+      if (anthropicModel.trim().isNotEmpty) anthropicModel.trim(),
+    ];
+    return parts.join(' · ');
+  }
+
+  factory ProviderInfo.fromJson(Map<String, dynamic> json) {
+    return ProviderInfo(
+      id: '${json['id'] ?? ''}',
+      name: '${json['name'] ?? ''}',
+      baseUrl: '${json['base_url'] ?? ''}',
+      model: '${json['model'] ?? ''}',
+      modelAlias: '${json['model_alias'] ?? ''}',
+      anthropicModel: '${json['anthropic_model'] ?? ''}',
+      defaultHaikuModel: '${json['default_haiku_model'] ?? ''}',
+      defaultSonnetModel: '${json['default_sonnet_model'] ?? ''}',
+      defaultOpusModel: '${json['default_opus_model'] ?? ''}',
+      category: '${json['category'] ?? ''}',
+      hasApiKey: json['has_api_key'] == true,
+    );
+  }
+}
+
+class ProviderAppSnapshot {
+  const ProviderAppSnapshot({
+    required this.app,
+    this.currentId = '',
+    this.providers = const [],
+  });
+
+  final String app;
+  final String currentId;
+  final List<ProviderInfo> providers;
+
+  factory ProviderAppSnapshot.fromJson(Map<String, dynamic> json) {
+    final list =
+        (json['providers'] as List? ?? const []).cast<Map<String, dynamic>>();
+    return ProviderAppSnapshot(
+      app: '${json['app'] ?? ''}',
+      currentId: '${json['current_id'] ?? ''}',
+      providers: list.map(ProviderInfo.fromJson).toList(),
+    );
+  }
+}
+
+class ProvidersListResponse {
+  const ProvidersListResponse({
+    required this.machineId,
+    this.apps = const [],
+    this.updatedAt,
+  });
+
+  final String machineId;
+  final List<ProviderAppSnapshot> apps;
+  final DateTime? updatedAt;
+
+  ProviderAppSnapshot? forApp(String app) {
+    for (final a in apps) {
+      if (a.app == app) return a;
+    }
+    return null;
+  }
+
+  factory ProvidersListResponse.fromJson(Map<String, dynamic> json) {
+    final list = (json['apps'] as List? ?? const []).cast<Map<String, dynamic>>();
+    return ProvidersListResponse(
+      machineId: '${json['machine_id'] ?? ''}',
+      apps: list.map(ProviderAppSnapshot.fromJson).toList(),
+      updatedAt: _parseTime(json['updated_at']),
+    );
+  }
+}
+
+class MachineCommand {
+  const MachineCommand({
+    required this.id,
+    required this.machineId,
+    required this.app,
+    required this.type,
+    required this.status,
+    this.errorMessage = '',
+  });
+
+  final String id;
+  final String machineId;
+  final String app;
+  final String type;
+  final String status;
+  final String errorMessage;
+
+  bool get isTerminal =>
+      status == 'succeeded' ||
+      status == 'failed' ||
+      status == 'timed_out' ||
+      status == 'cancelled';
+
+  bool get isSuccess => status == 'succeeded';
+
+  factory MachineCommand.fromJson(Map<String, dynamic> json) {
+    return MachineCommand(
+      id: '${json['id'] ?? json['command_id'] ?? ''}',
+      machineId: '${json['machine_id'] ?? ''}',
+      app: '${json['app'] ?? ''}',
+      type: '${json['type'] ?? ''}',
+      status: '${json['status'] ?? ''}',
+      errorMessage: '${json['error_message'] ?? ''}',
+    );
+  }
+}

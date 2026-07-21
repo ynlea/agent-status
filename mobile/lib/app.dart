@@ -7,6 +7,7 @@ import 'domain/models.dart';
 import 'theme/qingya_theme.dart';
 import 'ui/pages/devices_page.dart';
 import 'ui/pages/home_page.dart';
+import 'ui/pages/providers_page.dart';
 import 'ui/pages/session_detail_page.dart';
 import 'ui/pages/settings_page.dart';
 import 'ui/pages/usage_page.dart';
@@ -80,6 +81,13 @@ final routerProvider = Provider<GoRouter>((ref) {
                           machineId: state.pathParameters['machineId']!,
                           agent: state.pathParameters['agent']!,
                           sessionId: state.pathParameters['sessionId']!,
+                        ),
+                      ),
+                      GoRoute(
+                        path: 'providers',
+                        parentNavigatorKey: _rootKey,
+                        builder: (_, state) => ProvidersPage(
+                          machineId: state.pathParameters['machineId']!,
                         ),
                       ),
                     ],

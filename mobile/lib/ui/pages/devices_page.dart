@@ -361,6 +361,12 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                               machine!,
                             ),
                   ),
+                  const SizedBox(height: 12),
+                  _ProvidersEntryCard(
+                    onTap: () => context.push(
+                      '/devices/${widget.machineId}/providers',
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   _SessionSectionHeader(label: '活跃会话', count: active.length),
                   const SizedBox(height: 8),
@@ -566,6 +572,64 @@ class _DetailHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ProvidersEntryCard extends StatelessWidget {
+  const _ProvidersEntryCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    return Material(
+      color: c.card,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: c.deviceSoft,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.swap_horiz_rounded, size: 18, color: c.device),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '供应商 / cc-switch',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: c.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '查看、切换与编辑 Codex / Claude 供应商',
+                      style: TextStyle(fontSize: 11, color: c.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              QingyaTintIcon(QingyaAssets.chevron, size: 14),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

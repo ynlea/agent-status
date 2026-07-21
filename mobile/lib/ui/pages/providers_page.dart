@@ -1,0 +1,713 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../data/api/rest_client.dart';
+import '../../data/prefs/settings_store.dart';
+import '../../data/repo/status_repository.dart';
+import '../../domain/models.dart';
+import '../../theme/qingya_theme.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/assets.dart';
+
+class ProvidersPage extends ConsumerStatefulWidget {
+  const ProvidersPage({super.key, required this.machineId});
+
+  final String machineId;
+
+  @override
+  ConsumerState<ProvidersPage> createState() => _ProvidersPageState();
+}
+
+class _ProvidersPageState extends ConsumerState<ProvidersPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  ProvidersListResponse? _data;
+  String? _error;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this);
+    _tabs.addListener(() {
+      if (!_tabs.indexIsChanging) setState(() {});
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reload());
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  RestClient? _client() {
+    final s = ref.read(settingsProvider);
+    if (!s.isConfigured || s.demoMode) return null;
+    return RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
+  }
+
+  Future<void> _reload() async {
+    final client = _client();
+    if (client == null) {
+      setState(() {
+        _loading = false;
+        _error = ref.read(settingsProvider).demoMode
+            ? '演示模式不支持供应商管理'
+            : '请先配置服务器';
+        _data = null;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await client.fetchProviders(widget.machineId);
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  String get _app => _tabs.index == 0 ? 'codex' : 'claude';
+
+  Future<void> _runCommand({
+    required String type,
+    required Map<String, dynamic> payload,
+    required String successText,
+  }) async {
+    final client = _client();
+    if (client == null) return;
+    // Soft offline warning: still enqueue; success only after terminal status.
+    for (final m in ref.read(statusRepositoryProvider).machines) {
+      if (m.machineId == widget.machineId && !m.online) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('设备当前离线，命令已入队；离线超时前不会标记成功'),
+          ),
+        );
+        break;
+      }
+    }
+    setState(() => _busy = true);
+    try {
+      final cmd = await client.runCommandAndWait(
+        machineId: widget.machineId,
+        app: _app,
+        type: type,
+        payload: payload,
+      );
+      if (!mounted) return;
+      if (cmd.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(successText)),
+        );
+        await _reload();
+      } else {
+        final msg = cmd.errorMessage.isEmpty ? cmd.status : cmd.errorMessage;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('失败：$msg')),
+        );
+        await _reload();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请求失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _switchTo(ProviderInfo p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final c = ctx.qingya;
+        return AlertDialog(
+          backgroundColor: c.card,
+          surfaceTintColor: Colors.transparent,
+          title: Text(
+            '切换供应商',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: c.textPrimary,
+            ),
+          ),
+          content: Text(
+            '将 ${_app == 'codex' ? 'Codex' : 'Claude'} 当前供应商切换为「${p.name}」。\n\n'
+            '说明：已在运行的会话不一定立刻跟随，新会话会使用新配置。',
+            style: TextStyle(fontSize: 13, color: c.textPrimary, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: TextButton.styleFrom(foregroundColor: c.textSecondary),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('切换'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true) return;
+    await _runCommand(
+      type: 'switch_provider',
+      payload: {'provider_id': p.id},
+      successText: '已切换为「${p.name}」',
+    );
+  }
+
+  Future<void> _edit(ProviderInfo p) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.qingya.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => _EditProviderSheet(app: _app, provider: p),
+    );
+    if (result == null) return;
+    final savedName = (result['name'] as String?)?.trim();
+    await _runCommand(
+      type: 'update_provider',
+      payload: result,
+      successText: '已保存「${(savedName != null && savedName.isNotEmpty) ? savedName : p.name}」',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snapshot = ref.watch(statusRepositoryProvider);
+    Machine? machine;
+    for (final m in snapshot.machines) {
+      if (m.machineId == widget.machineId) {
+        machine = m;
+        break;
+      }
+    }
+    final c = context.qingya;
+    final title = machine?.machineName ?? widget.machineId;
+
+    return Scaffold(
+      backgroundColor: c.scaffold,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 12, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => context.pop(),
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.arrow_back_ios_new_rounded,
+                        size: 20, color: c.textPrimary),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '供应商 · $title',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: c.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (_busy)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: c.device,
+                        ),
+                      ),
+                    ),
+                  IconButton(
+                    onPressed: _busy ? null : _reload,
+                    visualDensity: VisualDensity.compact,
+                    icon: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                '切换或编辑只更新本机配置；已在运行的会话不一定立刻跟随。',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: c.textSecondary,
+                  height: 1.35,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: c.card,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _AppTab(
+                        label: 'Codex',
+                        selected: _tabs.index == 0,
+                        onTap: () => _tabs.animateTo(0),
+                      ),
+                    ),
+                    Expanded(
+                      child: _AppTab(
+                        label: 'Claude',
+                        selected: _tabs.index == 1,
+                        onTap: () => _tabs.animateTo(1),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _loading
+                  ? Center(
+                      child: CircularProgressIndicator(color: c.device),
+                    )
+                  : _error != null
+                      ? EmptyState(
+                          asset: QingyaAssets.catDetailPeekV3,
+                          title: '加载失败',
+                          subtitle: _error!,
+                        )
+                      : _buildList(c),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList(QingyaPalette c) {
+    final snap = _data?.forApp(_app);
+    if (snap == null || snap.providers.isEmpty) {
+      bool? online;
+      for (final m in ref.watch(statusRepositoryProvider).machines) {
+        if (m.machineId == widget.machineId) {
+          online = m.online;
+          break;
+        }
+      }
+      return EmptyState(
+        asset: QingyaAssets.catDetailPeekV3,
+        title: '暂无供应商数据',
+        subtitle: online == false
+            ? '设备离线，或监控端尚未上报快照'
+            : '监控端可能未安装 cc-switch，或版本尚未支持远程管理',
+      );
+    }
+    return RefreshIndicator(
+      color: c.device,
+      onRefresh: _reload,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+        itemCount: snap.providers.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) {
+          final p = snap.providers[i];
+          final current = p.id == snap.currentId;
+          return _ProviderTile(
+            provider: p,
+            app: _app,
+            current: current,
+            busy: _busy,
+            onSwitch: current ? null : () => _switchTo(p),
+            onEdit: () => _edit(p),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AppTab extends StatelessWidget {
+  const _AppTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    return Material(
+      color: selected ? c.deviceSoft : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: selected ? c.device : c.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderTile extends StatelessWidget {
+  const _ProviderTile({
+    required this.provider,
+    required this.app,
+    required this.current,
+    required this.busy,
+    this.onSwitch,
+    required this.onEdit,
+  });
+
+  final ProviderInfo provider;
+  final String app;
+  final bool current;
+  final bool busy;
+  final VoidCallback? onSwitch;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    final model = provider.modelSummary(app);
+    final url = provider.baseUrl;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 10),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(14),
+        border: current
+            ? Border.all(color: c.device.withValues(alpha: 0.45), width: 1.2)
+            : Border.all(color: c.border.withValues(alpha: 0.55)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  provider.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ),
+              if (current)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: c.deviceSoft,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '当前',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: c.device,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (model.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              model,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: c.textSecondary),
+            ),
+          ],
+          if (url.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: c.textSecondary),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            provider.hasApiKey ? 'API Key：已配置' : 'API Key：未配置',
+            style: TextStyle(fontSize: 11, color: c.textSecondary),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (onSwitch != null)
+                TextButton(
+                  onPressed: busy ? null : onSwitch,
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  child: const Text('设为当前'),
+                ),
+              TextButton(
+                onPressed: busy ? null : onEdit,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('编辑'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditProviderSheet extends StatefulWidget {
+  const _EditProviderSheet({required this.app, required this.provider});
+
+  final String app;
+  final ProviderInfo provider;
+
+  @override
+  State<_EditProviderSheet> createState() => _EditProviderSheetState();
+}
+
+class _EditProviderSheetState extends State<_EditProviderSheet> {
+  late final TextEditingController _name;
+  late final TextEditingController _baseUrl;
+  late final TextEditingController _apiKey;
+  late final TextEditingController _model;
+  late final TextEditingController _modelAlias;
+  late final TextEditingController _anthropicModel;
+  late final TextEditingController _haiku;
+  late final TextEditingController _sonnet;
+  late final TextEditingController _opus;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.provider;
+    _name = TextEditingController(text: p.name);
+    _baseUrl = TextEditingController(text: p.baseUrl);
+    _apiKey = TextEditingController();
+    _model = TextEditingController(text: p.model);
+    _modelAlias = TextEditingController(text: p.modelAlias);
+    _anthropicModel = TextEditingController(text: p.anthropicModel);
+    _haiku = TextEditingController(text: p.defaultHaikuModel);
+    _sonnet = TextEditingController(text: p.defaultSonnetModel);
+    _opus = TextEditingController(text: p.defaultOpusModel);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _baseUrl.dispose();
+    _apiKey.dispose();
+    _model.dispose();
+    _modelAlias.dispose();
+    _anthropicModel.dispose();
+    _haiku.dispose();
+    _sonnet.dispose();
+    _opus.dispose();
+    super.dispose();
+  }
+
+  Map<String, dynamic> _buildPayload() {
+    final payload = <String, dynamic>{
+      'provider_id': widget.provider.id,
+    };
+    void putIfChanged(String key, String value, String original) {
+      final v = value.trim();
+      if (v.isEmpty) return;
+      if (v == original.trim()) return;
+      payload[key] = v;
+    }
+
+    putIfChanged('name', _name.text, widget.provider.name);
+    putIfChanged('base_url', _baseUrl.text, widget.provider.baseUrl);
+    final key = _apiKey.text.trim();
+    if (key.isNotEmpty) {
+      payload['api_key'] = key;
+    }
+    if (widget.app == 'codex') {
+      putIfChanged('model', _model.text, widget.provider.model);
+    } else {
+      putIfChanged('model_alias', _modelAlias.text, widget.provider.modelAlias);
+      putIfChanged(
+          'anthropic_model', _anthropicModel.text, widget.provider.anthropicModel);
+      putIfChanged('default_haiku_model', _haiku.text,
+          widget.provider.defaultHaikuModel);
+      putIfChanged('default_sonnet_model', _sonnet.text,
+          widget.provider.defaultSonnetModel);
+      putIfChanged(
+          'default_opus_model', _opus.text, widget.provider.defaultOpusModel);
+    }
+    return payload;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottom),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: c.textSecondary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '编辑供应商',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'API Key 留空表示不修改。保存后若是当前项，会重新应用到本机 live 配置。',
+              style: TextStyle(fontSize: 12, color: c.textSecondary, height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            _field(c, _name, '名称'),
+            _field(c, _baseUrl, 'Base URL'),
+            _field(
+              c,
+              _apiKey,
+              widget.provider.hasApiKey ? 'API Key（已配置，留空不改）' : 'API Key',
+              obscure: true,
+            ),
+            if (widget.app == 'codex') ...[
+              _field(c, _model, 'Model'),
+            ] else ...[
+              _field(c, _modelAlias, 'Model 别名（顶层 model）'),
+              _field(c, _anthropicModel, 'ANTHROPIC_MODEL'),
+              _field(c, _haiku, 'DEFAULT_HAIKU_MODEL'),
+              _field(c, _sonnet, 'DEFAULT_SONNET_MODEL'),
+              _field(c, _opus, 'DEFAULT_OPUS_MODEL'),
+            ],
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                final payload = _buildPayload();
+                if (payload.length <= 1) {
+                  Navigator.pop(context);
+                  return;
+                }
+                Navigator.pop(context, payload);
+              },
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text('保存'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              style: TextButton.styleFrom(foregroundColor: c.textSecondary),
+              child: const Text('取消'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _field(
+    QingyaPalette c,
+    TextEditingController ctl,
+    String label, {
+    bool obscure = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: ctl,
+        obscureText: obscure,
+        style: TextStyle(fontSize: 14, color: c.textPrimary),
+        cursorColor: c.device,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(fontSize: 13, color: c.textSecondary),
+          filled: true,
+          fillColor: c.scaffold,
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
+      ),
+    );
+  }
+}

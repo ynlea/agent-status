@@ -153,6 +153,20 @@ func main() {
 		go us.RunLoop(ctx.Done())
 	}
 
+	// Remote cc-switch provider snapshot (+ optional command pull/execute).
+	pc := &monitor.ProviderController{
+		Cfg:     cfg,
+		Rep:     rep,
+		Adapter: monitor.NewCcSwitchAdapter(cfg),
+		Logger:  logger,
+	}
+	go pc.RunLoop(ctx.Done())
+	logger.Info("已启用供应商快照上报",
+		"命令拉取秒数", cfg.CommandPollSec,
+		"供应商上报秒数", cfg.ProviderReportSec,
+		"cc_switch_db", cfg.CcSwitchDB,
+	)
+
 	ticker := time.NewTicker(time.Duration(cfg.ReportIntervalSec) * time.Second)
 	defer ticker.Stop()
 

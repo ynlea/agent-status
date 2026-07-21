@@ -38,6 +38,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/usage/report", s.requireAuth(s.handleUsageReport))
 	mux.HandleFunc("/api/v1/usage/summary", s.requireAuth(s.handleUsageSummary))
 	mux.HandleFunc("/api/v1/usage/breakdown", s.requireAuth(s.handleUsageBreakdown))
+	mux.HandleFunc("/api/v1/providers/report", s.requireAuth(s.handleProvidersReport))
+	mux.HandleFunc("/api/v1/commands/pull", s.requireAuth(s.handleCommandsPull))
+	mux.HandleFunc("/api/v1/commands/", s.requireAuth(s.handleCommandSub))
 	mux.HandleFunc("/api/v1/machines", s.requireAuth(s.handleMachines))
 	mux.HandleFunc("/api/v1/machines/", s.requireAuth(s.handleMachineSub))
 	mux.HandleFunc("/api/v1/history", s.requireAuth(s.handleHistory))
@@ -176,19 +179,164 @@ func (s *Server) handleMachineSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET /api/v1/machines/{id}/providers
+	if len(parts) == 2 && parts[1] == "providers" {
+		if r.Method != http.MethodGet {
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+			return
+		}
+		app := r.URL.Query().Get("app")
+		if app == "" {
+			app = "all"
+		}
+		resp, err := s.Store.ListProviders(machineID, app)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// POST /api/v1/machines/{id}/commands
+	if len(parts) == 2 && parts[1] == "commands" {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+			return
+		}
+		var req apitypes.EnqueueCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+			return
+		}
+		cmd, err := s.Store.EnqueueCommand(machineID, req)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		s.log().Info("命令已入队",
+			"设备标识", machineID,
+			"命令标识", cmd.ID,
+			"应用", cmd.App,
+			"类型", cmd.Type,
+		)
+		writeJSON(w, http.StatusOK, apitypes.EnqueueCommandResponse{
+			CommandID: cmd.ID,
+			Status:    cmd.Status,
+		})
+		return
+	}
+
 	// GET /api/v1/machines/{id}/sessions
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or PATCH required")
 		return
 	}
 	if len(parts) != 2 || parts[1] != "sessions" {
-		writeErr(w, http.StatusNotFound, "not_found", "use /api/v1/machines/{id}/sessions or PATCH /api/v1/machines/{id}")
+		writeErr(w, http.StatusNotFound, "not_found", "use /api/v1/machines/{id}/sessions|providers|commands or PATCH /api/v1/machines/{id}")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"machine_id": machineID,
 		"sessions":   s.Store.ListSessions(machineID),
 	})
+}
+
+func (s *Server) handleProvidersReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+		return
+	}
+	var req apitypes.ProvidersReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+		return
+	}
+	if err := s.Store.ApplyProvidersReport(req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+func (s *Server) handleCommandsPull(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+		return
+	}
+	var req apitypes.CommandsPullRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+		return
+	}
+	cmds, err := s.Store.PullCommands(req.MachineID, req.Limit)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if cmds == nil {
+		cmds = []apitypes.MachineCommand{}
+	}
+	writeJSON(w, http.StatusOK, apitypes.CommandsPullResponse{Commands: cmds})
+}
+
+func (s *Server) handleCommandSub(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/commands/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeErr(w, http.StatusNotFound, "not_found", "command id required")
+		return
+	}
+	id := parts[0]
+
+	// POST /api/v1/commands/{id}/result
+	if len(parts) == 2 && parts[1] == "result" {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
+			return
+		}
+		var req apitypes.CommandResultRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+			return
+		}
+		cmd, err := s.Store.CompleteCommand(id, req)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeErr(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		cmd.Payload.APIKey = ""
+		s.log().Info("命令已完成",
+			"命令标识", cmd.ID,
+			"设备标识", cmd.MachineID,
+			"状态", cmd.Status,
+			"错误摘要", cmd.ErrorMessage,
+		)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "command": cmd})
+		return
+	}
+
+	// GET /api/v1/commands/{id}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
+			return
+		}
+		cmd, err := s.Store.GetCommand(id)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		cmd.Payload.APIKey = ""
+		writeJSON(w, http.StatusOK, cmd)
+		return
+	}
+
+	writeErr(w, http.StatusNotFound, "not_found", "use GET /api/v1/commands/{id} or POST .../result")
 }
 
 func (s *Server) handleUsageReport(w http.ResponseWriter, r *http.Request) {

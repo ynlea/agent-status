@@ -97,6 +97,28 @@ CREATE TABLE IF NOT EXISTS model_prices (
   source               TEXT NOT NULL DEFAULT 'bundled',
   updated_at           TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS provider_snapshots (
+  machine_id   TEXT NOT NULL,
+  app          TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (machine_id, app)
+);
+CREATE TABLE IF NOT EXISTS machine_commands (
+  id            TEXT PRIMARY KEY,
+  machine_id    TEXT NOT NULL,
+  app           TEXT NOT NULL,
+  type          TEXT NOT NULL,
+  payload_json  TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  error_message TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT,
+  lease_until   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_machine_commands_machine_status
+  ON machine_commands(machine_id, status, created_at);
 `)
 	if err != nil {
 		return err
@@ -559,7 +581,6 @@ DELETE FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
 	return changed, wasOnline
 }
 
-
 func (s *SQLiteStore) RenameMachine(machineID, name string) (apitypes.Machine, error) {
 	name = strings.TrimSpace(name)
 	if machineID == "" {
@@ -679,6 +700,8 @@ FROM history ORDER BY id DESC LIMIT ?
 
 func (s *SQLiteStore) Cleanup(maxAgeSeconds int64, maxCount int, machineOfflineAfter int64) (historyDeleted int, machinesOffline int) {
 	now := time.Now().UTC()
+	// Expire stale remote commands (queued/running timeouts) on the periodic cleanup path.
+	_ = s.ExpireCommands(now)
 	if maxAgeSeconds > 0 {
 		cut := now.Add(-time.Duration(maxAgeSeconds) * time.Second).Format(time.RFC3339Nano)
 		res, err := s.db.Exec(`DELETE FROM history WHERE at < ?`, cut)

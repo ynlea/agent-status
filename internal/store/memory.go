@@ -17,14 +17,17 @@ type sessionKey struct {
 
 // Memory is an in-memory store for the contract mock server.
 type Memory struct {
-	mu         sync.RWMutex
-	machines   map[string]apitypes.Machine
-	nameLocked map[string]bool
-	sessions   map[sessionKey]apitypes.Session
-	history    []apitypes.HistoryEntry
-	usage      map[string]apitypes.UsageEvent // dedupe_key -> event
-	maxHist    int
-	prices     *priceCache
+	mu             sync.RWMutex
+	machines       map[string]apitypes.Machine
+	nameLocked     map[string]bool
+	sessions       map[sessionKey]apitypes.Session
+	history        []apitypes.HistoryEntry
+	usage          map[string]apitypes.UsageEvent // dedupe_key -> event
+	maxHist        int
+	prices         *priceCache
+	providerSnaps  map[string]apitypes.ProviderAppSnapshot // machine|app
+	providerSnapAt map[string]time.Time
+	commands       map[string]apitypes.MachineCommand
 }
 
 func NewMemory(maxHistory int) *Memory {
@@ -32,13 +35,16 @@ func NewMemory(maxHistory int) *Memory {
 		maxHistory = 50
 	}
 	m := &Memory{
-		machines:   make(map[string]apitypes.Machine),
-		nameLocked: make(map[string]bool),
-		sessions:   make(map[sessionKey]apitypes.Session),
-		history:    make([]apitypes.HistoryEntry, 0, maxHistory),
-		usage:      make(map[string]apitypes.UsageEvent),
-		maxHist:    maxHistory,
-		prices:     newPriceCache(),
+		machines:       make(map[string]apitypes.Machine),
+		nameLocked:     make(map[string]bool),
+		sessions:       make(map[sessionKey]apitypes.Session),
+		history:        make([]apitypes.HistoryEntry, 0, maxHistory),
+		usage:          make(map[string]apitypes.UsageEvent),
+		maxHist:        maxHistory,
+		prices:         newPriceCache(),
+		providerSnaps:  make(map[string]apitypes.ProviderAppSnapshot),
+		providerSnapAt: make(map[string]time.Time),
+		commands:       make(map[string]apitypes.MachineCommand),
 	}
 	for _, p := range bundledPublicPrices {
 		m.prices.upsert(p, SourceBundled)
@@ -258,24 +264,24 @@ func (m *Memory) ApplyUsageReport(req apitypes.UsageReportRequest) (accepted, du
 		Online:      true,
 		LastSeenAt:  now,
 	}
-		for _, raw := range req.Events {
-			e, ok := sanitizeUsageEvent(req.MachineID, raw)
-			if !ok {
-				continue
-			}
-			if old, exists := m.usage[e.DedupeKey]; exists {
-				if isUnknownUsageModel(old.Model) && !isUnknownUsageModel(e.Model) {
-					old.Model = e.Model
-					m.usage[e.DedupeKey] = old
-					accepted++
-					continue
-				}
-				duplicates++
-				continue
-			}
-			m.usage[e.DedupeKey] = e
-			accepted++
+	for _, raw := range req.Events {
+		e, ok := sanitizeUsageEvent(req.MachineID, raw)
+		if !ok {
+			continue
 		}
+		if old, exists := m.usage[e.DedupeKey]; exists {
+			if isUnknownUsageModel(old.Model) && !isUnknownUsageModel(e.Model) {
+				old.Model = e.Model
+				m.usage[e.DedupeKey] = old
+				accepted++
+				continue
+			}
+			duplicates++
+			continue
+		}
+		m.usage[e.DedupeKey] = e
+		accepted++
+	}
 	return accepted, duplicates
 }
 
@@ -314,6 +320,9 @@ func (m *Memory) Cleanup(maxAgeSeconds int64, maxCount int, machineOfflineAfter 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now().UTC()
+	// Expire stale remote commands (queued/running timeouts) on the periodic cleanup path.
+	m.ensureProviderMaps()
+	_ = m.expireCommandsLocked(now)
 	if maxAgeSeconds > 0 {
 		cut := now.Add(-time.Duration(maxAgeSeconds) * time.Second)
 		kept := m.history[:0]
