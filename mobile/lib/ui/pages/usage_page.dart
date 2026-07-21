@@ -389,95 +389,122 @@ class _DropdownBox<T> extends StatelessWidget {
   final List<DropdownMenuItem<T>> items;
   final ValueChanged<T?> onChanged;
 
-  @override
-  Widget build(BuildContext context) {
-    final c = context.qingya;
-    final menuTheme = Theme.of(context).copyWith(
-      canvasColor: c.card,
-      colorScheme: Theme.of(context).colorScheme.copyWith(
-            primary: c.primary,
-            onPrimary: Colors.white,
-            surface: c.card,
-            onSurface: c.textPrimary,
-          ),
-      listTileTheme: ListTileThemeData(
-        textColor: c.textPrimary,
-        iconColor: c.textSecondary,
-        dense: true,
-      ),
-    );
+  String _labelOf(T v) {
+    for (final item in items) {
+      if (item.value == v) {
+        final child = item.child;
+        if (child is Text) return child.data ?? label;
+        return label;
+      }
+    }
+    return label;
+  }
 
-    return Container(
-      height: 34,
-      padding: const EdgeInsets.only(left: 8, right: 4),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: c.border.withValues(alpha: 0.9)),
+  Future<void> _open(BuildContext context) async {
+    final c = context.qingya;
+    final box = context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+
+    // Anchor menu to the closed chip — fixed size, no reflow of the bar.
+    final topLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
+    final bottomRight =
+        box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay);
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(topLeft, bottomRight),
+      Offset.zero & overlay.size,
+    );
+    final menuWidth = math.max(box.size.width, 148.0);
+
+    final selected = await showMenu<T>(
+      context: context,
+      position: position,
+      color: c.card,
+      surfaceTintColor: Colors.transparent,
+      elevation: 10,
+      shadowColor: c.shadow.withValues(alpha: 0.35),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: c.border.withValues(alpha: 0.9)),
       ),
-      child: Theme(
-        data: menuTheme,
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<T>(
-            isExpanded: true,
-            isDense: true,
-            value: value,
-            dropdownColor: c.card,
-            elevation: 6,
-            menuMaxHeight: 280,
-            focusColor: c.primarySoft,
-            icon: Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 16,
-              color: c.textSecondary,
-            ),
-            style: TextStyle(
-              fontSize: 12,
-              color: c.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-            borderRadius: BorderRadius.circular(12),
-            selectedItemBuilder: (context) => [
-              for (final item in items)
-                Align(
-                  alignment: Alignment.centerLeft,
+      constraints: BoxConstraints(
+        minWidth: menuWidth,
+        maxWidth: menuWidth + 40,
+        maxHeight: 280,
+      ),
+      items: [
+        for (final item in items)
+          PopupMenuItem<T>(
+            value: item.value,
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Expanded(
                   child: DefaultTextStyle(
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 13,
                       color: c.textPrimary,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: item.value == value
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     child: item.child,
                   ),
                 ),
-            ],
-            items: [
-              for (final item in items)
-                DropdownMenuItem<T>(
-                  value: item.value,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: c.textPrimary,
-                        fontWeight: item.value == value
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                      child: item.child,
-                    ),
+                if (item.value == value)
+                  Icon(Icons.check_rounded, size: 16, color: c.device),
+              ],
+            ),
+          ),
+      ],
+    );
+    if (selected != null) {
+      onChanged(selected);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.qingya;
+    final text = _labelOf(value);
+
+    return Material(
+      color: c.card,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _open(context),
+        child: Container(
+          height: 34,
+          padding: const EdgeInsets.only(left: 8, right: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: c.border.withValues(alpha: 0.9)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: c.textPrimary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+              ),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: c.textSecondary,
+              ),
             ],
-            onChanged: onChanged,
-            hint: Text(
-              label,
-              style: TextStyle(fontSize: 12, color: c.textSecondary),
-            ),
           ),
         ),
       ),
