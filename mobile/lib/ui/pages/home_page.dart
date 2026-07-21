@@ -8,7 +8,7 @@ import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
-import '../widgets/task_card.dart';
+import '../widgets/session_card.dart';
 
 enum _HomeFilter { all, confirm, working, done }
 
@@ -67,7 +67,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 child: Row(
                   children: [
                     Text(
-                      '活跃任务（${active.length}）',
+                      '活跃会话（${active.length}）',
                       style: TextStyle(
                         fontSize: 17,
                         color: c.textPrimary,
@@ -129,15 +129,15 @@ class _HomePageState extends ConsumerState<HomePage> {
                   height: 320,
                   child: EmptyState(
                     asset: QingyaAssets.catEmptySleepV3,
-                    title: '当前没有活跃任务',
-                    subtitle: '当有新的任务时，会及时通知你哦～',
+                    title: '当前没有活跃会话',
+                    subtitle: '当有新的会话时，会及时通知你哦～',
                   ),
                 )
               else
                 ...visible.map(
                   (session) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: TaskCard(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SessionCard(
                       session: session,
                       onTap: () => context.push(
                         '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
@@ -195,7 +195,7 @@ class _HeroCard extends StatelessWidget {
             child: _SpeechBubble(
               text: activeCount == 0
                   ? '今天可以休息一下～'
-                  : '有 $activeCount 个活跃任务\n在等你哦～',
+                  : '有 $activeCount 个活跃会话\n在等你哦～',
             ),
           ),
           Positioned(

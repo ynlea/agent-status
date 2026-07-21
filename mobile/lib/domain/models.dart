@@ -98,6 +98,8 @@ class Session {
     required this.state,
     required this.message,
     this.updatedAt,
+    this.startedAt,
+    this.realUsage,
     this.machineName,
     this.cwd = '',
     this.lastAssistantMessage = '',
@@ -111,6 +113,10 @@ class Session {
   final SessionState state;
   final String message;
   final DateTime? updatedAt;
+  /// 服务端首次入库时间；用于展示持续时长
+  final DateTime? startedAt;
+  /// 本会话真实用量（tokens）；null 表示服务端未下发
+  final int? realUsage;
   final String? machineName;
   /// 完整项目路径
   final String cwd;
@@ -149,6 +155,8 @@ class Session {
       state: sessionStateFrom('${json['state'] ?? ''}'),
       message: '${json['message'] ?? ''}',
       updatedAt: _parseTime(json['updated_at']),
+      startedAt: _parseTime(json['started_at']),
+      realUsage: json.containsKey('real_usage') ? _asInt(json['real_usage']) : null,
       machineName:
           json['machine_name'] == null ? null : '${json['machine_name']}',
       cwd: '${json['cwd'] ?? ''}'.trim(),
@@ -164,6 +172,9 @@ class Session {
     String? cwd,
     String? lastAssistantMessage,
     String? source,
+    DateTime? updatedAt,
+    DateTime? startedAt,
+    int? realUsage,
   }) {
     return Session(
       machineId: machineId,
@@ -172,7 +183,9 @@ class Session {
       displayName: displayName,
       state: state ?? this.state,
       message: message ?? this.message,
-      updatedAt: updatedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      startedAt: startedAt ?? this.startedAt,
+      realUsage: realUsage ?? this.realUsage,
       machineName: machineName ?? this.machineName,
       cwd: cwd ?? this.cwd,
       lastAssistantMessage: lastAssistantMessage ?? this.lastAssistantMessage,

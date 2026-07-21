@@ -135,6 +135,9 @@ CREATE INDEX IF NOT EXISTS idx_machine_commands_machine_status
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN last_assistant_message TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN name_locked INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN started_at TEXT`)
+	// Approximate first-seen for rows that predate the column.
+	_, _ = s.db.Exec(`UPDATE sessions SET started_at = updated_at WHERE started_at IS NULL OR started_at = ''`)
 	return s.seedModelPrices()
 }
 
@@ -478,6 +481,12 @@ ON CONFLICT(machine_id) DO UPDATE SET
 		return nil, false
 	}
 
+	// Prefer locked/custom display name for sessions, history, and notifications.
+	effectiveName := req.MachineName
+	if err = tx.QueryRow(`SELECT machine_name FROM machines WHERE machine_id = ?`, req.MachineID).Scan(&effectiveName); err != nil {
+		effectiveName = req.MachineName
+	}
+
 	// Report is a full snapshot for this machine: upsert present sessions, drop the rest.
 	keep := make(map[string]struct{}, len(req.Sessions))
 	for _, sess := range req.Sessions {
@@ -486,21 +495,31 @@ ON CONFLICT(machine_id) DO UPDATE SET
 		}
 		keep[sess.Agent+"\x00"+sess.SessionID] = struct{}{}
 		sess.MachineID = req.MachineID
-		if sess.MachineName == "" {
-			sess.MachineName = req.MachineName
-		}
+		sess.MachineName = effectiveName
 		if sess.UpdatedAt.IsZero() {
 			sess.UpdatedAt = now
 		}
 
 		var oldState string
+		var oldStarted sql.NullString
 		err = tx.QueryRow(`
-SELECT state FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
-`, req.MachineID, sess.Agent, sess.SessionID).Scan(&oldState)
+SELECT state, started_at FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
+`, req.MachineID, sess.Agent, sess.SessionID).Scan(&oldState, &oldStarted)
 		exists := err == nil
 		if err != nil && err != sql.ErrNoRows {
 			return nil, false
 		}
+		startedAt := sess.UpdatedAt
+		if exists && oldStarted.Valid && oldStarted.String != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, oldStarted.String); perr == nil {
+				startedAt = t
+			} else if t, perr := time.Parse(time.RFC3339, oldStarted.String); perr == nil {
+				startedAt = t
+			}
+		}
+		startedCopy := startedAt
+		sess.StartedAt = &startedCopy
+
 		if !exists || oldState != string(sess.State) {
 			from := apitypes.SessionState("")
 			if exists {
@@ -516,8 +535,8 @@ VALUES(?,?,?,?,?,?,?,?,?)
 			changed = append(changed, sess)
 		}
 		_, err = tx.Exec(`
-INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, cwd, last_assistant_message, updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?)
+INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, cwd, last_assistant_message, started_at, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   machine_name=excluded.machine_name,
   display_name=excluded.display_name,
@@ -526,7 +545,7 @@ ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE sessions.cwd END,
   last_assistant_message=CASE WHEN excluded.last_assistant_message != '' THEN excluded.last_assistant_message ELSE sessions.last_assistant_message END,
   updated_at=excluded.updated_at
-`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, sess.UpdatedAt.Format(time.RFC3339Nano))
+`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, startedAt.Format(time.RFC3339Nano), sess.UpdatedAt.Format(time.RFC3339Nano))
 		if err != nil {
 			return nil, false
 		}
@@ -558,7 +577,7 @@ SELECT agent, session_id, display_name, state, message FROM sessions WHERE machi
 		if r.state != string(apitypes.StateIdle) {
 			gone := apitypes.Session{
 				MachineID:   req.MachineID,
-				MachineName: req.MachineName,
+				MachineName: effectiveName,
 				Agent:       r.agent,
 				SessionID:   r.sid,
 				DisplayName: r.display,
@@ -569,7 +588,7 @@ SELECT agent, session_id, display_name, state, message FROM sessions WHERE machi
 			_, err = tx.Exec(`
 INSERT INTO history(machine_id, machine_name, agent, session_id, display_name, from_state, to_state, message, at)
 VALUES(?,?,?,?,?,?,?,?,?)
-`, req.MachineID, req.MachineName, r.agent, r.sid, r.display, r.state, string(apitypes.StateIdle), r.message, now.Format(time.RFC3339Nano))
+`, req.MachineID, effectiveName, r.agent, r.sid, r.display, r.state, string(apitypes.StateIdle), r.message, now.Format(time.RFC3339Nano))
 			if err != nil {
 				return nil, false
 			}
@@ -585,6 +604,7 @@ DELETE FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
 	if err := tx.Commit(); err != nil {
 		return nil, false
 	}
+	s.attachRealUsage(changed)
 	return changed, wasOnline
 }
 
@@ -650,9 +670,9 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	var rows *sql.Rows
 	var err error
 	if machineID == "" {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), updated_at FROM sessions`)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(started_at,''), updated_at FROM sessions`)
 	} else {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), updated_at FROM sessions WHERE machine_id=?`, machineID)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(started_at,''), updated_at FROM sessions WHERE machine_id=?`, machineID)
 	}
 	if err != nil {
 		return nil
@@ -661,18 +681,75 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	var out []apitypes.Session
 	for rows.Next() {
 		var sess apitypes.Session
-		var st, updated string
-		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &sess.Cwd, &sess.LastAssistantMessage, &updated); err != nil {
+		var st, started, updated string
+		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &sess.Cwd, &sess.LastAssistantMessage, &started, &updated); err != nil {
 			continue
 		}
 		sess.State = apitypes.SessionState(st)
 		sess.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		if started != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, started); perr == nil {
+				sess.StartedAt = &t
+			} else if t, perr := time.Parse(time.RFC3339, started); perr == nil {
+				sess.StartedAt = &t
+			}
+		}
 		out = append(out, sess)
 	}
 	if out == nil {
 		out = []apitypes.Session{}
 	}
+	s.attachRealUsage(out)
 	return out
+}
+
+// sessionRealUsageKey groups usage_events by the same triple as sessions.
+type sessionRealUsageKey struct {
+	MachineID string
+	Agent     string
+	SessionID string
+}
+
+func (s *SQLiteStore) loadRealUsageMap() map[sessionRealUsageKey]int64 {
+	rows, err := s.db.Query(`
+SELECT machine_id, agent, session_id,
+  SUM(input_tokens + output_tokens + reasoning_tokens + cache_write_tokens + cache_hit_tokens)
+FROM usage_events
+WHERE session_id IS NOT NULL AND session_id != ''
+GROUP BY machine_id, agent, session_id
+`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := make(map[sessionRealUsageKey]int64)
+	for rows.Next() {
+		var k sessionRealUsageKey
+		var sum int64
+		if err := rows.Scan(&k.MachineID, &k.Agent, &k.SessionID, &sum); err != nil {
+			continue
+		}
+		out[k] = sum
+	}
+	return out
+}
+
+func (s *SQLiteStore) attachRealUsage(list []apitypes.Session) {
+	if len(list) == 0 {
+		return
+	}
+	usage := s.loadRealUsageMap()
+	if usage == nil {
+		return
+	}
+	for i := range list {
+		k := sessionRealUsageKey{
+			MachineID: list[i].MachineID,
+			Agent:     list[i].Agent,
+			SessionID: list[i].SessionID,
+		}
+		list[i].RealUsage = usage[k]
+	}
 }
 
 func (s *SQLiteStore) ListHistory(limit int) []apitypes.HistoryEntry {

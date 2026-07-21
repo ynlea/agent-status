@@ -151,7 +151,7 @@ class _ConnectionSetupState extends ConsumerState<_ConnectionSetup> {
                     ),
                     const SizedBox(height: 9),
                     Text(
-                      '配置连接信息，开启跨设备任务管理',
+                      '配置连接信息，开启跨设备会话监控',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           fontSize: 13, color: context.qingya.textSecondary),

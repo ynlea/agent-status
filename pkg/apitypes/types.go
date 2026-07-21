@@ -67,12 +67,16 @@ type Session struct {
 	// codex-file-watch | codex-file | claude-hook
 	Source    string    `json:"source,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// StartedAt is set once when the session row is first inserted; not overwritten on upsert.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	// RealUsage is the session total tokens (input+output+reasoning+cache_write+cache_hit), filled on read.
+	RealUsage int64 `json:"real_usage,omitempty"`
 }
 
 type ReportRequest struct {
 	MachineID   string    `json:"machine_id"`
 	MachineName string    `json:"machine_name"`
-	Platform    string    `json:"platform"` // linux | windows
+	Platform    string    `json:"platform"`          // linux | windows
 	Version     string    `json:"version,omitempty"` // monitor binary version
 	Sessions    []Session `json:"sessions"`
 	ReportedAt  time.Time `json:"reported_at"`
@@ -115,9 +119,9 @@ type WSEvent struct {
 }
 
 const (
-	WSSessionUpsert  = "session_upsert"
-	WSSessionRemove  = "session_remove"
-	WSNotification   = "notification"
+	WSSessionUpsert    = "session_upsert"
+	WSSessionRemove    = "session_remove"
+	WSNotification     = "notification"
 	WSMachineOnline    = "machine_online"
 	WSMachineOffline   = "machine_offline"
 	WSError            = "error"

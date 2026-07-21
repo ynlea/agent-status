@@ -1,6 +1,6 @@
 # 轻芽（Qingya）Flutter 客户端
 
-按 `source/原型图.png` 重做的只读监控 App：首页活跃任务 / 设备 / 设置。
+按 `source/原型图.png` 重做的只读监控 App：首页活跃会话 / 设备 / 设置。
 
 界面示意见仓库根目录 README 的「轻芽界面预览」（`docs/screenshots/`）。更新截图：
 

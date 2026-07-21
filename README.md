@@ -17,7 +17,7 @@
 
 演示数据下的界面示意（Flutter golden 截图）：
 
-| 欢迎 / 配置 | 首页任务 | 设备列表 |
+| 欢迎 / 配置 | 首页会话 | 设备列表 |
 |:---:|:---:|:---:|
 | ![欢迎](docs/screenshots/qingya-welcome.png) | ![首页](docs/screenshots/qingya-home.png) | ![设备](docs/screenshots/qingya-devices.png) |
 
@@ -71,4 +71,4 @@ GOOS=windows GOARCH=amd64 go build -o bin/agent-status-monitor.exe ./cmd/monitor
 - 红 `confirm`：需回本机确认  
 - 黄 `working`：工作中  
 - 绿 `done`：刚完成  
-- 空 `idle`：无活跃任务  
+- 空 `idle`：无活跃会话  

@@ -89,6 +89,7 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 	if ver == "" && ok {
 		ver = prev.Version
 	}
+	// Prefer locked/custom display name for sessions, history, and notifications.
 	name := req.MachineName
 	if ok && m.nameLocked[req.MachineID] && prev.MachineName != "" {
 		name = prev.MachineName
@@ -111,15 +112,24 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 			continue
 		}
 		s.MachineID = req.MachineID
-		if s.MachineName == "" {
-			s.MachineName = req.MachineName
-		}
+		s.MachineName = name
 		if s.UpdatedAt.IsZero() {
 			s.UpdatedAt = now
 		}
 		key := sessionKey{req.MachineID, s.Agent, s.SessionID}
 		keep[key] = struct{}{}
 		old, exists := m.sessions[key]
+		if exists && old.StartedAt != nil {
+			started := *old.StartedAt
+			s.StartedAt = &started
+		} else {
+			started := s.UpdatedAt
+			if started.IsZero() {
+				started = now
+			}
+			s.StartedAt = &started
+		}
+		s.RealUsage = m.realUsageLocked(s.MachineID, s.Agent, s.SessionID)
 		if !exists || old.State != s.State {
 			from := apitypes.SessionState("")
 			if exists {
@@ -152,9 +162,10 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 			gone := old
 			gone.State = apitypes.StateIdle
 			gone.UpdatedAt = now
+			gone.MachineName = name
 			m.appendHistoryLocked(apitypes.HistoryEntry{
 				MachineID:   old.MachineID,
-				MachineName: old.MachineName,
+				MachineName: name,
 				Agent:       old.Agent,
 				SessionID:   old.SessionID,
 				DisplayName: old.DisplayName,
@@ -168,6 +179,17 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 		delete(m.sessions, key)
 	}
 	return changed, wasOnline
+}
+
+func (m *Memory) realUsageLocked(machineID, agent, sessionID string) int64 {
+	var sum int64
+	for _, e := range m.usage {
+		if e.MachineID != machineID || e.Agent != agent || e.SessionID != sessionID {
+			continue
+		}
+		sum += e.InputTokens + e.OutputTokens + e.ReasoningTokens + e.CacheWriteTokens + e.CacheHitTokens
+	}
+	return sum
 }
 
 func (m *Memory) appendHistoryLocked(e apitypes.HistoryEntry) {
@@ -219,6 +241,7 @@ func (m *Memory) ListSessions(machineID string) []apitypes.Session {
 	out := make([]apitypes.Session, 0)
 	for k, s := range m.sessions {
 		if machineID == "" || k.MachineID == machineID {
+			s.RealUsage = m.realUsageLocked(s.MachineID, s.Agent, s.SessionID)
 			out = append(out, s)
 		}
 	}

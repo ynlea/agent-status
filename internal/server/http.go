@@ -86,19 +86,33 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	changed, wasOnline := s.Store.ApplyReport(req)
+	// Prefer locked/custom machine name after store merge (not raw monitor hostname).
+	machineName := req.MachineName
+	platform := req.Platform
+	for _, mac := range s.Store.ListMachines() {
+		if mac.MachineID == req.MachineID {
+			if mac.MachineName != "" {
+				machineName = mac.MachineName
+			}
+			if mac.Platform != "" {
+				platform = mac.Platform
+			}
+			break
+		}
+	}
 	if !wasOnline {
 		s.log().Info("设备上线",
 			"设备标识", req.MachineID,
-			"设备名称", req.MachineName,
-			"平台", req.Platform,
+			"设备名称", machineName,
+			"平台", platform,
 			"会话数", len(req.Sessions),
 		)
 		s.Hub.Broadcast(apitypes.WSEvent{
 			Type: apitypes.WSMachineOnline,
 			Payload: apitypes.Machine{
 				MachineID:   req.MachineID,
-				MachineName: req.MachineName,
-				Platform:    req.Platform,
+				MachineName: machineName,
+				Platform:    platform,
 				Online:      true,
 				LastSeenAt:  time.Now().UTC(),
 			},
@@ -108,7 +122,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		// Only log real session changes (new or state transition); quiet heartbeats stay silent.
 		s.log().Info("会话状态已更新",
 			"设备标识", req.MachineID,
-			"设备名称", req.MachineName,
+			"设备名称", sess.MachineName,
 			"来源", sess.Source,
 			"代理", sess.Agent,
 			"会话标识", sess.SessionID,
@@ -471,7 +485,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
 
 // notifyMonitorCommands tells a connected monitor to pull/execute queued work.
 func (s *Server) notifyMonitorCommands(machineID string) {

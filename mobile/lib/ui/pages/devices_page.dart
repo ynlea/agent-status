@@ -9,7 +9,7 @@ import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
 import '../widgets/status_dot.dart';
-import '../widgets/task_card.dart';
+import '../widgets/session_card.dart';
 
 class DevicesPage extends ConsumerWidget {
   const DevicesPage({super.key});
@@ -76,7 +76,7 @@ class DevicesPage extends ConsumerWidget {
                         ),
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                         itemCount: machines.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
                           final machine = machines[index];
                           final sessions =
@@ -152,37 +152,37 @@ class _DeviceTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         onLongPress: onRename,
         child: Container(
-          height: 94,
-          padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+          height: 82,
+          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
           decoration: BoxDecoration(
             color: _backgroundOf(c),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(16),
             border:
                 Border.all(color: c.border.withValues(alpha: 0.85)),
             boxShadow: [
               BoxShadow(
                   color: c.shadow,
-                  blurRadius: 14,
-                  offset: Offset(0, 5)),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3)),
             ],
           ),
           child: Row(
             children: [
               Container(
-                width: 48,
-                height: 48,
-                padding: const EdgeInsets.all(4),
+                width: 42,
+                height: 42,
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: c.card.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(11),
                 ),
                 child: Image.asset(_deviceAsset, fit: BoxFit.contain),
               ),
-              const SizedBox(width: 13),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -267,8 +267,8 @@ class _DeviceTile extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                width: 62,
-                height: 70,
+                width: 52,
+                height: 58,
                 child: Image.asset(_catAsset, fit: BoxFit.contain),
               ),
               QingyaTintIcon(QingyaAssets.chevron, size: 14),
@@ -387,10 +387,10 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverList.separated(
                 itemCount: active.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, index) {
                   final session = active[index];
-                  return TaskCard(
+                  return SessionCard(
                     session: session,
                     onTap: () => context.push(
                       '/devices/${session.machineId}/sessions/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
@@ -419,10 +419,10 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
                 sliver: SliverList.separated(
                   itemCount: idle.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) {
                   final session = idle[index];
-                  return TaskCard(
+                  return SessionCard(
                     session: session,
                     onTap: () => context.push(
                       '/devices/${session.machineId}/sessions/${session.agent}/${Uri.encodeComponent(session.sessionId)}',

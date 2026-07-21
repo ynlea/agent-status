@@ -298,6 +298,8 @@ final _demoSessions = [
         '登录态偶现丢失的原因在刷新 token 竞态：并发请求同时发现过期后各自刷新，后写入覆盖了先写入的值。\n\n建议在刷新路径加单飞锁，并在 401 重试队列里复用同一次 refresh 结果。需要我直接改 `AuthInterceptor` 吗？',
     source: 'claude-hook',
     updatedAt: DateTime.now().subtract(const Duration(minutes: 2)),
+    startedAt: DateTime.now().subtract(const Duration(minutes: 23)),
+    realUsage: 86000,
   ),
   Session(
     machineId: 'm-macbook',
@@ -312,6 +314,8 @@ final _demoSessions = [
         '已按原型重新设计上传接口：\n\n- 支持分片与秒传\n- 校验 MIME 与大小上限\n- 补了集成测试\n\n接下来可以接前端进度条。',
     source: 'codex-file',
     updatedAt: DateTime.now().subtract(const Duration(minutes: 5)),
+    startedAt: DateTime.now().subtract(const Duration(hours: 1, minutes: 12)),
+    realUsage: 1200000,
   ),
   Session(
     machineId: 'm-macmini',
@@ -325,6 +329,8 @@ final _demoSessions = [
     lastAssistantMessage: '文档已更新到 v3，并修正了安装步骤里的两处路径错误。',
     source: 'claude-hook',
     updatedAt: DateTime.now().subtract(const Duration(minutes: 8)),
+    startedAt: DateTime.now().subtract(const Duration(minutes: 45)),
+    realUsage: 42000,
   ),
   Session(
     machineId: 'm-ubuntu',
@@ -338,6 +344,8 @@ final _demoSessions = [
     lastAssistantMessage: '正在把聚合查询拆成按日物化视图，下一步会补回填脚本。',
     source: 'codex-file',
     updatedAt: DateTime.now().subtract(const Duration(minutes: 12)),
+    startedAt: DateTime.now().subtract(const Duration(hours: 2)),
+    realUsage: 256000,
   ),
   Session(
     machineId: 'm-thinkbook',
@@ -351,6 +359,8 @@ final _demoSessions = [
     lastAssistantMessage: '',
     source: 'claude-hook',
     updatedAt: DateTime.now().subtract(const Duration(minutes: 30)),
+    startedAt: DateTime.now().subtract(const Duration(hours: 3)),
+    realUsage: 0,
   ),
   Session(
     machineId: 'm-macbook',
@@ -364,6 +374,8 @@ final _demoSessions = [
     lastAssistantMessage: 'Safari 下 flex gap 已改为 margin 方案，视觉对齐了。',
     source: 'codex-file',
     updatedAt: DateTime.now().subtract(const Duration(hours: 1)),
+    startedAt: DateTime.now().subtract(const Duration(hours: 1, minutes: 20)),
+    realUsage: 3500,
   ),
   Session(
     machineId: 'm-macmini',
@@ -377,5 +389,7 @@ final _demoSessions = [
     lastAssistantMessage: '依赖已升到兼容版本，CI 全绿。',
     source: 'codex-file',
     updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
+    startedAt: DateTime.now().subtract(const Duration(hours: 4)),
+    realUsage: 18000,
   ),
 ];
