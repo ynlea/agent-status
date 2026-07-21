@@ -481,7 +481,13 @@ class ProvidersListResponse {
   final bool ccSwitchCliReady;
   final String ccSwitchBin;
 
-  bool get ready => ccSwitchAvailable && ccSwitchCliReady;
+  /// Can list/mutate provider rows in local DB (create/delete/duplicate/edit fields).
+  bool get canManage => ccSwitchAvailable;
+
+  /// Can switch / apply live config (needs CLI).
+  bool get canApply => ccSwitchAvailable && ccSwitchCliReady;
+
+  bool get ready => canApply;
 
   String get notReadyReason {
     if (!ccSwitchAvailable && !ccSwitchCliReady) {
@@ -490,6 +496,13 @@ class ProvidersListResponse {
     if (!ccSwitchCliReady) {
       return '未安装 cc-switch-cli（或监控端找不到可执行文件）';
     }
+    if (!ccSwitchAvailable) {
+      return '未找到本机 cc-switch 数据库（~/.cc-switch）';
+    }
+    return '';
+  }
+
+  String get manageBlockedReason {
     if (!ccSwitchAvailable) {
       return '未找到本机 cc-switch 数据库（~/.cc-switch）';
     }

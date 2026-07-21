@@ -11,7 +11,10 @@ const (
 
 	CommandTypeSwitchProvider   = "switch_provider"
 	CommandTypeUpdateProvider   = "update_provider"
-	CommandTypeRefreshProviders = "refresh_providers"
+	CommandTypeRefreshProviders  = "refresh_providers"
+	CommandTypeCreateProvider    = "create_provider"
+	CommandTypeDeleteProvider    = "delete_provider"
+	CommandTypeDuplicateProvider = "duplicate_provider"
 
 	CommandStatusQueued    = "queued"
 	CommandStatusRunning   = "running"
@@ -34,7 +37,8 @@ func ValidProviderApp(app string) bool {
 // ValidCommandType returns true for supported command types.
 func ValidCommandType(t string) bool {
 	switch t {
-	case CommandTypeSwitchProvider, CommandTypeUpdateProvider, CommandTypeRefreshProviders:
+	case CommandTypeSwitchProvider, CommandTypeUpdateProvider, CommandTypeRefreshProviders,
+		CommandTypeCreateProvider, CommandTypeDeleteProvider, CommandTypeDuplicateProvider:
 		return true
 	default:
 		return false

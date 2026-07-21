@@ -1,6 +1,8 @@
 package ccswitch
 
 import (
+	"encoding/hex"
+	"crypto/rand"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -393,6 +395,217 @@ func patchSettings(app, settingsJSON string, p apitypes.CommandPayload) (string,
 	return string(raw), nil
 }
 
+
+func newProviderID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("prov-%d", time.Now().UnixNano())
+	}
+	// UUID-like with hyphens for readability
+	h := hex.EncodeToString(b[:])
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+}
+
+// CreateProvider inserts a custom provider from structured fields.
+func (a *Adapter) CreateProvider(app string, p apitypes.CommandPayload) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !apitypes.ValidProviderApp(app) {
+		return fmt.Errorf("unsupported app %s", app)
+	}
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	db, err := a.openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	settings, err := buildNewSettings(app, p)
+	if err != nil {
+		return err
+	}
+	id := newProviderID()
+	now := time.Now().UnixMilli()
+	meta := `{"commonConfigEnabled":false,"endpointAutoSelect":true}`
+	_, err = db.Exec(`
+INSERT INTO providers(
+  id, app_type, name, settings_config, website_url, category, created_at,
+  meta, is_current, in_failover_queue, cost_multiplier
+) VALUES(?,?,?,?,?,?,?,?,0,0,'1.0')`,
+		id, app, name, settings, strings.TrimSpace(p.BaseURL), "custom", now, meta,
+	)
+	return err
+}
+
+
+func buildNewSettings(app string, p apitypes.CommandPayload) (string, error) {
+	switch app {
+	case apitypes.ProviderAppCodex:
+		model := strings.TrimSpace(p.Model)
+		if model == "" {
+			model = "gpt-5.4"
+		}
+		base := strings.TrimSpace(p.BaseURL)
+		cfg := "model_provider = \"OpenAI\"\nmodel = \"" + escapeTOML(model) + "\"\n"
+		if base != "" {
+			cfg += "\n[model_providers.OpenAI]\nname = \"OpenAI\"\nbase_url = \"" + escapeTOML(base) + "\"\nwire_api = \"responses\"\n"
+		}
+		root := map[string]interface{}{
+			"auth":   map[string]interface{}{},
+			"config": cfg,
+		}
+		if strings.TrimSpace(p.APIKey) != "" {
+			root["auth"] = map[string]interface{}{"OPENAI_API_KEY": p.APIKey}
+		}
+		b, err := json.Marshal(root)
+		return string(b), err
+	case apitypes.ProviderAppClaude:
+		env := map[string]interface{}{}
+		if strings.TrimSpace(p.APIKey) != "" {
+			env["ANTHROPIC_AUTH_TOKEN"] = p.APIKey
+		}
+		if strings.TrimSpace(p.BaseURL) != "" {
+			env["ANTHROPIC_BASE_URL"] = p.BaseURL
+		}
+		if strings.TrimSpace(p.AnthropicModel) != "" {
+			env["ANTHROPIC_MODEL"] = p.AnthropicModel
+		}
+		if strings.TrimSpace(p.DefaultHaikuModel) != "" {
+			env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = p.DefaultHaikuModel
+		}
+		if strings.TrimSpace(p.DefaultSonnetModel) != "" {
+			env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = p.DefaultSonnetModel
+		}
+		if strings.TrimSpace(p.DefaultOpusModel) != "" {
+			env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = p.DefaultOpusModel
+		}
+		root := map[string]interface{}{"env": env}
+		if strings.TrimSpace(p.ModelAlias) != "" {
+			root["model"] = p.ModelAlias
+		}
+		b, err := json.Marshal(root)
+		return string(b), err
+	default:
+		return "", fmt.Errorf("unsupported app")
+	}
+}
+
+func escapeTOML(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+// DeleteProvider removes a non-current provider.
+func (a *Adapter) DeleteProvider(app, providerID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !apitypes.ValidProviderApp(app) {
+		return fmt.Errorf("unsupported app %s", app)
+	}
+	if strings.TrimSpace(providerID) == "" {
+		return fmt.Errorf("provider_id required")
+	}
+	db, err := a.openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var isCur bool
+	var category string
+	err = db.QueryRow(`SELECT is_current, COALESCE(category,'') FROM providers WHERE id=? AND app_type=?`,
+		providerID, app).Scan(&isCur, &category)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("provider not found")
+	}
+	if err != nil {
+		return err
+	}
+	if isCur {
+		return fmt.Errorf("cannot delete current provider; switch away first")
+	}
+	if category == "official" || providerID == "codex-official" {
+		return fmt.Errorf("cannot delete official provider")
+	}
+	if _, err := db.Exec(`DELETE FROM provider_endpoints WHERE provider_id=? AND app_type=?`, providerID, app); err != nil {
+		// table may not exist on older DBs
+		_ = err
+	}
+	res, err := db.Exec(`DELETE FROM providers WHERE id=? AND app_type=?`, providerID, app)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("provider not found")
+	}
+	return nil
+}
+
+// DuplicateProvider clones a provider row with a new id and name suffix.
+func (a *Adapter) DuplicateProvider(app, providerID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !apitypes.ValidProviderApp(app) {
+		return fmt.Errorf("unsupported app %s", app)
+	}
+	if strings.TrimSpace(providerID) == "" {
+		return fmt.Errorf("provider_id required")
+	}
+	db, err := a.openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var (
+		name, settings, website, category, notes, icon, iconColor, meta sql.NullString
+		createdAt                                                       sql.NullInt64
+		sortIndex                                                       sql.NullInt64
+		costMult                                                        sql.NullString
+	)
+	err = db.QueryRow(`
+SELECT name, settings_config, website_url, category, created_at, sort_index, notes, icon, icon_color, meta, cost_multiplier
+FROM providers WHERE id=? AND app_type=?`, providerID, app).Scan(
+		&name, &settings, &website, &category, &createdAt, &sortIndex, &notes, &icon, &iconColor, &meta, &costMult,
+	)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("provider not found")
+	}
+	if err != nil {
+		return err
+	}
+	newID := newProviderID()
+	newName := strings.TrimSpace(name.String)
+	if newName == "" {
+		newName = "copy"
+	} else {
+		newName = newName + " copy"
+	}
+	now := time.Now().UnixMilli()
+	_, err = db.Exec(`
+INSERT INTO providers(
+  id, app_type, name, settings_config, website_url, category, created_at,
+  sort_index, notes, icon, icon_color, meta, is_current, in_failover_queue, cost_multiplier
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,0,?)`,
+		newID, app, newName, settings.String, website.String, nullStr(category, "custom"), now,
+		sortIndex.Int64, notes.String, icon.String, iconColor.String, nullStr(meta, "{}"),
+		nullStr(costMult, "1.0"),
+	)
+	return err
+}
+
+func nullStr(ns sql.NullString, def string) string {
+	if ns.Valid && ns.String != "" {
+		return ns.String
+	}
+	return def
+}
+
 // Execute runs a leased machine command.
 func (a *Adapter) Execute(cmd apitypes.MachineCommand) error {
 	switch cmd.Type {
@@ -405,6 +618,12 @@ func (a *Adapter) Execute(cmd apitypes.MachineCommand) error {
 			return fmt.Errorf("cc-switch database not found")
 		}
 		return nil
+	case apitypes.CommandTypeCreateProvider:
+		return a.CreateProvider(cmd.App, cmd.Payload)
+	case apitypes.CommandTypeDeleteProvider:
+		return a.DeleteProvider(cmd.App, cmd.Payload.ProviderID)
+	case apitypes.CommandTypeDuplicateProvider:
+		return a.DuplicateProvider(cmd.App, cmd.Payload.ProviderID)
 	default:
 		return fmt.Errorf("unknown command type %s", cmd.Type)
 	}

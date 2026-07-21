@@ -362,14 +362,16 @@ func (p *ProviderController) runOne(cmd apitypes.MachineCommand) {
 	var execErr error
 	if p.Adapter == nil {
 		execErr = fmt.Errorf("cc-switch adapter not configured")
-	} else if cmd.Type != apitypes.CommandTypeRefreshProviders && !p.Adapter.CLIReady() {
-		execErr = fmt.Errorf("cc-switch-cli not installed or not found")
-	} else if !p.Adapter.Available() && cmd.Type != apitypes.CommandTypeRefreshProviders {
-		execErr = fmt.Errorf("cc-switch database not found")
-	} else if cmd.Type == apitypes.CommandTypeRefreshProviders && !p.Adapter.Available() {
+	} else if !p.Adapter.Available() {
 		execErr = fmt.Errorf("cc-switch database not found")
 	} else {
-		execErr = p.Adapter.Execute(cmd)
+		needsCLI := cmd.Type == apitypes.CommandTypeSwitchProvider ||
+			cmd.Type == apitypes.CommandTypeUpdateProvider
+		if needsCLI && !p.Adapter.CLIReady() {
+			execErr = fmt.Errorf("cc-switch-cli not installed or not found")
+		} else {
+			execErr = p.Adapter.Execute(cmd)
+		}
 	}
 
 	status := apitypes.CommandStatusSucceeded

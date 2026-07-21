@@ -116,12 +116,23 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
   }) async {
     final client = _client();
     if (client == null) return;
-    if (!_ready) {
+    final needsCLI = type == 'switch_provider' || type == 'update_provider';
+    if (needsCLI && !_ready) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_data?.notReadyReason.isNotEmpty == true
               ? _data!.notReadyReason
               : '未安装 cc-switch-cli，无法操作'),
+        ),
+      );
+      return;
+    }
+    if (!needsCLI && _data?.canManage != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_data?.manageBlockedReason.isNotEmpty == true
+              ? _data!.manageBlockedReason
+              : '本机无 cc-switch 数据，无法管理配置'),
         ),
       );
       return;
@@ -237,6 +248,79 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     );
   }
 
+
+  Future<void> _create() async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.qingya.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => _EditProviderSheet(app: _app, provider: null, title: '添加供应商'),
+    );
+    if (result == null) return;
+    await _runCommand(
+      type: 'create_provider',
+      payload: result,
+      successText: '已添加「${result['name'] ?? ''}」',
+    );
+  }
+
+  Future<void> _duplicate(ProviderInfo p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final c = ctx.qingya;
+        return AlertDialog(
+          backgroundColor: c.card,
+          surfaceTintColor: Colors.transparent,
+          title: Text('复制供应商', style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.w700)),
+          content: Text('将复制「${p.name}」为新配置（不会自动切换）。', style: TextStyle(color: c.textPrimary)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('复制')),
+          ],
+        );
+      },
+    );
+    if (ok != true) return;
+    await _runCommand(
+      type: 'duplicate_provider',
+      payload: {'provider_id': p.id},
+      successText: '已复制「${p.name}」',
+    );
+  }
+
+  Future<void> _delete(ProviderInfo p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final c = ctx.qingya;
+        return AlertDialog(
+          backgroundColor: c.card,
+          surfaceTintColor: Colors.transparent,
+          title: Text('删除供应商', style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.w700)),
+          content: Text('确定删除「${p.name}」？此操作不可撤销。', style: TextStyle(color: c.textPrimary)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true) return;
+    await _runCommand(
+      type: 'delete_provider',
+      payload: {'provider_id': p.id},
+      successText: '已删除「${p.name}」',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = ref.watch(statusRepositoryProvider);
@@ -253,6 +337,15 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
 
     return Scaffold(
       backgroundColor: c.scaffold,
+      floatingActionButton: (_data?.canManage == true && !_busy)
+          ? FloatingActionButton.extended(
+              onPressed: _create,
+              backgroundColor: c.device,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('添加'),
+            )
+          : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -459,9 +552,13 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
           provider: p,
           app: _app,
           current: current,
-          busy: _busy || !_ready,
-          onSwitch: (!_ready || current) ? null : () => _switchTo(p),
-          onEdit: !_ready ? null : () => _edit(p),
+          busy: _busy,
+          onSwitch: (!_ready || current || _busy) ? null : () => _switchTo(p),
+          onEdit: (!(_data?.canManage == true) || _busy) ? null : () => _edit(p),
+          onDuplicate: (!(_data?.canManage == true) || _busy) ? null : () => _duplicate(p),
+          onDelete: (!(_data?.canManage == true) || current || _busy)
+              ? null
+              : () => _delete(p),
         );
       },
     );
@@ -513,6 +610,8 @@ class _ProviderTile extends StatelessWidget {
     required this.busy,
     this.onSwitch,
     this.onEdit,
+    this.onDuplicate,
+    this.onDelete,
   });
 
   final ProviderInfo provider;
@@ -521,6 +620,8 @@ class _ProviderTile extends StatelessWidget {
   final bool busy;
   final VoidCallback? onSwitch;
   final VoidCallback? onEdit;
+  final VoidCallback? onDuplicate;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -530,7 +631,6 @@ class _ProviderTile extends StatelessWidget {
     final meta = <String>[
       if (model.isNotEmpty) model,
       if (url.isNotEmpty) url,
-      provider.hasApiKey ? 'Key 已配置' : 'Key 未配置',
     ].join(' · ');
 
     return Material(
@@ -624,11 +724,28 @@ class _ProviderTile extends StatelessWidget {
                       ),
                       child: const Text('编辑', style: TextStyle(fontSize: 12)),
                     ),
-                  const Spacer(),
-                  if (provider.category.isNotEmpty)
-                    Text(
-                      provider.category,
-                      style: TextStyle(fontSize: 10, color: c.textSecondary),
+                  if (onDuplicate != null)
+                    TextButton(
+                      onPressed: busy ? null : onDuplicate,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('复制', style: TextStyle(fontSize: 12)),
+                    ),
+                  if (onDelete != null)
+                    TextButton(
+                      onPressed: busy ? null : onDelete,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: Colors.redAccent,
+                      ),
+                      child: const Text('删除', style: TextStyle(fontSize: 12)),
                     ),
                 ],
               ),
@@ -641,10 +758,15 @@ class _ProviderTile extends StatelessWidget {
 }
 
 class _EditProviderSheet extends StatefulWidget {
-  const _EditProviderSheet({required this.app, required this.provider});
+  const _EditProviderSheet({
+    required this.app,
+    this.provider,
+    this.title = '编辑供应商',
+  });
 
   final String app;
-  final ProviderInfo provider;
+  final ProviderInfo? provider;
+  final String title;
 
   @override
   State<_EditProviderSheet> createState() => _EditProviderSheetState();
@@ -665,15 +787,15 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
   void initState() {
     super.initState();
     final p = widget.provider;
-    _name = TextEditingController(text: p.name);
-    _baseUrl = TextEditingController(text: p.baseUrl);
+    _name = TextEditingController(text: p?.name ?? '');
+    _baseUrl = TextEditingController(text: p?.baseUrl ?? '');
     _apiKey = TextEditingController();
-    _model = TextEditingController(text: p.model);
-    _modelAlias = TextEditingController(text: p.modelAlias);
-    _anthropicModel = TextEditingController(text: p.anthropicModel);
-    _haiku = TextEditingController(text: p.defaultHaikuModel);
-    _sonnet = TextEditingController(text: p.defaultSonnetModel);
-    _opus = TextEditingController(text: p.defaultOpusModel);
+    _model = TextEditingController(text: p?.model ?? '');
+    _modelAlias = TextEditingController(text: p?.modelAlias ?? '');
+    _anthropicModel = TextEditingController(text: p?.anthropicModel ?? '');
+    _haiku = TextEditingController(text: p?.defaultHaikuModel ?? '');
+    _sonnet = TextEditingController(text: p?.defaultSonnetModel ?? '');
+    _opus = TextEditingController(text: p?.defaultOpusModel ?? '');
   }
 
   @override
@@ -691,34 +813,41 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
   }
 
   Map<String, dynamic> _buildPayload() {
-    final payload = <String, dynamic>{
-      'provider_id': widget.provider.id,
-    };
+    final creating = widget.provider == null;
+    final p = widget.provider;
+    final payload = <String, dynamic>{};
+    if (!creating) {
+      payload['provider_id'] = p!.id;
+    }
     void putIfChanged(String key, String value, String original) {
       final v = value.trim();
       if (v.isEmpty) return;
-      if (v == original.trim()) return;
+      if (!creating && v == original.trim()) return;
       payload[key] = v;
     }
 
-    putIfChanged('name', _name.text, widget.provider.name);
-    putIfChanged('base_url', _baseUrl.text, widget.provider.baseUrl);
+    final name = _name.text.trim();
+    if (creating) {
+      if (name.isEmpty) return {};
+      payload['name'] = name;
+    } else {
+      putIfChanged('name', _name.text, p!.name);
+    }
+    putIfChanged('base_url', _baseUrl.text, p?.baseUrl ?? '');
     final key = _apiKey.text.trim();
     if (key.isNotEmpty) {
       payload['api_key'] = key;
+    } else if (creating) {
+      // allow create without key
     }
     if (widget.app == 'codex') {
-      putIfChanged('model', _model.text, widget.provider.model);
+      putIfChanged('model', _model.text, p?.model ?? '');
     } else {
-      putIfChanged('model_alias', _modelAlias.text, widget.provider.modelAlias);
-      putIfChanged(
-          'anthropic_model', _anthropicModel.text, widget.provider.anthropicModel);
-      putIfChanged('default_haiku_model', _haiku.text,
-          widget.provider.defaultHaikuModel);
-      putIfChanged('default_sonnet_model', _sonnet.text,
-          widget.provider.defaultSonnetModel);
-      putIfChanged(
-          'default_opus_model', _opus.text, widget.provider.defaultOpusModel);
+      putIfChanged('model_alias', _modelAlias.text, p?.modelAlias ?? '');
+      putIfChanged('anthropic_model', _anthropicModel.text, p?.anthropicModel ?? '');
+      putIfChanged('default_haiku_model', _haiku.text, p?.defaultHaikuModel ?? '');
+      putIfChanged('default_sonnet_model', _sonnet.text, p?.defaultSonnetModel ?? '');
+      putIfChanged('default_opus_model', _opus.text, p?.defaultOpusModel ?? '');
     }
     return payload;
   }
@@ -746,7 +875,7 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
             ),
             const SizedBox(height: 12),
             Text(
-              '编辑供应商',
+              widget.title,
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -764,7 +893,9 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
             _field(
               c,
               _apiKey,
-              widget.provider.hasApiKey ? 'API Key（已配置，留空不改）' : 'API Key',
+              (widget.provider?.hasApiKey == true)
+                  ? 'API Key（已配置，留空不改）'
+                  : 'API Key',
               obscure: true,
             ),
             if (widget.app == 'codex') ...[
@@ -780,6 +911,14 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
             FilledButton(
               onPressed: () {
                 final payload = _buildPayload();
+                final creating = widget.provider == null;
+                if (creating) {
+                  if ((payload['name'] as String?)?.trim().isNotEmpty != true) {
+                    return;
+                  }
+                  Navigator.pop(context, payload);
+                  return;
+                }
                 if (payload.length <= 1) {
                   Navigator.pop(context);
                   return;
