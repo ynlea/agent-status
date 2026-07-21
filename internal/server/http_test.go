@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,5 +334,45 @@ func TestProvidersAndCommandsHTTP(t *testing.T) {
 	res.Body.Close()
 	if cmd.Status != "succeeded" || cmd.Payload.APIKey != "" {
 		t.Fatalf("cmd=%+v", cmd)
+	}
+}
+
+func TestMonitorWSCommandNotify(t *testing.T) {
+	mem := store.NewMemory(20)
+	srv := &Server{Key: "k", Store: mem, Hub: NewHub()}
+	ts := httptest.NewServer(srv.Routes())
+	defer ts.Close()
+
+	// Connect monitor WS
+	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/monitor/ws?machine_id=m1"
+	hdr := http.Header{}
+	hdr.Set("Authorization", "Bearer k")
+	conn, _, err := websocket.DefaultDialer.Dial(u, hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Enqueue command
+	body := `{"app":"codex","type":"refresh_providers","payload":{}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/machines/m1/commands", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer k")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("expected push: %v", err)
+	}
+	if !strings.Contains(string(data), "command_available") {
+		t.Fatalf("unexpected payload %s", data)
 	}
 }

@@ -251,6 +251,7 @@ Pre-shared key required on all routes. Snapshots never include plaintext API key
 
 ### Monitor
 
+- `GET /api/v1/monitor/ws?machine_id=...` — long-lived command channel (Bearer key). Server pushes `{type:"command_available"}` on enqueue; monitor should `commands/pull` immediately. Reconnect drains backlog.
 - `POST /api/v1/providers/report` — redacted provider snapshot + readiness (`cc_switch_available`, `cc_switch_cli_ready`, `cc_switch_bin`)
 - `POST /api/v1/commands/pull` — lease pending commands for `machine_id` (serial running)
 - `POST /api/v1/commands/{id}/result` — report `succeeded`/`failed`; optional `providers_report`

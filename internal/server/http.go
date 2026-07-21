@@ -45,6 +45,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/machines/", s.requireAuth(s.handleMachineSub))
 	mux.HandleFunc("/api/v1/history", s.requireAuth(s.handleHistory))
 	mux.HandleFunc("/api/v1/ws", s.handleWS)
+	mux.HandleFunc("/api/v1/monitor/ws", s.handleMonitorWS)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -220,6 +221,8 @@ func (s *Server) handleMachineSub(w http.ResponseWriter, r *http.Request) {
 			"应用", cmd.App,
 			"类型", cmd.Type,
 		)
+		// Try immediate push to connected monitor (lease via PullCommands).
+		s.notifyMonitorCommands(machineID)
 		writeJSON(w, http.StatusOK, apitypes.EnqueueCommandResponse{
 			CommandID: cmd.ID,
 			Status:    cmd.Status,
@@ -316,6 +319,8 @@ func (s *Server) handleCommandSub(w http.ResponseWriter, r *http.Request) {
 			"状态", cmd.Status,
 			"错误摘要", cmd.ErrorMessage,
 		)
+		// If more commands are queued, wake monitor immediately.
+		s.notifyMonitorCommands(cmd.MachineID)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "command": cmd})
 		return
 	}
@@ -464,6 +469,59 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if _, _, err := c.ReadMessage(); err != nil {
 			return
 		}
+	}
+}
+
+
+// notifyMonitorCommands tells a connected monitor to pull/execute queued work.
+func (s *Server) notifyMonitorCommands(machineID string) {
+	if s.Hub == nil || strings.TrimSpace(machineID) == "" {
+		return
+	}
+	ok := s.Hub.PushToMonitor(machineID, apitypes.WSEvent{
+		Type: apitypes.WSCommandAvailable,
+		Payload: map[string]string{
+			"machine_id": machineID,
+		},
+	})
+	if ok {
+		s.log().Info("已通知监控端拉取命令", "设备标识", machineID)
+	}
+}
+
+func (s *Server) handleMonitorWS(w http.ResponseWriter, r *http.Request) {
+	if !auth.Check(r, s.Key) {
+		writeErr(w, http.StatusUnauthorized, "unauthorized", "invalid or missing key")
+		return
+	}
+	machineID := strings.TrimSpace(r.URL.Query().Get("machine_id"))
+	if machineID == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "machine_id query required")
+		return
+	}
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	s.Hub.SetMonitor(machineID, c)
+	defer s.Hub.Remove(c)
+	s.log().Info("监控端已连接命令通道", "设备标识", machineID)
+
+	// Deliver any queued work immediately on connect.
+	s.notifyMonitorCommands(machineID)
+
+	// Keepalive read loop: client may send pings/hello; any read error ends session.
+	_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
+	c.SetPongHandler(func(string) error {
+		_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
+		return nil
+	})
+	for {
+		if _, _, err := c.ReadMessage(); err != nil {
+			s.log().Info("监控端命令通道断开", "设备标识", machineID)
+			return
+		}
+		_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
 	}
 }
 

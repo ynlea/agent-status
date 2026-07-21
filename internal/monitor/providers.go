@@ -7,8 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ynlea/agent-status/internal/monitor/ccswitch"
 	"github.com/ynlea/agent-status/pkg/apitypes"
 )
@@ -129,6 +133,8 @@ type ProviderController struct {
 	Rep     *Reporter
 	Adapter *ccswitch.Adapter
 	Logger  *slog.Logger
+
+	runMu sync.Mutex // serialize command execution across WS + poll
 }
 
 func (p *ProviderController) log() *slog.Logger {
@@ -167,6 +173,9 @@ func (p *ProviderController) RunLoop(stop <-chan struct{}) {
 
 	// initial snapshot
 	p.reportOnce("startup")
+
+	// Long-lived command channel (sub-second wakeups); poll remains a safety net.
+	go p.runCommandWS(stop)
 
 	for {
 		select {
@@ -208,7 +217,9 @@ func (p *ProviderController) reportOnce(reason string) {
 }
 
 func (p *ProviderController) pullAndRun() {
-	if p.Adapter == nil {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	if p.Adapter == nil || p.Rep == nil {
 		return
 	}
 	// still poll even if db missing so failed commands can surface
@@ -219,6 +230,125 @@ func (p *ProviderController) pullAndRun() {
 	}
 	for _, cmd := range cmds {
 		p.runOne(cmd)
+	}
+}
+
+func (p *ProviderController) runCommandWS(stop <-chan struct{}) {
+	backoff := time.Second
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		err := p.commandWSSession(stop)
+		if err != nil {
+			p.log().Warn("命令通道会话结束", "错误", err)
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 15*time.Second {
+			backoff *= 2
+			if backoff > 15*time.Second {
+				backoff = 15 * time.Second
+			}
+		}
+	}
+}
+
+func (p *ProviderController) commandWSSession(stop <-chan struct{}) error {
+	if p.Rep == nil || p.Cfg == nil {
+		return fmt.Errorf("reporter not configured")
+	}
+	base, err := p.Rep.baseURL()
+	if err != nil {
+		return err
+	}
+	wsBase := base
+	if strings.HasPrefix(wsBase, "https://") {
+		wsBase = "wss://" + strings.TrimPrefix(wsBase, "https://")
+	} else if strings.HasPrefix(wsBase, "http://") {
+		wsBase = "ws://" + strings.TrimPrefix(wsBase, "http://")
+	} else {
+		return fmt.Errorf("unsupported server_url scheme")
+	}
+	u, err := url.Parse(wsBase + "/api/v1/monitor/ws")
+	if err != nil {
+		return err
+	}
+	q := u.Query()
+	q.Set("machine_id", p.Cfg.MachineID)
+	u.RawQuery = q.Encode()
+
+	hdr := http.Header{}
+	hdr.Set("Authorization", "Bearer "+p.Cfg.Key)
+	hdr.Set("X-Agent-Status-Key", p.Cfg.Key)
+
+	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
+	conn, resp, err := dialer.Dial(u.String(), hdr)
+	if err != nil {
+		if resp != nil {
+			return fmt.Errorf("ws dial: %w (status %d)", err, resp.StatusCode)
+		}
+		return fmt.Errorf("ws dial: %w", err)
+	}
+	defer conn.Close()
+	p.log().Info("已连接服务端命令通道", "地址", u.String())
+
+	// Drain any backlog immediately.
+	p.pullAndRun()
+
+	// Reset backoff is done by returning nil only on stop; session errors reconnect.
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				_ = conn.Close()
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				_ = conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(5*time.Second))
+			}
+		}
+	}()
+	defer close(done)
+
+	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		return nil
+	})
+
+	for {
+		select {
+		case <-stop:
+			return nil
+		default:
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &ev); err != nil {
+			continue
+		}
+		switch ev.Type {
+		case apitypes.WSCommandAvailable, apitypes.WSMonitorCommand:
+			p.pullAndRun()
+		default:
+			// ignore unknown
+		}
 	}
 }
 

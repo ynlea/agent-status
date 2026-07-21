@@ -118,9 +118,12 @@ const (
 	WSSessionUpsert  = "session_upsert"
 	WSSessionRemove  = "session_remove"
 	WSNotification   = "notification"
-	WSMachineOnline  = "machine_online"
-	WSMachineOffline = "machine_offline"
-	WSError          = "error"
+	WSMachineOnline    = "machine_online"
+	WSMachineOffline   = "machine_offline"
+	WSError            = "error"
+	WSMonitorCommand   = "monitor_command"   // server → monitor: leased command payload
+	WSMonitorHello     = "monitor_hello"     // monitor → server (optional)
+	WSCommandAvailable = "command_available" // optional notify
 )
 
 type NotificationPayload struct {

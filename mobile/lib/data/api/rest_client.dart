@@ -221,7 +221,7 @@ class RestClient {
     required String type,
     required Map<String, dynamic> payload,
     Duration timeout = const Duration(seconds: 90),
-    Duration interval = const Duration(seconds: 2),
+    Duration interval = const Duration(milliseconds: 500),
   }) async {
     final id = await enqueueCommand(
       machineId: machineId,
