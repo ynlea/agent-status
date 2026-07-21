@@ -676,12 +676,17 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
     if (value <= 0 || maxV <= 0) {
       return c.idleSoft;
     }
-    final t = (value / maxV).clamp(0.0, 1.0);
-    // 浅 → 青芽橙
-    if (t < 0.25) return Color.lerp(c.idleSoft, c.primarySoft, 0.7)!;
-    if (t < 0.5) return c.primarySoft;
-    if (t < 0.75) return Color.lerp(c.primarySoft, c.primary, 0.55)!;
-    return c.primaryDark;
+    // Log scale so a single huge day (e.g. 1e9) does not wash out mid days.
+    // Any non-zero day gets a visible floor intensity.
+    final ratio = math.log(1 + value) / math.log(1 + maxV);
+    final t = (0.28 + 0.72 * ratio).clamp(0.0, 1.0);
+    if (t < 0.4) {
+      return Color.lerp(c.primarySoft, c.primary, (t - 0.28) / 0.12)!;
+    }
+    if (t < 0.7) {
+      return Color.lerp(c.primary, c.primaryDark, (t - 0.4) / 0.3)!;
+    }
+    return Color.lerp(c.primaryDark, c.device, (t - 0.7) / 0.3)!;
   }
 
   @override
@@ -750,61 +755,65 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
           const SizedBox(height: 8),
           LayoutBuilder(
             builder: (context, c) {
-              // 7 行 × 16 列，尽量塞进汇总卡类似高度
+              // 7 行 × 16 列：格子铺满整卡宽度，不再右侧留白。
               const gap = 2.5;
-              final cell = ((c.maxWidth - gap * 15) / 16).clamp(8.0, 12.0);
+              final cell = ((c.maxWidth - gap * (weeks - 1)) / weeks)
+                  .clamp(8.0, 28.0);
               final height = cell * 7 + gap * 6;
               return SizedBox(
+                width: c.maxWidth,
                 height: height,
                 child: Row(
                   children: [
                     for (var w = 0; w < weeks; w++) ...[
                       if (w > 0) SizedBox(width: gap),
-                      Column(
-                        children: [
-                          for (var d = 0; d < 7; d++) ...[
-                            if (d > 0) SizedBox(height: gap),
-                            Builder(
-                              builder: (_) {
-                                final cellData = cells[w * 7 + d];
-                                final v = cellData.value;
-                                final empty = v < 0;
-                                final color = empty
-                                    ? Colors.transparent
-                                    : _colorFor(v, maxV);
-                                return GestureDetector(
-                                  onTap: empty
-                                      ? null
-                                      : () {
-                                          final day = cellData.day;
-                                          final label =
-                                              '${day.month}/${day.day}';
-                                          setState(() {
-                                            _tip = v <= 0
-                                                ? '$label · 无用量'
-                                                : '$label · ${widget.fmtInt(v)}';
-                                          });
-                                        },
-                                  child: Container(
-                                    width: cell,
-                                    height: cell,
-                                    decoration: BoxDecoration(
-                                      color: color,
-                                      borderRadius: BorderRadius.circular(2),
-                                      border: empty
+                      Expanded(
+                        child: Column(
+                          children: [
+                            for (var d = 0; d < 7; d++) ...[
+                              if (d > 0) SizedBox(height: gap),
+                              Expanded(
+                                child: Builder(
+                                  builder: (_) {
+                                    final cellData = cells[w * 7 + d];
+                                    final v = cellData.value;
+                                    final empty = v < 0;
+                                    final color = empty
+                                        ? Colors.transparent
+                                        : _colorFor(v, maxV);
+                                    return GestureDetector(
+                                      onTap: empty
                                           ? null
-                                          : Border.all(
-                                              color: context.qingya.border
-                                                  .withValues(alpha: 0.45),
-                                              width: 0.5,
-                                            ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                                          : () {
+                                              final day = cellData.day;
+                                              final label =
+                                                  '${day.month}/${day.day}';
+                                              setState(() {
+                                                _tip = v <= 0
+                                                    ? '$label · 无用量'
+                                                    : '$label · ${widget.fmtInt(v)}';
+                                              });
+                                            },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: color,
+                                          borderRadius: BorderRadius.circular(2),
+                                          border: empty
+                                              ? null
+                                              : Border.all(
+                                                  color: context.qingya.border
+                                                      .withValues(alpha: 0.45),
+                                                  width: 0.5,
+                                                ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -822,10 +831,10 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
               const SizedBox(width: 4),
               for (final c in [
                 context.qingya.idleSoft,
-                Color.lerp(context.qingya.idleSoft, context.qingya.primarySoft, 0.7)!,
                 context.qingya.primarySoft,
-                Color.lerp(context.qingya.primarySoft, context.qingya.primary, 0.55)!,
+                context.qingya.primary,
                 context.qingya.primaryDark,
+                context.qingya.device,
               ]) ...[
                 Container(
                   width: 9,

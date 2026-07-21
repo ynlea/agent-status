@@ -85,10 +85,35 @@ final routerProvider = Provider<GoRouter>((ref) {
                       ),
                       GoRoute(
                         path: 'providers',
-                        parentNavigatorKey: _rootKey,
-                        builder: (_, state) => ProvidersPage(
-                          machineId: state.pathParameters['machineId']!,
-                        ),
+                        // Stay on the devices branch stack so back returns to
+                        // DeviceDetail (not the device list). Avoid root-navigator
+                        // push which drops intermediate pages and leaves fade ghosts.
+                        pageBuilder: (context, state) {
+                          return CustomTransitionPage<void>(
+                            key: state.pageKey,
+                            opaque: true,
+                            transitionDuration: const Duration(milliseconds: 160),
+                            reverseTransitionDuration:
+                                const Duration(milliseconds: 140),
+                            child: ProvidersPage(
+                              machineId: state.pathParameters['machineId']!,
+                            ),
+                            transitionsBuilder:
+                                (context, animation, secondaryAnimation, child) {
+                              // Ignore secondaryAnimation to avoid residual ghosting
+                              // of the previous route during pop.
+                              final curved = CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutCubic,
+                                reverseCurve: Curves.easeInCubic,
+                              );
+                              return FadeTransition(
+                                opacity: curved,
+                                child: child,
+                              );
+                            },
+                          );
+                        },
                       ),
                     ],
                   ),
