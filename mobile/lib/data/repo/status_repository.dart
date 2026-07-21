@@ -114,8 +114,9 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
         connected: true,
       );
       _bindWs(s);
+      // 首页/设备列表实时性：缩短轮询，并配合 WS + 回前台刷新。
       _poll =
-          Timer.periodic(const Duration(seconds: 20), (_) => _softRefresh());
+          Timer.periodic(const Duration(seconds: 8), (_) => softRefresh());
     } catch (e) {
       final msg = e.toString();
       final friendly = msg.contains('SocketException') ||
@@ -173,7 +174,8 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
     state = state.copyWith(machines: machines, sessions: sessions);
   }
 
-  Future<void> _softRefresh() async {
+  /// 轻量全量刷新（不打断 WS）。供轮询与回前台调用。
+  Future<void> softRefresh() async {
     final s = _settings;
     if (!s.isConfigured || s.demoMode) return;
     try {
@@ -196,26 +198,43 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
     } catch (_) {}
   }
 
+  void _upsertSession(Session session) {
+    String? name = session.machineName;
+    for (final m in state.machines) {
+      if (m.machineId == session.machineId) {
+        name = m.machineName;
+        break;
+      }
+    }
+    final next = session.copyWith(machineName: name);
+    final list = [
+      ...state.sessions.where(
+        (e) => !(e.machineId == next.machineId &&
+            e.sessionId == next.sessionId &&
+            e.agent == next.agent),
+      ),
+      next,
+    ];
+    state = state.copyWith(sessions: list, connected: true);
+  }
+
   void _bindWs(AppSettings s) {
     final ws = WsClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
     _ws = ws;
     ws.onEvent = (type, payload) {
       if (type == 'session_upsert') {
-        final session = Session.fromJson(payload);
-        String? name = session.machineName;
-        for (final m in state.machines) {
-          if (m.machineId == session.machineId) {
-            name = m.machineName;
-            break;
-          }
-        }
-        final next = session.copyWith(machineName: name);
-        final list = [
-          ...state.sessions.where((e) => !(e.machineId == next.machineId &&
-              e.sessionId == next.sessionId &&
-              e.agent == next.agent)),
-          next,
-        ];
+        _upsertSession(Session.fromJson(payload));
+      } else if (type == 'session_remove') {
+        final machineId = '${payload['machine_id'] ?? ''}';
+        final sessionId = '${payload['session_id'] ?? ''}';
+        final agent = '${payload['agent'] ?? ''}';
+        final list = state.sessions
+            .where(
+              (e) => !(e.machineId == machineId &&
+                  e.sessionId == sessionId &&
+                  (agent.isEmpty || e.agent == agent)),
+            )
+            .toList();
         state = state.copyWith(sessions: list, connected: true);
       } else if (type == 'machine_online' || type == 'machine_offline') {
         final m = Machine.fromJson(payload);
@@ -225,8 +244,33 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
         ];
         state = state.copyWith(machines: machines, connected: true);
       } else if (type == 'notification') {
-        // UI 层可选监听；此处标记已连接
-        state = state.copyWith(connected: true);
+        // 状态推送也写进列表，避免只靠 20s 轮询才看到变化。
+        final machineId = '${payload['machine_id'] ?? ''}';
+        final sessionId = '${payload['session_id'] ?? ''}';
+        final agent = '${payload['agent'] ?? 'unknown'}';
+        if (machineId.isNotEmpty && sessionId.isNotEmpty) {
+          DateTime? at;
+          final rawAt = payload['at'];
+          if (rawAt is String && rawAt.isNotEmpty) {
+            at = DateTime.tryParse(rawAt);
+          }
+          _upsertSession(
+            Session(
+              machineId: machineId,
+              agent: agent,
+              sessionId: sessionId,
+              displayName: '${payload['display_name'] ?? sessionId}',
+              state: sessionStateFrom('${payload['state'] ?? ''}'),
+              message: '${payload['message'] ?? ''}',
+              updatedAt: at ?? DateTime.now(),
+              machineName: payload['machine_name'] == null
+                  ? null
+                  : '${payload['machine_name']}',
+            ),
+          );
+        } else {
+          state = state.copyWith(connected: true);
+        }
       }
     };
     ws.connect();

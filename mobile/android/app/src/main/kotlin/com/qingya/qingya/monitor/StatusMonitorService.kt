@@ -53,10 +53,12 @@ class StatusMonitorService : Service() {
     private var jobs: Job? = null
     private lateinit var notifier: Notifier
     private lateinit var ws: WsClient
+    private val statsFetcher = LiveStatsFetcher()
     private var wakeLock: PowerManager.WakeLock? = null
     private val connected = AtomicBoolean(false)
     @Volatile private var lastUrl: String = ""
     @Volatile private var lastKey: String = ""
+    @Volatile private var lastStats: LiveStats = LiveStats()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -74,14 +76,14 @@ class StatusMonitorService : Service() {
                     when (ev) {
                         is WsEvent.Connected -> {
                             connected.set(ev.ok)
-                            promoteForeground(
-                                ev.ok,
-                                if (ev.ok) "链路正常" else "连接断开，重连中…",
-                            )
+                            if (ev.ok) {
+                                refreshStatsIfPossible()
+                            }
+                            promoteForeground(ev.ok, statsDetail(ev.ok))
                         }
                         is WsEvent.Failure -> {
                             connected.set(false)
-                            promoteForeground(false, "失败: ${ev.message.take(48)}")
+                            promoteForeground(false, statsDetail(false))
                         }
                         is WsEvent.Notification -> {
                             val cfg = MonitorConfigStore.read(this@StatusMonitorService)
@@ -93,6 +95,9 @@ class StatusMonitorService : Service() {
                                 SessionState.Idle -> false
                             }
                             if (allow) notifier.notifyState(ev.payload)
+                            // 状态变化后尽快刷一次计数
+                            refreshStatsIfPossible()
+                            promoteForeground(connected.get(), statsDetail(connected.get()))
                         }
                     }
                 }
@@ -100,6 +105,7 @@ class StatusMonitorService : Service() {
             while (isActive) {
                 val cfg = MonitorConfigStore.read(this@StatusMonitorService)
                 if (!cfg.configured) {
+                    lastStats = LiveStats()
                     promoteForeground(false, "未配置服务（请在 App 内保存地址和密钥）")
                     ws.close()
                     lastUrl = ""
@@ -114,10 +120,11 @@ class StatusMonitorService : Service() {
                     } else {
                         ws.ensureConnected()
                     }
-                    promoteForeground(
-                        connected.get(),
-                        if (connected.get()) "链路正常" else "重连中…",
-                    )
+                    // 每轮尝试刷新统计（失败则沿用上次）
+                    if (connected.get() || changed) {
+                        refreshStatsIfPossible()
+                    }
+                    promoteForeground(connected.get(), statsDetail(connected.get()))
                 }
                 delay(4_000)
             }
@@ -125,10 +132,14 @@ class StatusMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        promoteForeground(connected.get(), if (connected.get()) "链路正常" else "运行中…")
+        promoteForeground(connected.get(), statsDetail(connected.get()))
         scope.launch {
             val cfg = MonitorConfigStore.read(this@StatusMonitorService)
-            if (cfg.configured) ws.connect(cfg.serverUrl, cfg.key)
+            if (cfg.configured) {
+                ws.connect(cfg.serverUrl, cfg.key)
+                refreshStatsIfPossible()
+                promoteForeground(connected.get(), statsDetail(connected.get()))
+            }
         }
         return START_STICKY
     }
@@ -146,6 +157,18 @@ class StatusMonitorService : Service() {
         runCatching { ws.close() }
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun refreshStatsIfPossible() {
+        val cfg = MonitorConfigStore.read(this)
+        if (!cfg.configured) return
+        val next = statsFetcher.fetch(cfg.serverUrl, cfg.key) ?: return
+        lastStats = next
+    }
+
+    private fun statsDetail(isConnected: Boolean): String {
+        val line = lastStats.summaryLine()
+        return if (isConnected) line else "重连中 · $line"
     }
 
     private fun acquireWakeLock() {

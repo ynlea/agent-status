@@ -162,17 +162,13 @@ class Notifier(private val context: Context) {
     fun buildOngoing(isConnected: Boolean, detail: String): Notification {
         ensureChannel()
         val title = if (isConnected) "轻芽 · 监听中" else "轻芽 · 重连中"
-        val text = if (isConnected) {
-            "WebSocket 已连接 · $detail"
-        } else {
-            detail.ifBlank { "正在恢复连接…" }
+        val text = detail.ifBlank {
+            if (isConnected) "统计刷新中…" else "正在恢复连接…"
         }
         val openApp = openAppIntent(requestCode = 1)
-        val largeIcon = runCatching {
-            BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
-        }.getOrNull()
 
-        val builder = NotificationCompat.Builder(context, ONGOING_CHANNEL_ID)
+        // 只保留左侧 smallIcon，不设 largeIcon（右侧大图标）。
+        return NotificationCompat.Builder(context, ONGOING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_qingya)
             .setContentTitle(title)
             .setContentText(text)
@@ -186,11 +182,7 @@ class Notifier(private val context: Context) {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openApp)
             .setShowWhen(false)
-
-        if (largeIcon != null) {
-            builder.setLargeIcon(largeIcon)
-        }
-        return builder.build()
+            .build()
     }
 
     private fun openAppIntent(

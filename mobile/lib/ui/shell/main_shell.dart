@@ -1,29 +1,58 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/repo/status_repository.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 
-class MainShell extends StatelessWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
+  @override
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends ConsumerState<MainShell>
+    with WidgetsBindingObserver {
   void _onTap(int index) {
-    navigationShell.goBranch(
+    widget.navigationShell.goBranch(
       index,
-      initialLocation: index == navigationShell.currentIndex,
+      initialLocation: index == widget.navigationShell.currentIndex,
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(statusRepositoryProvider.notifier).softRefresh());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
-    final index = navigationShell.currentIndex;
+    final index = widget.navigationShell.currentIndex;
     final accents = [c.primary, c.device, c.working, c.primary];
     return Scaffold(
       backgroundColor: c.scaffold,
-      body: navigationShell,
+      body: widget.navigationShell,
       bottomNavigationBar: ColoredBox(
         color: c.scaffold,
         child: SafeArea(

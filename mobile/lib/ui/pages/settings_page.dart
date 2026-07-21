@@ -6,6 +6,7 @@ import '../../data/monitor/monitor_bridge.dart';
 import '../../data/prefs/package_info_provider.dart';
 import '../../data/prefs/settings_store.dart';
 import '../../data/repo/status_repository.dart';
+import '../../data/update/app_update_service.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
@@ -20,6 +21,12 @@ class SettingsPage extends ConsumerStatefulWidget {
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
   String _monitorStatus = MonitorBridge.lastStatus;
+  final _updater = AppUpdateService();
+  bool _checkingUpdate = false;
+  bool _downloading = false;
+  bool _cancelDownload = false;
+  double? _downloadProgress;
+  String? _updateHint;
 
   Future<void> _refreshMonitorLabel() async {
     final s = ref.read(settingsProvider);
@@ -34,6 +41,119 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshMonitorLabel();
     });
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (_checkingUpdate || _downloading) return;
+    setState(() {
+      _checkingUpdate = true;
+      _updateHint = '正在检查…';
+    });
+    try {
+      final info = await ref.read(packageInfoProvider.future);
+      final result = await _updater.checkLatest(info.version);
+      if (!mounted) return;
+      if (!result.ok) {
+        setState(() => _updateHint = result.message ?? '检查失败');
+        return;
+      }
+      if (!result.hasUpdate) {
+        setState(() => _updateHint = '已是最新（${result.tag}）');
+        return;
+      }
+      if (result.apkUrl == null || result.apkUrl!.isEmpty) {
+        setState(() => _updateHint = '发现 ${result.tag}，但未找到安装包');
+        return;
+      }
+      setState(() => _updateHint = '发现 ${result.tag}');
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          final c = ctx.qingya;
+          return AlertDialog(
+            backgroundColor: c.card,
+            title: Text('发现新版本 ${result.tag}'),
+            content: Text(
+              result.releaseNotes.isEmpty
+                  ? '当前 ${result.localVersion}，是否下载并安装？\n来源：GitHub Release'
+                  : result.releaseNotes.length > 400
+                      ? '${result.releaseNotes.substring(0, 400)}…'
+                      : result.releaseNotes,
+              style: TextStyle(fontSize: 13, color: c.textSecondary, height: 1.35),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('稍后'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('下载安装'),
+              ),
+            ],
+          );
+        },
+      );
+      if (go == true && mounted) {
+        await _downloadAndInstall(result);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _updateHint = '检查失败：$e');
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
+
+  Future<void> _downloadAndInstall(AppUpdateCheckResult result) async {
+    final url = result.apkUrl;
+    if (url == null || url.isEmpty) return;
+    setState(() {
+      _downloading = true;
+      _cancelDownload = false;
+      _downloadProgress = 0;
+      _updateHint = '下载中…';
+    });
+    try {
+      final file = await _updater.downloadApk(
+        url: url,
+        tag: result.tag,
+        isCancelled: () => _cancelDownload,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            if (total != null && total > 0) {
+              _downloadProgress = (received / total).clamp(0.0, 1.0);
+              final mb = (received / 1024 / 1024).toStringAsFixed(1);
+              final tmb = (total / 1024 / 1024).toStringAsFixed(1);
+              _updateHint = '下载中 $mb / $tmb MB';
+            } else {
+              _downloadProgress = null;
+              final mb = (received / 1024 / 1024).toStringAsFixed(1);
+              _updateHint = '下载中 $mb MB';
+            }
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _downloadProgress = 1;
+        _updateHint = '正在打开安装…';
+      });
+      await _updater.installApk(file.path);
+      if (!mounted) return;
+      setState(() => _updateHint = '已调起系统安装');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _updateHint = '$e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _downloadProgress = null;
+        });
+      }
+    }
   }
 
   @override
@@ -194,6 +314,51 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         error: (_, __) => 'v0.1.6',
                       ),
                 ),
+                Divider(
+                    height: 1, indent: 12, endIndent: 12, color: c.divider),
+                _SettingsValueRow(
+                  label: '检查更新',
+                  value: _downloading
+                      ? (_updateHint ?? '下载中…')
+                      : (_checkingUpdate
+                          ? '检查中…'
+                          : (_updateHint ?? 'GitHub Release')),
+                  onTap: (_checkingUpdate || _downloading)
+                      ? null
+                      : _checkForUpdate,
+                ),
+                if (_downloading) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        LinearProgressIndicator(
+                          value: _downloadProgress,
+                          minHeight: 4,
+                          borderRadius: BorderRadius.circular(4),
+                          color: c.primary,
+                          backgroundColor: c.primarySoft,
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () =>
+                                setState(() => _cancelDownload = true),
+                            child: Text(
+                              '取消下载',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: c.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (settings.demoMode) ...[
                   Divider(
                       height: 1, indent: 12, endIndent: 12, color: c.divider),
