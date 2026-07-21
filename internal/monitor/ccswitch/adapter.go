@@ -400,6 +400,11 @@ func (a *Adapter) Execute(cmd apitypes.MachineCommand) error {
 		return a.SwitchProvider(cmd.App, cmd.Payload.ProviderID)
 	case apitypes.CommandTypeUpdateProvider:
 		return a.UpdateProvider(cmd.App, cmd.Payload)
+	case apitypes.CommandTypeRefreshProviders:
+		if !a.Available() {
+			return fmt.Errorf("cc-switch database not found")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown command type %s", cmd.Type)
 	}
