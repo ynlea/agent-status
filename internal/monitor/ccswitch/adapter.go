@@ -36,10 +36,46 @@ func NewAdapter(dbPath, bin string) *Adapter {
 	if strings.TrimSpace(dbPath) == "" {
 		dbPath = DefaultDBPath()
 	}
-	if strings.TrimSpace(bin) == "" {
+	return &Adapter{DBPath: dbPath, Bin: resolveBin(bin)}
+}
+
+// resolveBin finds cc-switch on PATH or common user install locations.
+// systemd user services often lack ~/.local/bin in PATH.
+func resolveBin(bin string) string {
+	bin = strings.TrimSpace(bin)
+	if bin == "" {
 		bin = "cc-switch"
 	}
-	return &Adapter{DBPath: dbPath, Bin: bin}
+	if filepath.IsAbs(bin) {
+		return bin
+	}
+	// relative path that exists as-is
+	if strings.Contains(bin, string(os.PathSeparator)) || strings.Contains(bin, "/") {
+		if st, err := os.Stat(bin); err == nil && !st.IsDir() {
+			return bin
+		}
+	}
+	if path, err := exec.LookPath(bin); err == nil {
+		return path
+	}
+	// only probe fallbacks for the default command name
+	base := filepath.Base(bin)
+	if base != "cc-switch" && base != "cc-switch.exe" {
+		return bin
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "cc-switch"),
+		filepath.Join(home, ".local", "bin", "cc-switch.exe"),
+		filepath.Join(home, "bin", "cc-switch"),
+		filepath.Join(home, "bin", "cc-switch.exe"),
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return bin
 }
 
 // Available reports whether the sqlite file exists.
@@ -181,9 +217,11 @@ func (a *Adapter) switchUnlocked(app, providerID string) error {
 	if strings.TrimSpace(providerID) == "" {
 		return fmt.Errorf("provider_id required")
 	}
+	bin := resolveBin(a.Bin)
+	a.Bin = bin
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, a.Bin, "use", providerID, "-a", app)
+	cmd := exec.CommandContext(ctx, bin, "use", providerID, "-a", app)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
