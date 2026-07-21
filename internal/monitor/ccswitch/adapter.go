@@ -40,7 +40,7 @@ func NewAdapter(dbPath, bin string) *Adapter {
 }
 
 // resolveBin finds cc-switch on PATH or common user install locations.
-// systemd user services often lack ~/.local/bin in PATH.
+// Service environments (systemd / Windows services) often lack the user PATH.
 func resolveBin(bin string) string {
 	bin = strings.TrimSpace(bin)
 	if bin == "" {
@@ -50,7 +50,7 @@ func resolveBin(bin string) string {
 		return bin
 	}
 	// relative path that exists as-is
-	if strings.Contains(bin, string(os.PathSeparator)) || strings.Contains(bin, "/") {
+	if strings.Contains(bin, string(os.PathSeparator)) || strings.Contains(bin, "/") || strings.Contains(bin, `\`) {
 		if st, err := os.Stat(bin); err == nil && !st.IsDir() {
 			return bin
 		}
@@ -65,10 +65,18 @@ func resolveBin(bin string) string {
 	}
 	home, _ := os.UserHomeDir()
 	candidates := []string{
+		// Linux / macOS user installs
 		filepath.Join(home, ".local", "bin", "cc-switch"),
 		filepath.Join(home, ".local", "bin", "cc-switch.exe"),
 		filepath.Join(home, "bin", "cc-switch"),
 		filepath.Join(home, "bin", "cc-switch.exe"),
+		// Windows official CLI install (per-user)
+		filepath.Join(home, "AppData", "Local", "Programs", "cc-switch-cli", "cc-switch.exe"),
+	}
+	if localApp := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localApp != "" {
+		candidates = append(candidates,
+			filepath.Join(localApp, "Programs", "cc-switch-cli", "cc-switch.exe"),
+		)
 	}
 	for _, c := range candidates {
 		if st, err := os.Stat(c); err == nil && !st.IsDir() {
