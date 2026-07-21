@@ -45,6 +45,9 @@ type Config struct {
 	CommandPollSec int `json:"command_poll_sec,omitempty"`
 	// ProviderReportSec is how often to push provider snapshots (default = report_interval_sec).
 	ProviderReportSec int `json:"provider_report_sec,omitempty"`
+
+	// ConfigPath is the absolute path of this monitor.json (not serialized).
+	ConfigPath string `json:"-"`
 }
 
 func (c *Config) UsageScanEnabled() bool {

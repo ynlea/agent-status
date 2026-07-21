@@ -214,6 +214,19 @@ func (p *ProviderController) reportOnce(reason string) {
 	if err := p.Rep.ReportProvidersRequest(req); err != nil {
 		p.log().Warn("上报供应商快照失败", "原因", reason, "错误", err)
 	}
+	// Also heal hooks when user switches Claude providers in the GUI.
+	p.restoreClaudeHooks("provider-report")
+}
+
+func (p *ProviderController) restoreClaudeHooks(reason string) {
+	if p == nil || p.Cfg == nil || strings.TrimSpace(p.Cfg.ConfigPath) == "" {
+		return
+	}
+	if err := EnsureClaudeHooks(p.Cfg.ConfigPath); err != nil {
+		p.log().Warn("恢复 Claude Hooks 失败", "原因", reason, "错误", err)
+		return
+	}
+	p.log().Info("已确保 Claude Hooks 存在", "原因", reason)
 }
 
 func (p *ProviderController) pullAndRun() {
@@ -386,6 +399,12 @@ func (p *ProviderController) runOne(cmd apitypes.MachineCommand) {
 		p.log().Warn("远程命令执行失败", "命令标识", cmd.ID, "错误", errMsg)
 	} else {
 		p.log().Info("远程命令执行成功", "命令标识", cmd.ID)
+		// cc-switch replaces whole Claude settings.json on switch; restore hooks.
+		if cmd.App == apitypes.ProviderAppClaude &&
+			(cmd.Type == apitypes.CommandTypeSwitchProvider ||
+				cmd.Type == apitypes.CommandTypeUpdateProvider) {
+			p.restoreClaudeHooks("after-claude-provider-change")
+		}
 	}
 	// Always attach latest readiness/snapshot after command attempt.
 	if p.Adapter != nil {

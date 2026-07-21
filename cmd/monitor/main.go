@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -83,6 +84,11 @@ func main() {
 	if err != nil {
 		logger.Error("加载监控配置失败", "错误", err, "路径", *cfgPath)
 		os.Exit(2)
+	}
+	if abs, err := filepath.Abs(*cfgPath); err == nil {
+		cfg.ConfigPath = abs
+	} else {
+		cfg.ConfigPath = *cfgPath
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
