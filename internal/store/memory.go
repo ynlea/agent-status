@@ -27,6 +27,7 @@ type Memory struct {
 	prices         *priceCache
 	providerSnaps  map[string]apitypes.ProviderAppSnapshot // machine|app
 	providerSnapAt map[string]time.Time
+	providerMeta   map[string]apitypes.ProvidersListResponse
 	commands       map[string]apitypes.MachineCommand
 }
 
@@ -44,6 +45,7 @@ func NewMemory(maxHistory int) *Memory {
 		prices:         newPriceCache(),
 		providerSnaps:  make(map[string]apitypes.ProviderAppSnapshot),
 		providerSnapAt: make(map[string]time.Time),
+		providerMeta:   make(map[string]apitypes.ProvidersListResponse),
 		commands:       make(map[string]apitypes.MachineCommand),
 	}
 	for _, p := range bundledPublicPrices {

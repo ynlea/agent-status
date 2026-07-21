@@ -31,6 +31,7 @@ NO_INIT_AGENTS=0
 NO_ENABLE=0
 LOCAL_BIN_SRC=""
 FORCE_CONFIG=0
+INSTALL_CC_SWITCH=0
 PURGE=0
 FORCE_UPDATE=0
 CONFIG_ACTION=""
@@ -638,6 +639,43 @@ PY
   if [[ -n "$db_line" ]]; then
     kv "cc-switch.db" "$db_line"
   fi
+}
+
+
+install_cc_switch_cli() {
+  step "安装 cc-switch-cli"
+  local api="https://api.github.com/repos/SaladDay/cc-switch-cli/releases/latest"
+  local json tag asset url arch tmp dest
+  if ! command -v curl >/dev/null 2>&1; then
+    die "需要 curl 才能安装 cc-switch-cli"
+  fi
+  json="$(curl -fsSL -H 'User-Agent: agent-status-install' "$api")" || die "无法获取 cc-switch-cli 发布信息"
+  tag="$(printf '%s' "$json" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("tag_name",""))' 2>/dev/null || true)"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) asset="cc-switch-cli-linux-x64.tar.gz" ;;
+    aarch64|arm64) asset="cc-switch-cli-linux-arm64.tar.gz" ;;
+    *) die "暂不支持的架构: $arch" ;;
+  esac
+  url="https://github.com/SaladDay/cc-switch-cli/releases/download/${tag}/${asset}"
+  tmp="$(mktemp -d)"
+  dest="${HOME}/.local/bin"
+  mkdir -p "$dest"
+  kv "版本" "$tag"
+  kv "目标" "$dest/cc-switch"
+  info "下载 $asset ..."
+  curl -fL --progress-bar -o "$tmp/$asset" "$url" || die "下载失败"
+  tar -xzf "$tmp/$asset" -C "$tmp"
+  local bin
+  bin="$(find "$tmp" -type f -name cc-switch | head -n1)"
+  [[ -n "$bin" ]] || die "压缩包内未找到 cc-switch"
+  install -m 755 "$bin" "$dest/cc-switch"
+  rm -rf "$tmp"
+  kv "cc-switch" "$dest/cc-switch"
+  if "$dest/cc-switch" --version >/dev/null 2>&1; then
+    kv "版本探测" "$("$dest/cc-switch" --version 2>/dev/null | head -n1)"
+  fi
+  ok "cc-switch-cli 已安装 ($tag)"
 }
 
 write_monitor_json() {
@@ -1452,6 +1490,18 @@ cmd_install() {
     step "安装监测端"
     install_binary monitor
     write_monitor_json "$SERVER_URL" "$KEY"
+    if [[ "${INSTALL_CC_SWITCH:-0}" -eq 1 ]] || ! find_cc_switch_bin >/dev/null 2>&1; then
+      if [[ "${INSTALL_CC_SWITCH:-0}" -eq 1 ]]; then
+        install_cc_switch_cli
+        ensure_monitor_cc_switch
+      elif [[ -t 0 && "${YES:-0}" -eq 0 ]]; then
+        read -r -p "  未检测到 cc-switch-cli，是否现在安装? [Y/n] " ans || true
+        if [[ ! "${ans:-}" =~ ^[nN] ]]; then
+          install_cc_switch_cli
+          ensure_monitor_cc_switch
+        fi
+      fi
+    fi
     write_systemd_monitor
     ok "监测端就绪"
   fi
@@ -1520,6 +1570,7 @@ parse_args() {
       --no-enable) NO_ENABLE=1; shift ;;
       --local-bin) LOCAL_BIN_SRC="${2:-}"; shift 2 ;;
       --force-config) FORCE_CONFIG=1; shift ;;
+      --install-cc-switch) INSTALL_CC_SWITCH=1; shift ;;
       --purge) PURGE=1; shift ;;
       --force) FORCE_UPDATE=1; shift ;;
       -h|--help) usage; exit 0 ;;

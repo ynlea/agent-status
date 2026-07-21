@@ -117,6 +117,13 @@ CREATE TABLE IF NOT EXISTS machine_commands (
   finished_at   TEXT,
   lease_until   TEXT
 );
+CREATE TABLE IF NOT EXISTS provider_machine_meta (
+  machine_id          TEXT PRIMARY KEY,
+  cc_switch_available INTEGER NOT NULL DEFAULT 0,
+  cc_switch_cli_ready INTEGER NOT NULL DEFAULT 0,
+  cc_switch_bin       TEXT NOT NULL DEFAULT '',
+  updated_at          TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_machine_commands_machine_status
   ON machine_commands(machine_id, status, created_at);
 `)

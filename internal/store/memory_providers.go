@@ -16,6 +16,9 @@ func (m *Memory) ensureProviderMaps() {
 	if m.providerSnapAt == nil {
 		m.providerSnapAt = make(map[string]time.Time)
 	}
+	if m.providerMeta == nil {
+		m.providerMeta = make(map[string]apitypes.ProvidersListResponse)
+	}
 	if m.commands == nil {
 		m.commands = make(map[string]apitypes.MachineCommand)
 	}
@@ -40,6 +43,13 @@ func (m *Memory) ApplyProvidersReport(req apitypes.ProvidersReportRequest) error
 		prev.Online = true
 		prev.LastSeenAt = now
 		m.machines[req.MachineID] = prev
+	}
+	m.providerMeta[req.MachineID] = apitypes.ProvidersListResponse{
+		MachineID:         req.MachineID,
+		CcSwitchAvailable: req.CcSwitchAvailable,
+		CcSwitchCLIReady:  req.CcSwitchCLIReady,
+		CcSwitchBin:       req.CcSwitchBin,
+		UpdatedAt:         now,
 	}
 	for _, appSnap := range req.Apps {
 		if !apitypes.ValidProviderApp(appSnap.App) {
@@ -99,12 +109,25 @@ func (m *Memory) ListProviders(machineID, app string) (apitypes.ProvidersListRes
 		}
 	}
 	out.UpdatedAt = latest
+	if meta, ok := m.providerMeta[machineID]; ok {
+		out.CcSwitchAvailable = meta.CcSwitchAvailable
+		out.CcSwitchCLIReady = meta.CcSwitchCLIReady
+		out.CcSwitchBin = meta.CcSwitchBin
+		if meta.UpdatedAt.After(out.UpdatedAt) {
+			out.UpdatedAt = meta.UpdatedAt
+		}
+	}
 	return out, nil
 }
 
 func (m *Memory) EnqueueCommand(machineID string, req apitypes.EnqueueCommandRequest) (apitypes.MachineCommand, error) {
 	if err := validateEnqueue(machineID, req); err != nil {
 		return apitypes.MachineCommand{}, err
+	}
+	if req.Type == apitypes.CommandTypeRefreshProviders {
+		if strings.TrimSpace(req.App) == "" {
+			req.App = apitypes.ProviderAppAll
+		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

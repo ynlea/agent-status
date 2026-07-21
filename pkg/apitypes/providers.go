@@ -7,9 +7,11 @@ import "time"
 const (
 	ProviderAppCodex  = "codex"
 	ProviderAppClaude = "claude"
+	ProviderAppAll    = "all"
 
-	CommandTypeSwitchProvider = "switch_provider"
-	CommandTypeUpdateProvider = "update_provider"
+	CommandTypeSwitchProvider   = "switch_provider"
+	CommandTypeUpdateProvider   = "update_provider"
+	CommandTypeRefreshProviders = "refresh_providers"
 
 	CommandStatusQueued    = "queued"
 	CommandStatusRunning   = "running"
@@ -32,7 +34,7 @@ func ValidProviderApp(app string) bool {
 // ValidCommandType returns true for supported command types.
 func ValidCommandType(t string) bool {
 	switch t {
-	case CommandTypeSwitchProvider, CommandTypeUpdateProvider:
+	case CommandTypeSwitchProvider, CommandTypeUpdateProvider, CommandTypeRefreshProviders:
 		return true
 	default:
 		return false
@@ -55,7 +57,7 @@ type ProviderInfo struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
 	BaseURL            string `json:"base_url,omitempty"`
-	Model              string `json:"model,omitempty"` // codex top-level model
+	Model              string `json:"model,omitempty"`
 	ModelAlias         string `json:"model_alias,omitempty"`
 	AnthropicModel     string `json:"anthropic_model,omitempty"`
 	DefaultHaikuModel  string `json:"default_haiku_model,omitempty"`
@@ -74,28 +76,38 @@ type ProviderAppSnapshot struct {
 
 // ProvidersReportRequest is Monitor → Server snapshot push.
 type ProvidersReportRequest struct {
-	MachineID   string                `json:"machine_id"`
-	MachineName string                `json:"machine_name,omitempty"`
-	Platform    string                `json:"platform,omitempty"`
-	ReportedAt  time.Time             `json:"reported_at"`
-	Apps        []ProviderAppSnapshot `json:"apps"`
+	MachineID         string                `json:"machine_id"`
+	MachineName       string                `json:"machine_name,omitempty"`
+	Platform          string                `json:"platform,omitempty"`
+	ReportedAt        time.Time             `json:"reported_at"`
+	Apps              []ProviderAppSnapshot `json:"apps"`
+	CcSwitchAvailable bool                  `json:"cc_switch_available"`
+	CcSwitchCLIReady  bool                  `json:"cc_switch_cli_ready"`
+	CcSwitchBin       string                `json:"cc_switch_bin,omitempty"`
 }
 
 // ProvidersListResponse is App → Server snapshot read.
 type ProvidersListResponse struct {
-	MachineID string                `json:"machine_id"`
-	Apps      []ProviderAppSnapshot `json:"apps"`
-	UpdatedAt time.Time             `json:"updated_at,omitempty"`
+	MachineID         string                `json:"machine_id"`
+	Apps              []ProviderAppSnapshot `json:"apps"`
+	UpdatedAt         time.Time             `json:"updated_at,omitempty"`
+	CcSwitchAvailable bool                  `json:"cc_switch_available"`
+	CcSwitchCLIReady  bool                  `json:"cc_switch_cli_ready"`
+	CcSwitchBin       string                `json:"cc_switch_bin,omitempty"`
+}
+
+// Ready reports whether remote provider ops can run on this machine.
+func (r ProvidersListResponse) Ready() bool {
+	return r.CcSwitchAvailable && r.CcSwitchCLIReady
 }
 
 // CommandPayload carries switch/update parameters.
-// api_key is only present when the user changed it; stripped after command finishes.
 type CommandPayload struct {
-	ProviderID         string `json:"provider_id"`
+	ProviderID         string `json:"provider_id,omitempty"`
 	Name               string `json:"name,omitempty"`
 	BaseURL            string `json:"base_url,omitempty"`
 	APIKey             string `json:"api_key,omitempty"`
-	Model              string `json:"model,omitempty"` // codex
+	Model              string `json:"model,omitempty"`
 	ModelAlias         string `json:"model_alias,omitempty"`
 	AnthropicModel     string `json:"anthropic_model,omitempty"`
 	DefaultHaikuModel  string `json:"default_haiku_model,omitempty"`
@@ -145,7 +157,7 @@ type CommandsPullResponse struct {
 // CommandResultRequest is Monitor → Server result callback.
 type CommandResultRequest struct {
 	MachineID       string                  `json:"machine_id"`
-	Status          string                  `json:"status"` // succeeded | failed
+	Status          string                  `json:"status"`
 	ErrorMessage    string                  `json:"error_message,omitempty"`
 	ProvidersReport *ProvidersReportRequest `json:"providers_report,omitempty"`
 }

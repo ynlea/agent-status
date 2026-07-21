@@ -469,11 +469,32 @@ class ProvidersListResponse {
     required this.machineId,
     this.apps = const [],
     this.updatedAt,
+    this.ccSwitchAvailable = false,
+    this.ccSwitchCliReady = false,
+    this.ccSwitchBin = '',
   });
 
   final String machineId;
   final List<ProviderAppSnapshot> apps;
   final DateTime? updatedAt;
+  final bool ccSwitchAvailable;
+  final bool ccSwitchCliReady;
+  final String ccSwitchBin;
+
+  bool get ready => ccSwitchAvailable && ccSwitchCliReady;
+
+  String get notReadyReason {
+    if (!ccSwitchAvailable && !ccSwitchCliReady) {
+      return '未安装或未检测到 cc-switch-cli / 本地数据库';
+    }
+    if (!ccSwitchCliReady) {
+      return '未安装 cc-switch-cli（或监控端找不到可执行文件）';
+    }
+    if (!ccSwitchAvailable) {
+      return '未找到本机 cc-switch 数据库（~/.cc-switch）';
+    }
+    return '';
+  }
 
   ProviderAppSnapshot? forApp(String app) {
     for (final a in apps) {
@@ -488,6 +509,9 @@ class ProvidersListResponse {
       machineId: '${json['machine_id'] ?? ''}',
       apps: list.map(ProviderAppSnapshot.fromJson).toList(),
       updatedAt: _parseTime(json['updated_at']),
+      ccSwitchAvailable: json['cc_switch_available'] == true,
+      ccSwitchCliReady: json['cc_switch_cli_ready'] == true,
+      ccSwitchBin: '${json['cc_switch_bin'] ?? ''}'.trim(),
     );
   }
 }

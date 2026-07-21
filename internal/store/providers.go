@@ -34,11 +34,21 @@ func validateEnqueue(machineID string, req apitypes.EnqueueCommandRequest) error
 	if strings.TrimSpace(machineID) == "" {
 		return fmt.Errorf("machine_id required")
 	}
+	if !apitypes.ValidCommandType(req.Type) {
+		return fmt.Errorf("type must be switch_provider|update_provider|refresh_providers")
+	}
+	if req.Type == apitypes.CommandTypeRefreshProviders {
+		app := strings.TrimSpace(req.App)
+		if app == "" || app == apitypes.ProviderAppAll {
+			return nil
+		}
+		if !apitypes.ValidProviderApp(app) {
+			return fmt.Errorf("app must be codex|claude|all")
+		}
+		return nil
+	}
 	if !apitypes.ValidProviderApp(req.App) {
 		return fmt.Errorf("app must be codex|claude")
-	}
-	if !apitypes.ValidCommandType(req.Type) {
-		return fmt.Errorf("type must be switch_provider|update_provider")
 	}
 	if strings.TrimSpace(req.Payload.ProviderID) == "" {
 		return fmt.Errorf("payload.provider_id required")

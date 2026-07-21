@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../data/api/rest_client.dart';
 import '../../data/prefs/settings_store.dart';
@@ -49,7 +50,11 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     return RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
   }
 
-  Future<void> _reload() async {
+  bool get _ready => _data?.ready == true;
+
+  String get _app => _tabs.index == 0 ? 'codex' : 'claude';
+
+  Future<void> _reload({bool forceRemote = false}) async {
     final client = _client();
     if (client == null) {
       setState(() {
@@ -66,6 +71,28 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
       _error = null;
     });
     try {
+      if (forceRemote) {
+        // Ask monitor to re-scan local cc-switch and push a fresh snapshot.
+        final cmd = await client.runCommandAndWait(
+          machineId: widget.machineId,
+          app: 'all',
+          type: 'refresh_providers',
+          payload: const {},
+          timeout: const Duration(seconds: 45),
+          interval: const Duration(milliseconds: 800),
+        );
+        if (!cmd.isSuccess && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                cmd.errorMessage.isEmpty
+                    ? '远端刷新失败：${cmd.status}'
+                    : '远端刷新失败：${cmd.errorMessage}',
+              ),
+            ),
+          );
+        }
+      }
       final data = await client.fetchProviders(widget.machineId);
       if (!mounted) return;
       setState(() {
@@ -81,16 +108,24 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     }
   }
 
-  String get _app => _tabs.index == 0 ? 'codex' : 'claude';
-
   Future<void> _runCommand({
     required String type,
     required Map<String, dynamic> payload,
     required String successText,
+    String app = '',
   }) async {
     final client = _client();
     if (client == null) return;
-    // Soft offline warning: still enqueue; success only after terminal status.
+    if (!_ready) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_data?.notReadyReason.isNotEmpty == true
+              ? _data!.notReadyReason
+              : '未安装 cc-switch-cli，无法操作'),
+        ),
+      );
+      return;
+    }
     for (final m in ref.read(statusRepositoryProvider).machines) {
       if (m.machineId == widget.machineId && !m.online) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,7 +140,7 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     try {
       final cmd = await client.runCommandAndWait(
         machineId: widget.machineId,
-        app: _app,
+        app: app.isEmpty ? _app : app,
         type: type,
         payload: payload,
       );
@@ -149,8 +184,8 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
             ),
           ),
           content: Text(
-            '将 ${_app == 'codex' ? 'Codex' : 'Claude'} 当前供应商切换为「${p.name}」。\n\n'
-            '说明：已在运行的会话不一定立刻跟随，新会话会使用新配置。',
+            '将 ${_app == 'codex' ? 'Codex' : 'Claude'} 切换为「${p.name}」。\n\n'
+            '说明：已在运行的会话不一定立刻跟随。',
             style: TextStyle(fontSize: 13, color: c.textPrimary, height: 1.4),
           ),
           actions: [
@@ -197,7 +232,8 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     await _runCommand(
       type: 'update_provider',
       payload: result,
-      successText: '已保存「${(savedName != null && savedName.isNotEmpty) ? savedName : p.name}」',
+      successText:
+          '已保存「${(savedName != null && savedName.isNotEmpty) ? savedName : p.name}」',
     );
   }
 
@@ -213,6 +249,7 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     }
     final c = context.qingya;
     final title = machine?.machineName ?? widget.machineId;
+    final updated = _data?.updatedAt;
 
     return Scaffold(
       backgroundColor: c.scaffold,
@@ -220,33 +257,46 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 12, 0),
+              padding: const EdgeInsets.fromLTRB(4, 2, 8, 0),
               child: Row(
                 children: [
                   IconButton(
                     onPressed: () => context.pop(),
                     visualDensity: VisualDensity.compact,
                     icon: Icon(Icons.arrow_back_ios_new_rounded,
-                        size: 20, color: c.textPrimary),
+                        size: 18, color: c.textPrimary),
                   ),
                   Expanded(
-                    child: Text(
-                      '供应商 · $title',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: c.textPrimary,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '供应商 · $title',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                        if (updated != null)
+                          Text(
+                            '快照 ${DateFormat('MM-dd HH:mm:ss').format(updated.toLocal())}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: c.textSecondary,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   if (_busy)
                     Padding(
-                      padding: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.only(right: 6),
                       child: SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           color: c.device,
@@ -254,31 +304,61 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
                       ),
                     ),
                   IconButton(
-                    onPressed: _busy ? null : _reload,
+                    tooltip: '从本机重新拉取',
+                    onPressed: (_busy || _loading)
+                        ? null
+                        : () async {
+                            setState(() => _busy = true);
+                            await _reload(forceRemote: true);
+                            if (mounted) setState(() => _busy = false);
+                          },
                     visualDensity: VisualDensity.compact,
-                    icon: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
+                    icon: QingyaTintIcon(QingyaAssets.refreshV2, size: 18),
                   ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text(
-                '切换或编辑只更新本机配置；已在运行的会话不一定立刻跟随。',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: c.textSecondary,
-                  height: 1.35,
+            if (_data != null && !_ready)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: c.deviceSoft,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: c.border),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded,
+                          size: 16, color: c.device),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _data!.notReadyReason.isEmpty
+                              ? '未安装 cc-switch-cli，切换/编辑已禁用'
+                              : '${_data!.notReadyReason}。切换/编辑已禁用。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: c.textPrimary,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               child: Container(
-                padding: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
@@ -300,19 +380,20 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
                 ),
               ),
             ),
-            const SizedBox(height: 8),
             Expanded(
               child: _loading
-                  ? Center(
-                      child: CircularProgressIndicator(color: c.device),
-                    )
+                  ? Center(child: CircularProgressIndicator(color: c.device))
                   : _error != null
                       ? EmptyState(
                           asset: QingyaAssets.catDetailPeekV3,
                           title: '加载失败',
                           subtitle: _error!,
                         )
-                      : _buildList(c),
+                      : RefreshIndicator(
+                          color: c.device,
+                          onRefresh: () => _reload(forceRemote: true),
+                          child: _buildBody(c),
+                        ),
             ),
           ],
         ),
@@ -320,7 +401,24 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
     );
   }
 
-  Widget _buildList(QingyaPalette c) {
+  Widget _buildBody(QingyaPalette c) {
+    if (_data != null && !_ready) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 28),
+        children: [
+          EmptyState(
+            asset: QingyaAssets.catDetailPeekV3,
+            title: '未安装 cc-switch-cli',
+            subtitle:
+                '${_data!.notReadyReason}\n下拉可让监控端重新探测；安装后请重启监控端。',
+          ),
+        ],
+      );
+    }
+
     final snap = _data?.forApp(_app);
     if (snap == null || snap.providers.isEmpty) {
       bool? online;
@@ -330,37 +428,42 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
           break;
         }
       }
-      return EmptyState(
-        asset: QingyaAssets.catDetailPeekV3,
-        title: '暂无供应商数据',
-        subtitle: online == false
-            ? '设备离线，或监控端尚未上报快照'
-            : '监控端可能未安装 cc-switch，或版本尚未支持远程管理',
-      );
-    }
-    return RefreshIndicator(
-      color: c.device,
-      onRefresh: _reload,
-      child: ListView.separated(
+      return ListView(
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-        itemCount: snap.providers.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (_, i) {
-          final p = snap.providers[i];
-          final current = p.id == snap.currentId;
-          return _ProviderTile(
-            provider: p,
-            app: _app,
-            current: current,
-            busy: _busy,
-            onSwitch: current ? null : () => _switchTo(p),
-            onEdit: () => _edit(p),
-          );
-        },
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 28),
+        children: [
+          EmptyState(
+            asset: QingyaAssets.catDetailPeekV3,
+            title: '暂无供应商数据',
+            subtitle: online == false
+                ? '设备离线，或监控端尚未上报快照\n下拉可请求重新拉取'
+                : '监控端可能尚未上报，下拉可强制重新拉取本机配置',
+          ),
+        ],
+      );
+    }
+
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
       ),
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 24),
+      itemCount: snap.providers.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        final p = snap.providers[i];
+        final current = p.id == snap.currentId;
+        return _ProviderTile(
+          provider: p,
+          app: _app,
+          current: current,
+          busy: _busy || !_ready,
+          onSwitch: (!_ready || current) ? null : () => _switchTo(p),
+          onEdit: !_ready ? null : () => _edit(p),
+        );
+      },
     );
   }
 }
@@ -381,12 +484,12 @@ class _AppTab extends StatelessWidget {
     final c = context.qingya;
     return Material(
       color: selected ? c.deviceSoft : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(9),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(9),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
             label,
             textAlign: TextAlign.center,
@@ -409,7 +512,7 @@ class _ProviderTile extends StatelessWidget {
     required this.current,
     required this.busy,
     this.onSwitch,
-    required this.onEdit,
+    this.onEdit,
   });
 
   final ProviderInfo provider;
@@ -417,104 +520,121 @@ class _ProviderTile extends StatelessWidget {
   final bool current;
   final bool busy;
   final VoidCallback? onSwitch;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
     final model = provider.modelSummary(app);
     final url = provider.baseUrl;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 10),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(14),
-        border: current
-            ? Border.all(color: c.device.withValues(alpha: 0.45), width: 1.2)
-            : Border.all(color: c.border.withValues(alpha: 0.55)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final meta = <String>[
+      if (model.isNotEmpty) model,
+      if (url.isNotEmpty) url,
+      provider.hasApiKey ? 'Key 已配置' : 'Key 未配置',
+    ].join(' · ');
+
+    return Material(
+      color: c.card,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onEdit == null || busy ? null : onEdit,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: current
+                  ? c.device.withValues(alpha: 0.5)
+                  : c.border.withValues(alpha: 0.7),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  provider.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: c.textPrimary,
-                  ),
-                ),
-              ),
-              if (current)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: c.deviceSoft,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '当前',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: c.device,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      provider.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: c.textPrimary,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          if (model.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              model,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: c.textSecondary),
-            ),
-          ],
-          if (url.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: c.textSecondary),
-            ),
-          ],
-          const SizedBox(height: 4),
-          Text(
-            provider.hasApiKey ? 'API Key：已配置' : 'API Key：未配置',
-            style: TextStyle(fontSize: 11, color: c.textSecondary),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              if (onSwitch != null)
-                TextButton(
-                  onPressed: busy ? null : onSwitch,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  if (current)
+                    Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: c.deviceSoft,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '当前',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: c.device,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (meta.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  meta,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: c.textSecondary,
+                    height: 1.3,
                   ),
-                  child: const Text('设为当前'),
                 ),
-              TextButton(
-                onPressed: busy ? null : onEdit,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: const Text('编辑'),
+              ],
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  if (onSwitch != null)
+                    TextButton(
+                      onPressed: busy ? null : onSwitch,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('设为当前', style: TextStyle(fontSize: 12)),
+                    ),
+                  if (onEdit != null)
+                    TextButton(
+                      onPressed: busy ? null : onEdit,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('编辑', style: TextStyle(fontSize: 12)),
+                    ),
+                  const Spacer(),
+                  if (provider.category.isNotEmpty)
+                    Text(
+                      provider.category,
+                      style: TextStyle(fontSize: 10, color: c.textSecondary),
+                    ),
+                ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -635,7 +755,7 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
             ),
             const SizedBox(height: 4),
             Text(
-              'API Key 留空表示不修改。保存后若是当前项，会重新应用到本机 live 配置。',
+              'API Key 留空表示不修改。当前项保存后会重新应用到 live 配置。',
               style: TextStyle(fontSize: 12, color: c.textSecondary, height: 1.35),
             ),
             const SizedBox(height: 12),
@@ -650,11 +770,11 @@ class _EditProviderSheetState extends State<_EditProviderSheet> {
             if (widget.app == 'codex') ...[
               _field(c, _model, 'Model'),
             ] else ...[
-              _field(c, _modelAlias, 'Model 别名（顶层 model）'),
+              _field(c, _modelAlias, 'Model 别名'),
               _field(c, _anthropicModel, 'ANTHROPIC_MODEL'),
-              _field(c, _haiku, 'DEFAULT_HAIKU_MODEL'),
-              _field(c, _sonnet, 'DEFAULT_SONNET_MODEL'),
-              _field(c, _opus, 'DEFAULT_OPUS_MODEL'),
+              _field(c, _haiku, 'DEFAULT_HAIKU'),
+              _field(c, _sonnet, 'DEFAULT_SONNET'),
+              _field(c, _opus, 'DEFAULT_OPUS'),
             ],
             const SizedBox(height: 12),
             FilledButton(

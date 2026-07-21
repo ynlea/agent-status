@@ -21,14 +21,30 @@ func NewCcSwitchAdapter(cfg *Config) *ccswitch.Adapter {
 	return ccswitch.NewAdapter(cfg.CcSwitchDB, cfg.CcSwitchBin)
 }
 
-// ReportProviders posts a redacted provider snapshot.
+// ReportProviders posts a redacted provider snapshot (legacy helper).
 func (r *Reporter) ReportProviders(apps []apitypes.ProviderAppSnapshot) error {
-	req := apitypes.ProvidersReportRequest{
+	return r.ReportProvidersRequest(apitypes.ProvidersReportRequest{
 		MachineID:   r.Cfg.MachineID,
 		MachineName: r.Cfg.MachineName,
 		Platform:    r.platform(),
 		ReportedAt:  time.Now().UTC(),
 		Apps:        apps,
+	})
+}
+
+// ReportProvidersRequest posts a full providers report including readiness flags.
+func (r *Reporter) ReportProvidersRequest(req apitypes.ProvidersReportRequest) error {
+	if req.ReportedAt.IsZero() {
+		req.ReportedAt = time.Now().UTC()
+	}
+	if req.MachineID == "" {
+		req.MachineID = r.Cfg.MachineID
+	}
+	if req.MachineName == "" {
+		req.MachineName = r.Cfg.MachineName
+	}
+	if req.Platform == "" {
+		req.Platform = r.platform()
 	}
 	return r.postJSON("/api/v1/providers/report", req)
 }
@@ -53,20 +69,26 @@ func (r *Reporter) PullCommands(limit int) ([]apitypes.MachineCommand, error) {
 }
 
 // CompleteCommand reports command outcome, optionally attaching a fresh snapshot.
-func (r *Reporter) CompleteCommand(id string, status, errMsg string, apps []apitypes.ProviderAppSnapshot) error {
+func (r *Reporter) CompleteCommand(id string, status, errMsg string, report *apitypes.ProvidersReportRequest) error {
 	req := apitypes.CommandResultRequest{
 		MachineID:    r.Cfg.MachineID,
 		Status:       status,
 		ErrorMessage: errMsg,
 	}
-	if len(apps) > 0 {
-		req.ProvidersReport = &apitypes.ProvidersReportRequest{
-			MachineID:   r.Cfg.MachineID,
-			MachineName: r.Cfg.MachineName,
-			Platform:    r.platform(),
-			ReportedAt:  time.Now().UTC(),
-			Apps:        apps,
+	if report != nil {
+		if report.ReportedAt.IsZero() {
+			report.ReportedAt = time.Now().UTC()
 		}
+		if report.MachineID == "" {
+			report.MachineID = r.Cfg.MachineID
+		}
+		if report.MachineName == "" {
+			report.MachineName = r.Cfg.MachineName
+		}
+		if report.Platform == "" {
+			report.Platform = r.platform()
+		}
+		req.ProvidersReport = report
 	}
 	return r.postJSON("/api/v1/commands/"+id+"/result", req)
 }
@@ -159,17 +181,29 @@ func (p *ProviderController) RunLoop(stop <-chan struct{}) {
 }
 
 func (p *ProviderController) reportOnce(reason string) {
-	if p.Adapter == nil || !p.Adapter.Available() {
+	if p.Adapter == nil {
 		return
 	}
-	apps, err := p.Adapter.ListApps()
-	if err != nil {
-		p.log().Warn("采集 cc-switch 供应商失败", "原因", reason, "错误", err)
-		return
+	req := apitypes.ProvidersReportRequest{
+		MachineID:         p.Cfg.MachineID,
+		MachineName:       p.Cfg.MachineName,
+		Platform:          p.Rep.platform(),
+		ReportedAt:        time.Now().UTC(),
+		Apps:              []apitypes.ProviderAppSnapshot{},
+		CcSwitchAvailable: p.Adapter.Available(),
+		CcSwitchCLIReady:  p.Adapter.CLIReady(),
+		CcSwitchBin:       p.Adapter.ResolvedBin(),
 	}
-	if err := p.Rep.ReportProviders(apps); err != nil {
+	if p.Adapter.Available() {
+		apps, err := p.Adapter.ListApps()
+		if err != nil {
+			p.log().Warn("采集 cc-switch 供应商失败", "原因", reason, "错误", err)
+		} else {
+			req.Apps = apps
+		}
+	}
+	if err := p.Rep.ReportProvidersRequest(req); err != nil {
 		p.log().Warn("上报供应商快照失败", "原因", reason, "错误", err)
-		return
 	}
 }
 
@@ -196,15 +230,21 @@ func (p *ProviderController) runOne(cmd apitypes.MachineCommand) {
 		"供应商", cmd.Payload.ProviderID,
 	)
 	var execErr error
-	if p.Adapter == nil || !p.Adapter.Available() {
-		execErr = fmt.Errorf("cc-switch not available on this machine")
+	if p.Adapter == nil {
+		execErr = fmt.Errorf("cc-switch adapter not configured")
+	} else if cmd.Type != apitypes.CommandTypeRefreshProviders && !p.Adapter.CLIReady() {
+		execErr = fmt.Errorf("cc-switch-cli not installed or not found")
+	} else if !p.Adapter.Available() && cmd.Type != apitypes.CommandTypeRefreshProviders {
+		execErr = fmt.Errorf("cc-switch database not found")
+	} else if cmd.Type == apitypes.CommandTypeRefreshProviders && !p.Adapter.Available() {
+		execErr = fmt.Errorf("cc-switch database not found")
 	} else {
 		execErr = p.Adapter.Execute(cmd)
 	}
 
 	status := apitypes.CommandStatusSucceeded
 	errMsg := ""
-	var apps []apitypes.ProviderAppSnapshot
+	var report *apitypes.ProvidersReportRequest
 	if execErr != nil {
 		status = apitypes.CommandStatusFailed
 		errMsg = execErr.Error()
@@ -214,13 +254,27 @@ func (p *ProviderController) runOne(cmd apitypes.MachineCommand) {
 		p.log().Warn("远程命令执行失败", "命令标识", cmd.ID, "错误", errMsg)
 	} else {
 		p.log().Info("远程命令执行成功", "命令标识", cmd.ID)
-		if p.Adapter != nil && p.Adapter.Available() {
+	}
+	// Always attach latest readiness/snapshot after command attempt.
+	if p.Adapter != nil {
+		rep := &apitypes.ProvidersReportRequest{
+			MachineID:         p.Cfg.MachineID,
+			MachineName:       p.Cfg.MachineName,
+			Platform:          p.Rep.platform(),
+			ReportedAt:        time.Now().UTC(),
+			Apps:              []apitypes.ProviderAppSnapshot{},
+			CcSwitchAvailable: p.Adapter.Available(),
+			CcSwitchCLIReady:  p.Adapter.CLIReady(),
+			CcSwitchBin:       p.Adapter.ResolvedBin(),
+		}
+		if p.Adapter.Available() {
 			if listed, err := p.Adapter.ListApps(); err == nil {
-				apps = listed
+				rep.Apps = listed
 			}
 		}
+		report = rep
 	}
-	if err := p.Rep.CompleteCommand(cmd.ID, status, errMsg, apps); err != nil {
+	if err := p.Rep.CompleteCommand(cmd.ID, status, errMsg, report); err != nil {
 		p.log().Warn("回报命令结果失败", "命令标识", cmd.ID, "错误", err)
 	}
 }

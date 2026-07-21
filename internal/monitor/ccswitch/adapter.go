@@ -95,6 +95,31 @@ func (a *Adapter) Available() bool {
 	return err == nil && !st.IsDir()
 }
 
+// CLIReady reports whether the cc-switch binary can be executed.
+func (a *Adapter) CLIReady() bool {
+	if a == nil {
+		return false
+	}
+	bin := resolveBin(a.Bin)
+	a.Bin = bin
+	if filepath.IsAbs(bin) || strings.Contains(bin, string(os.PathSeparator)) {
+		st, err := os.Stat(bin)
+		return err == nil && !st.IsDir()
+	}
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
+
+// ResolvedBin returns the resolved executable path (best effort).
+func (a *Adapter) ResolvedBin() string {
+	if a == nil {
+		return ""
+	}
+	bin := resolveBin(a.Bin)
+	a.Bin = bin
+	return bin
+}
+
 func (a *Adapter) openDB() (*sql.DB, error) {
 	if !a.Available() {
 		return nil, fmt.Errorf("cc-switch db not found: %s", a.DBPath)

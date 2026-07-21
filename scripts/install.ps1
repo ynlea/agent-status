@@ -27,6 +27,7 @@ param(
     [switch]$NoEnable,
     [string]$LocalBin = '',
     [switch]$ForceConfig,
+    [switch]$InstallCcSwitch,
     [switch]$Purge,
     [string[]]$Set = @()
 )
@@ -387,6 +388,53 @@ function Find-CcSwitchDb {
 }
 
 # 探测并补写 cc-switch 路径（新建与保留旧配置都会跑）。
+
+function Install-CcSwitchCLI {
+    Write-Step '安装 cc-switch-cli'
+    $api = 'https://api.github.com/repos/SaladDay/cc-switch-cli/releases/latest'
+    try {
+        $rel = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'agent-status-install' }
+    } catch {
+        Die "无法获取 cc-switch-cli 发布信息: $_"
+    }
+    $tag = [string]$rel.tag_name
+    $asset = $rel.assets | Where-Object { $_.name -match 'windows-x64\.zip$' } | Select-Object -First 1
+    if (-not $asset) { Die '未找到 windows-x64 发布资产' }
+    $url = [string]$asset.browser_download_url
+    $tmp = Join-Path $env:TEMP ("cc-switch-cli-{0}.zip" -f $tag)
+    $dest = if ($env:LOCALAPPDATA) {
+        Join-Path $env:LOCALAPPDATA 'Programs\cc-switch-cli'
+    } else {
+        Join-Path $env:USERPROFILE 'AppData\Local\Programs\cc-switch-cli'
+    }
+    Write-Kv '版本' $tag
+    Write-Kv '目标' $dest
+    Write-Info "下载 $($asset.name) ..."
+    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+    if (Test-Path $dest) {
+        Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    Expand-Archive -Path $tmp -DestinationPath $dest -Force
+    # zip 可能带一层目录
+    $exe = Get-ChildItem -Path $dest -Recurse -Filter 'cc-switch.exe' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $exe) { Die '解压后未找到 cc-switch.exe' }
+    # 若在子目录，提升到 dest 根
+    if ($exe.DirectoryName -ne $dest) {
+        Copy-Item $exe.FullName (Join-Path $dest 'cc-switch.exe') -Force
+    }
+    $final = Join-Path $dest 'cc-switch.exe'
+    if (-not (Test-Path $final)) { $final = $exe.FullName }
+    Write-Kv 'cc-switch' $final
+    try {
+        $ver = & $final --version 2>$null
+        if ($ver) { Write-Kv '版本探测' ("$ver".Trim()) }
+    } catch {}
+    Write-Ok "cc-switch-cli 已安装 ($tag)"
+    return $final
+}
+
 function Ensure-MonitorCcSwitch {
     $path = Join-Path $ConfigDir 'monitor.json'
     if (-not (Test-Path $path)) { return }
@@ -799,6 +847,21 @@ function Invoke-Install {
         Write-Step '安装监测端'
         Install-Binary monitor
         Write-MonitorJson $ServerUrl $Key
+        $needCli = $InstallCcSwitch
+        if (-not $needCli -and -not (Find-CcSwitchBin)) {
+            if (Test-Interactive -and -not $Yes) {
+                $ans = Read-Host '  未检测到 cc-switch-cli，是否现在安装? [Y/n]'
+                if ($ans -notmatch '^(n|no|N)$') { $needCli = $true }
+            }
+        }
+        if ($needCli -and -not (Find-CcSwitchBin)) {
+            [void](Install-CcSwitchCLI)
+            Ensure-MonitorCcSwitch
+        } elseif ($InstallCcSwitch) {
+            # force reinstall/update even if present
+            [void](Install-CcSwitchCLI)
+            Ensure-MonitorCcSwitch
+        }
         Write-Ok '监测端就绪'
     }
 

@@ -29,6 +29,26 @@ func (s *SQLiteStore) ApplyProvidersReport(req apitypes.ProvidersReportRequest) 
 UPDATE machines SET last_seen_at=?, online=1
 WHERE machine_id=?`, now.Format(time.RFC3339Nano), req.MachineID)
 
+	avail, cliReady := 0, 0
+	if req.CcSwitchAvailable {
+		avail = 1
+	}
+	if req.CcSwitchCLIReady {
+		cliReady = 1
+	}
+	_, err = tx.Exec(`
+INSERT INTO provider_machine_meta(machine_id, cc_switch_available, cc_switch_cli_ready, cc_switch_bin, updated_at)
+VALUES(?,?,?,?,?)
+ON CONFLICT(machine_id) DO UPDATE SET
+  cc_switch_available=excluded.cc_switch_available,
+  cc_switch_cli_ready=excluded.cc_switch_cli_ready,
+  cc_switch_bin=excluded.cc_switch_bin,
+  updated_at=excluded.updated_at
+`, req.MachineID, avail, cliReady, req.CcSwitchBin, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+
 	for _, appSnap := range req.Apps {
 		if !apitypes.ValidProviderApp(appSnap.App) {
 			continue
@@ -108,12 +128,25 @@ WHERE machine_id=? AND app=?`, machineID, app)
 		return out, err
 	}
 	out.UpdatedAt = latest
+	var avail, cliReady int
+	var bin string
+	_ = s.db.QueryRow(`
+SELECT cc_switch_available, cc_switch_cli_ready, cc_switch_bin
+FROM provider_machine_meta WHERE machine_id=?`, machineID).Scan(&avail, &cliReady, &bin)
+	out.CcSwitchAvailable = avail == 1
+	out.CcSwitchCLIReady = cliReady == 1
+	out.CcSwitchBin = bin
 	return out, nil
 }
 
 func (s *SQLiteStore) EnqueueCommand(machineID string, req apitypes.EnqueueCommandRequest) (apitypes.MachineCommand, error) {
 	if err := validateEnqueue(machineID, req); err != nil {
 		return apitypes.MachineCommand{}, err
+	}
+	if req.Type == apitypes.CommandTypeRefreshProviders {
+		if strings.TrimSpace(req.App) == "" {
+			req.App = apitypes.ProviderAppAll
+		}
 	}
 	now := time.Now().UTC()
 	cmd := apitypes.MachineCommand{
