@@ -361,39 +361,81 @@ UsageSummary _demoSummary(DateTime from, DateTime to) {
 }
 
 UsageBreakdown _demoBreakdown(DateTime from, DateTime to, String groupBy) {
+  final groups = groupBy == 'project'
+      ? const [
+          UsageBreakdownGroup(
+            key: 'ThinkPad-X1/home/u/projects/agent-status',
+            metrics: UsageMetrics(
+              inputTokens: 800000,
+              outputTokens: 100000,
+              cacheHitTokens: 30000000,
+              realUsage: 30900000,
+              eventCount: 200,
+              estimatedCostUsd: 8.2,
+              priced: true,
+              cacheHitRate: 0.97,
+            ),
+          ),
+          UsageBreakdownGroup(
+            key: 'MacBook-Pro/Users/u/work/file-center',
+            metrics: UsageMetrics(
+              inputTokens: 1021322,
+              outputTokens: 123823,
+              reasoningTokens: 12000,
+              cacheHitTokens: 13426048,
+              realUsage: 14583193,
+              eventCount: 168,
+              estimatedCostUsd: 4.14,
+              priced: true,
+              cacheHitRate: 0.92,
+            ),
+          ),
+          UsageBreakdownGroup(
+            key: 'Ubuntu-Server未知项目',
+            metrics: UsageMetrics(
+              inputTokens: 50000,
+              outputTokens: 8000,
+              realUsage: 58000,
+              eventCount: 12,
+              estimatedCostUsd: 0.2,
+              priced: true,
+            ),
+          ),
+        ]
+      : const [
+          UsageBreakdownGroup(
+            key: 'claude-sonnet-4-5',
+            metrics: UsageMetrics(
+              inputTokens: 800000,
+              outputTokens: 100000,
+              cacheHitTokens: 30000000,
+              realUsage: 30900000,
+              eventCount: 200,
+              estimatedCostUsd: 8.2,
+              priced: true,
+              cacheHitRate: 0.97,
+            ),
+          ),
+          UsageBreakdownGroup(
+            key: 'gpt-5.2',
+            metrics: UsageMetrics(
+              inputTokens: 1021322,
+              outputTokens: 123823,
+              reasoningTokens: 12000,
+              cacheHitTokens: 13426048,
+              realUsage: 14583193,
+              eventCount: 168,
+              estimatedCostUsd: 4.14,
+              priced: true,
+              cacheHitRate: 0.92,
+            ),
+          ),
+        ];
   return UsageBreakdown(
     from: from,
     to: to,
     groupBy: groupBy,
-    groups: const [
-      UsageBreakdownGroup(
-        key: 'claude-sonnet-4-5',
-        metrics: UsageMetrics(
-          inputTokens: 800000,
-          outputTokens: 100000,
-          cacheHitTokens: 30000000,
-          realUsage: 30900000,
-          eventCount: 200,
-          estimatedCostUsd: 8.2,
-          priced: true,
-          cacheHitRate: 0.97,
-        ),
-      ),
-      UsageBreakdownGroup(
-        key: 'gpt-5.2',
-        metrics: UsageMetrics(
-          inputTokens: 1021322,
-          outputTokens: 123823,
-          reasoningTokens: 12000,
-          cacheHitTokens: 13426048,
-          realUsage: 14583193,
-          eventCount: 168,
-          estimatedCostUsd: 4.14,
-          priced: true,
-          cacheHitRate: 0.92,
-        ),
-      ),
-    ],
+    groups: groups,
   );
 }
 

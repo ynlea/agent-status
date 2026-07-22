@@ -288,6 +288,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                     in snap.breakdown?.groups ?? const <UsageBreakdownGroup>[])
                   _CompactTile(
                     group: g,
+                    groupBy: q.groupBy,
                     expanded: _expanded.contains(g.key),
                     onToggle: () {
                       setState(() {
@@ -322,6 +323,7 @@ class _GroupByToggle extends StatelessWidget {
     ('model', '模型'),
     ('machine', '设备'),
     ('agent', '渠道'),
+    ('project', '项目'),
   ];
 
   @override
@@ -1410,6 +1412,7 @@ class _TrendPainter extends CustomPainter {
 class _CompactTile extends StatelessWidget {
   const _CompactTile({
     required this.group,
+    this.groupBy = '',
     required this.expanded,
     required this.onToggle,
     required this.fmtInt,
@@ -1418,19 +1421,31 @@ class _CompactTile extends StatelessWidget {
   });
 
   final UsageBreakdownGroup group;
+  final String groupBy;
   final bool expanded;
   final VoidCallback onToggle;
   final String Function(int) fmtInt;
   final String Function(double?) fmtRate;
   final String Function(double?, bool) fmtCost;
 
+  static const _projectSep = '';
+
   @override
   Widget build(BuildContext context) {
     final m = group.metrics;
+    final c = context.qingya;
+    final rawKey = group.key.isEmpty ? 'unknown' : group.key;
+    String title = rawKey;
+    String? subtitle;
+    if (groupBy == 'project' || rawKey.contains(_projectSep)) {
+      final parts = rawKey.split(_projectSep);
+      title = parts.isNotEmpty && parts.first.isNotEmpty ? parts.first : 'unknown';
+      subtitle = parts.length > 1 && parts[1].isNotEmpty ? parts[1] : '未知项目';
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: context.qingya.card,
+        color: c.card,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -1440,25 +1455,45 @@ class _CompactTile extends StatelessWidget {
             child: Column(
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Text(
-                        group.key.isEmpty ? 'unknown' : group.key,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: context.qingya.textPrimary,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: c.textPrimary,
+                            ),
+                          ),
+                          if (subtitle != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              subtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: c.textSecondary,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       fmtInt(m.realUsage),
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: context.qingya.primaryDark,
+                        color: c.primaryDark,
                       ),
                     ),
                     Icon(
@@ -1466,7 +1501,7 @@ class _CompactTile extends StatelessWidget {
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
-                      color: context.qingya.textSecondary,
+                      color: c.textSecondary,
                     ),
                   ],
                 ),
@@ -1477,7 +1512,7 @@ class _CompactTile extends StatelessWidget {
                       '入${fmtInt(m.inputTokens)} · 出${fmtInt(m.outputTotal)} · 命中${fmtRate(m.cacheHitRate)}',
                       style: TextStyle(
                         fontSize: 11,
-                        color: context.qingya.textSecondary,
+                        color: c.textSecondary,
                       ),
                     ),
                     const Spacer(),
@@ -1485,7 +1520,7 @@ class _CompactTile extends StatelessWidget {
                       fmtCost(m.estimatedCostUsd, m.priced),
                       style: TextStyle(
                         fontSize: 11,
-                        color: context.qingya.device,
+                        color: c.device,
                         fontWeight: FontWeight.w600,
                       ),
                     ),

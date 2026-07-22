@@ -76,7 +76,7 @@ type UsageQuery struct {
 	MachineID string
 	Agent     string
 	Model     string
-	GroupBy   string // agent | model | machine | day
+	GroupBy   string // agent | model | machine | day | hour | project
 }
 
 // FillDerived sets real_usage and cache_hit_rate from component counters.

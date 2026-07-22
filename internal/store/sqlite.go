@@ -126,6 +126,16 @@ CREATE TABLE IF NOT EXISTS provider_machine_meta (
 );
 CREATE INDEX IF NOT EXISTS idx_machine_commands_machine_status
   ON machine_commands(machine_id, status, created_at);
+CREATE TABLE IF NOT EXISTS session_projects (
+  machine_id   TEXT NOT NULL,
+  agent        TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  machine_name TEXT NOT NULL DEFAULT '',
+  cwd          TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (machine_id, agent, session_id)
+);
 `)
 	if err != nil {
 		return err
@@ -138,6 +148,30 @@ CREATE INDEX IF NOT EXISTS idx_machine_commands_machine_status
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN started_at TEXT`)
 	// Approximate first-seen for rows that predate the column.
 	_, _ = s.db.Exec(`UPDATE sessions SET started_at = updated_at WHERE started_at IS NULL OR started_at = ''`)
+	// Durable session→project map (survives session row deletion).
+	_, _ = s.db.Exec(`
+CREATE TABLE IF NOT EXISTS session_projects (
+  machine_id   TEXT NOT NULL,
+  agent        TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  machine_name TEXT NOT NULL DEFAULT '',
+  cwd          TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (machine_id, agent, session_id)
+)`)
+	// Backfill once from current sessions (best-effort).
+	_, _ = s.db.Exec(`
+INSERT INTO session_projects(machine_id, agent, session_id, machine_name, cwd, display_name, updated_at)
+SELECT machine_id, agent, session_id, COALESCE(machine_name,''), COALESCE(cwd,''), COALESCE(display_name,''), updated_at
+FROM sessions
+WHERE COALESCE(cwd,'') != '' OR COALESCE(display_name,'') != ''
+ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
+  machine_name=CASE WHEN excluded.machine_name != '' THEN excluded.machine_name ELSE session_projects.machine_name END,
+  cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE session_projects.cwd END,
+  display_name=CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE session_projects.display_name END,
+  updated_at=excluded.updated_at
+`)
 	return s.seedModelPrices()
 }
 
@@ -390,14 +424,18 @@ func (s *SQLiteStore) UsageSummary(q apitypes.UsageQuery) apitypes.UsageSummaryR
 
 func (s *SQLiteStore) UsageBreakdown(q apitypes.UsageQuery) apitypes.UsageBreakdownResponse {
 	groupBy := validateGroupBy(q.GroupBy)
+	if groupBy == "project" {
+		return s.usageBreakdownByProject(q)
+	}
+	if groupBy == "machine" {
+		return s.usageBreakdownByMachine(q)
+	}
 	clause, args := s.usageWhere(q)
 
 	var groupExpr string
 	switch groupBy {
 	case "agent":
 		groupExpr = "agent"
-	case "machine":
-		groupExpr = "machine_id"
 	case "day":
 		// occurred_at is RFC3339; first 10 chars are YYYY-MM-DD in UTC storage
 		groupExpr = "substr(occurred_at, 1, 10)"
@@ -444,6 +482,144 @@ func (s *SQLiteStore) UsageBreakdown(q apitypes.UsageQuery) apitypes.UsageBreakd
 		groups[gkey][model] = m
 	}
 	return finalizeBreakdown(s.LookupModelPrice, q, groupBy, groups)
+}
+
+// usageBreakdownByMachine groups by renamed machine_name (fallback machine_id).
+func (s *SQLiteStore) usageBreakdownByMachine(q apitypes.UsageQuery) apitypes.UsageBreakdownResponse {
+	clause, args := s.usageWherePrefixed(q, "e.")
+	sqlStr := `
+SELECT COALESCE(NULLIF(mac.machine_name,''), e.machine_id) AS gkey, e.model,
+ COALESCE(SUM(e.input_tokens),0), COALESCE(SUM(e.output_tokens),0), COALESCE(SUM(e.reasoning_tokens),0),
+ COALESCE(SUM(e.cache_write_tokens),0), COALESCE(SUM(e.cache_hit_tokens),0), COALESCE(COUNT(*),0)
+FROM usage_events e
+LEFT JOIN machines mac ON mac.machine_id = e.machine_id` + clause + `
+GROUP BY gkey, e.model`
+	rows, err := s.db.Query(sqlStr, args...)
+	if err != nil {
+		return finalizeBreakdown(s.LookupModelPrice, q, "machine", map[string]map[string]apitypes.UsageMetrics{})
+	}
+	defer rows.Close()
+	groups := map[string]map[string]apitypes.UsageMetrics{}
+	for rows.Next() {
+		var gkey, model string
+		var in, outn, reason, cw, ch, n int64
+		if err := rows.Scan(&gkey, &model, &in, &outn, &reason, &cw, &ch, &n); err != nil {
+			continue
+		}
+		if gkey == "" {
+			gkey = "unknown"
+		}
+		if model == "" {
+			model = "unknown"
+		}
+		if groups[gkey] == nil {
+			groups[gkey] = map[string]apitypes.UsageMetrics{}
+		}
+		m := groups[gkey][model]
+		m.InputTokens += in
+		m.OutputTokens += outn
+		m.ReasoningTokens += reason
+		m.CacheWriteTokens += cw
+		m.CacheHitTokens += ch
+		m.EventCount += n
+		groups[gkey][model] = m
+	}
+	return finalizeBreakdown(s.LookupModelPrice, q, "machine", groups)
+}
+
+// usageBreakdownByProject groups by durable session_projects map.
+// Key format: machineName + "\x1f" + projectPath  (client splits to two lines).
+// Events without a known directory collapse into "未知项目".
+func (s *SQLiteStore) usageBreakdownByProject(q apitypes.UsageQuery) apitypes.UsageBreakdownResponse {
+	clause, args := s.usageWherePrefixed(q, "e.")
+	// Prefer durable session_projects; fall back to live sessions; else 未知项目.
+	// Unit separator \x1f keeps device / path separable on the client.
+	sqlStr := `
+SELECT
+  (
+    COALESCE(NULLIF(mac.machine_name,''), NULLIF(sp.machine_name,''), NULLIF(ss.machine_name,''), e.machine_id)
+    || char(31) ||
+    CASE
+      WHEN COALESCE(NULLIF(sp.cwd,''), NULLIF(ss.cwd,''), '') != ''
+        THEN COALESCE(NULLIF(sp.cwd,''), NULLIF(ss.cwd,''))
+      ELSE '未知项目'
+    END
+  ) AS gkey,
+  e.model,
+  COALESCE(SUM(e.input_tokens),0), COALESCE(SUM(e.output_tokens),0), COALESCE(SUM(e.reasoning_tokens),0),
+  COALESCE(SUM(e.cache_write_tokens),0), COALESCE(SUM(e.cache_hit_tokens),0), COALESCE(COUNT(*),0)
+FROM usage_events e
+LEFT JOIN session_projects sp
+  ON sp.machine_id = e.machine_id AND sp.agent = e.agent AND sp.session_id = e.session_id
+LEFT JOIN sessions ss
+  ON ss.machine_id = e.machine_id AND ss.agent = e.agent AND ss.session_id = e.session_id
+LEFT JOIN machines mac ON mac.machine_id = e.machine_id` + clause + `
+GROUP BY gkey, e.model`
+
+	rows, err := s.db.Query(sqlStr, args...)
+	if err != nil {
+		return finalizeBreakdown(s.LookupModelPrice, q, "project", map[string]map[string]apitypes.UsageMetrics{})
+	}
+	defer rows.Close()
+	groups := map[string]map[string]apitypes.UsageMetrics{}
+	for rows.Next() {
+		var gkey, model string
+		var in, outn, reason, cw, ch, n int64
+		if err := rows.Scan(&gkey, &model, &in, &outn, &reason, &cw, &ch, &n); err != nil {
+			continue
+		}
+		if gkey == "" {
+			gkey = "unknown" + "\x1f" + "未知项目"
+		}
+		if model == "" {
+			model = "unknown"
+		}
+		if groups[gkey] == nil {
+			groups[gkey] = map[string]apitypes.UsageMetrics{}
+		}
+		m := groups[gkey][model]
+		m.InputTokens += in
+		m.OutputTokens += outn
+		m.ReasoningTokens += reason
+		m.CacheWriteTokens += cw
+		m.CacheHitTokens += ch
+		m.EventCount += n
+		groups[gkey][model] = m
+	}
+	return finalizeBreakdown(s.LookupModelPrice, q, "project", groups)
+}
+
+// usageWherePrefixed is like usageWhere but qualifies columns with a table prefix (e.g. "e.").
+func (s *SQLiteStore) usageWherePrefixed(q apitypes.UsageQuery, prefix string) (string, []interface{}) {
+	var (
+		args  []interface{}
+		where []string
+	)
+	if !q.From.IsZero() {
+		where = append(where, prefix+"occurred_at >= ?")
+		args = append(args, q.From.UTC().Format(time.RFC3339Nano))
+	}
+	if !q.To.IsZero() {
+		where = append(where, prefix+"occurred_at <= ?")
+		args = append(args, q.To.UTC().Format(time.RFC3339Nano))
+	}
+	if q.MachineID != "" {
+		where = append(where, prefix+"machine_id = ?")
+		args = append(args, q.MachineID)
+	}
+	if q.Agent != "" {
+		where = append(where, prefix+"agent = ?")
+		args = append(args, strings.ToLower(q.Agent))
+	}
+	if q.Model != "" {
+		where = append(where, prefix+"model = ?")
+		args = append(args, q.Model)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+	return clause, args
 }
 
 func (s *SQLiteStore) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Session, wasOnline bool) {
@@ -509,16 +685,29 @@ SELECT state, started_at FROM sessions WHERE machine_id=? AND agent=? AND sessio
 		if err != nil && err != sql.ErrNoRows {
 			return nil, false
 		}
-		startedAt := sess.UpdatedAt
-		if exists && oldStarted.Valid && oldStarted.String != "" {
-			if t, perr := time.Parse(time.RFC3339Nano, oldStarted.String); perr == nil {
-				startedAt = t
-			} else if t, perr := time.Parse(time.RFC3339, oldStarted.String); perr == nil {
-				startedAt = t
+		// started_at = start of current working streak only; null otherwise.
+		var startedSQL interface{}
+		sess.StartedAt = nil
+		if sess.State == apitypes.StateWorking {
+			enteringWorking := !exists || oldState != string(apitypes.StateWorking)
+			if !enteringWorking && exists && oldStarted.Valid && oldStarted.String != "" {
+				if tt, perr := time.Parse(time.RFC3339Nano, oldStarted.String); perr == nil {
+					startedSQL = tt.Format(time.RFC3339Nano)
+					sess.StartedAt = &tt
+				} else if tt, perr := time.Parse(time.RFC3339, oldStarted.String); perr == nil {
+					startedSQL = tt.Format(time.RFC3339Nano)
+					sess.StartedAt = &tt
+				}
+			}
+			if sess.StartedAt == nil {
+				tt := sess.UpdatedAt
+				if tt.IsZero() {
+					tt = now
+				}
+				startedSQL = tt.Format(time.RFC3339Nano)
+				sess.StartedAt = &tt
 			}
 		}
-		startedCopy := startedAt
-		sess.StartedAt = &startedCopy
 
 		if !exists || oldState != string(sess.State) {
 			from := apitypes.SessionState("")
@@ -544,10 +733,29 @@ ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   message=excluded.message,
   cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE sessions.cwd END,
   last_assistant_message=CASE WHEN excluded.last_assistant_message != '' THEN excluded.last_assistant_message ELSE sessions.last_assistant_message END,
+  started_at=excluded.started_at,
   updated_at=excluded.updated_at
-`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, startedAt.Format(time.RFC3339Nano), sess.UpdatedAt.Format(time.RFC3339Nano))
+`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, startedSQL, sess.UpdatedAt.Format(time.RFC3339Nano))
 		if err != nil {
 			return nil, false
+		}
+		if err != nil {
+			return nil, false
+		}
+		// Durable project map: keep cwd/display even after session row is pruned.
+		if strings.TrimSpace(sess.Cwd) != "" || strings.TrimSpace(sess.DisplayName) != "" || strings.TrimSpace(sess.MachineName) != "" {
+			_, err = tx.Exec(`
+INSERT INTO session_projects(machine_id, agent, session_id, machine_name, cwd, display_name, updated_at)
+VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
+  machine_name=CASE WHEN excluded.machine_name != '' THEN excluded.machine_name ELSE session_projects.machine_name END,
+  cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE session_projects.cwd END,
+  display_name=CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE session_projects.display_name END,
+  updated_at=excluded.updated_at
+`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.Cwd, sess.DisplayName, sess.UpdatedAt.Format(time.RFC3339Nano))
+			if err != nil {
+				return nil, false
+			}
 		}
 	}
 
@@ -627,6 +835,7 @@ UPDATE machines SET machine_name=?, name_locked=1 WHERE machine_id=?
 		return apitypes.Machine{}, fmt.Errorf("machine not found")
 	}
 	_, _ = s.db.Exec(`UPDATE sessions SET machine_name=? WHERE machine_id=?`, name, machineID)
+	_, _ = s.db.Exec(`UPDATE session_projects SET machine_name=? WHERE machine_id=?`, name, machineID)
 	var m apitypes.Machine
 	var online int
 	var last string

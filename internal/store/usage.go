@@ -108,9 +108,33 @@ func groupKey(e apitypes.UsageEvent, groupBy string) string {
 		return e.OccurredAt.UTC().Format("2006-01-02")
 	case "hour":
 		return e.OccurredAt.UTC().Format("2006-01-02T15")
+	case "project":
+		// Without session lookup; Memory overrides with cwd-aware key.
+		return projectGroupKey(e.MachineID, "", "", "", "")
 	default: // model
 		return e.Model
 	}
+}
+
+// projectKeySep separates device name and project path for mobile two-line UI.
+const projectKeySep = "\x1f"
+
+// projectGroupKey builds "machineName\x1fpath". Empty cwd → 未知项目 (never raw session id).
+func projectGroupKey(machineID, machineName, cwd, displayName, sessionID string) string {
+	_ = displayName
+	_ = sessionID
+	host := strings.TrimSpace(machineName)
+	if host == "" {
+		host = strings.TrimSpace(machineID)
+	}
+	if host == "" {
+		host = "unknown"
+	}
+	path := strings.TrimSpace(cwd)
+	if path == "" {
+		path = "未知项目"
+	}
+	return host + projectKeySep + path
 }
 
 func finalizeBreakdown(lookup PriceLookup, q apitypes.UsageQuery, groupBy string, groups map[string]map[string]apitypes.UsageMetrics) apitypes.UsageBreakdownResponse {
@@ -196,7 +220,7 @@ func addEventToModelMap(byModel map[string]apitypes.UsageMetrics, e apitypes.Usa
 
 func validateGroupBy(g string) string {
 	switch strings.ToLower(strings.TrimSpace(g)) {
-	case "agent", "model", "machine", "day", "hour":
+	case "agent", "model", "machine", "day", "hour", "project":
 		return strings.ToLower(g)
 	default:
 		return "model"

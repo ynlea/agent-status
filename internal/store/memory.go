@@ -15,20 +15,27 @@ type sessionKey struct {
 	SessionID string
 }
 
+type sessionProject struct {
+	MachineName string
+	Cwd         string
+	DisplayName string
+}
+
 // Memory is an in-memory store for the contract mock server.
 type Memory struct {
-	mu             sync.RWMutex
-	machines       map[string]apitypes.Machine
-	nameLocked     map[string]bool
-	sessions       map[sessionKey]apitypes.Session
-	history        []apitypes.HistoryEntry
-	usage          map[string]apitypes.UsageEvent // dedupe_key -> event
-	maxHist        int
-	prices         *priceCache
-	providerSnaps  map[string]apitypes.ProviderAppSnapshot // machine|app
-	providerSnapAt map[string]time.Time
-	providerMeta   map[string]apitypes.ProvidersListResponse
-	commands       map[string]apitypes.MachineCommand
+	mu              sync.RWMutex
+	machines        map[string]apitypes.Machine
+	nameLocked      map[string]bool
+	sessions        map[sessionKey]apitypes.Session
+	sessionProjects map[sessionKey]sessionProject // durable; survives session prune
+	history         []apitypes.HistoryEntry
+	usage           map[string]apitypes.UsageEvent // dedupe_key -> event
+	maxHist         int
+	prices          *priceCache
+	providerSnaps   map[string]apitypes.ProviderAppSnapshot // machine|app
+	providerSnapAt  map[string]time.Time
+	providerMeta    map[string]apitypes.ProvidersListResponse
+	commands        map[string]apitypes.MachineCommand
 }
 
 func NewMemory(maxHistory int) *Memory {
@@ -36,17 +43,18 @@ func NewMemory(maxHistory int) *Memory {
 		maxHistory = 50
 	}
 	m := &Memory{
-		machines:       make(map[string]apitypes.Machine),
-		nameLocked:     make(map[string]bool),
-		sessions:       make(map[sessionKey]apitypes.Session),
-		history:        make([]apitypes.HistoryEntry, 0, maxHistory),
-		usage:          make(map[string]apitypes.UsageEvent),
-		maxHist:        maxHistory,
-		prices:         newPriceCache(),
-		providerSnaps:  make(map[string]apitypes.ProviderAppSnapshot),
-		providerSnapAt: make(map[string]time.Time),
-		providerMeta:   make(map[string]apitypes.ProvidersListResponse),
-		commands:       make(map[string]apitypes.MachineCommand),
+		machines:        make(map[string]apitypes.Machine),
+		nameLocked:      make(map[string]bool),
+		sessions:        make(map[sessionKey]apitypes.Session),
+		sessionProjects: make(map[sessionKey]sessionProject),
+		history:         make([]apitypes.HistoryEntry, 0, maxHistory),
+		usage:           make(map[string]apitypes.UsageEvent),
+		maxHist:         maxHistory,
+		prices:          newPriceCache(),
+		providerSnaps:   make(map[string]apitypes.ProviderAppSnapshot),
+		providerSnapAt:  make(map[string]time.Time),
+		providerMeta:    make(map[string]apitypes.ProvidersListResponse),
+		commands:        make(map[string]apitypes.MachineCommand),
 	}
 	for _, p := range bundledPublicPrices {
 		m.prices.upsert(p, SourceBundled)
@@ -119,15 +127,20 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 		key := sessionKey{req.MachineID, s.Agent, s.SessionID}
 		keep[key] = struct{}{}
 		old, exists := m.sessions[key]
-		if exists && old.StartedAt != nil {
-			started := *old.StartedAt
-			s.StartedAt = &started
-		} else {
-			started := s.UpdatedAt
-			if started.IsZero() {
-				started = now
+		// started_at = start of current working streak only.
+		s.StartedAt = nil
+		if s.State == apitypes.StateWorking {
+			entering := !exists || old.State != apitypes.StateWorking
+			if !entering && old.StartedAt != nil {
+				started := *old.StartedAt
+				s.StartedAt = &started
+			} else {
+				started := s.UpdatedAt
+				if started.IsZero() {
+					started = now
+				}
+				s.StartedAt = &started
 			}
-			s.StartedAt = &started
 		}
 		s.RealUsage = m.realUsageLocked(s.MachineID, s.Agent, s.SessionID)
 		if !exists || old.State != s.State {
@@ -149,6 +162,19 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 			changed = append(changed, s)
 		}
 		m.sessions[key] = s
+		if strings.TrimSpace(s.Cwd) != "" || strings.TrimSpace(s.DisplayName) != "" || strings.TrimSpace(s.MachineName) != "" {
+			prev := m.sessionProjects[key]
+			if strings.TrimSpace(s.MachineName) != "" {
+				prev.MachineName = s.MachineName
+			}
+			if strings.TrimSpace(s.Cwd) != "" {
+				prev.Cwd = s.Cwd
+			}
+			if strings.TrimSpace(s.DisplayName) != "" {
+				prev.DisplayName = s.DisplayName
+			}
+			m.sessionProjects[key] = prev
+		}
 	}
 	// Drop sessions for this machine that were not in the snapshot.
 	for key, old := range m.sessions {
@@ -220,6 +246,12 @@ func (m *Memory) RenameMachine(machineID, name string) (apitypes.Machine, error)
 		if k.MachineID == machineID {
 			s.MachineName = name
 			m.sessions[k] = s
+		}
+	}
+	for k, p := range m.sessionProjects {
+		if k.MachineID == machineID {
+			p.MachineName = name
+			m.sessionProjects[k] = p
 		}
 	}
 	return prev, nil
@@ -332,7 +364,37 @@ func (m *Memory) UsageBreakdown(q apitypes.UsageQuery) apitypes.UsageBreakdownRe
 		if !eventMatches(e, q) {
 			continue
 		}
-		gk := groupKey(e, groupBy)
+		var gk string
+		if groupBy == "project" {
+			name := ""
+			if mac, ok := m.machines[e.MachineID]; ok {
+				name = mac.MachineName
+			}
+			cwd, display := "", ""
+			sk := sessionKey{e.MachineID, e.Agent, e.SessionID}
+			if p, ok := m.sessionProjects[sk]; ok {
+				if p.MachineName != "" {
+					name = p.MachineName
+				}
+				cwd = p.Cwd
+				display = p.DisplayName
+			} else if sess, ok := m.sessions[sk]; ok {
+				if sess.MachineName != "" {
+					name = sess.MachineName
+				}
+				cwd = sess.Cwd
+				display = sess.DisplayName
+			}
+			gk = projectGroupKey(e.MachineID, name, cwd, display, e.SessionID)
+		} else if groupBy == "machine" {
+			if mac, ok := m.machines[e.MachineID]; ok && strings.TrimSpace(mac.MachineName) != "" {
+				gk = mac.MachineName
+			} else {
+				gk = e.MachineID
+			}
+		} else {
+			gk = groupKey(e, groupBy)
+		}
 		if groups[gk] == nil {
 			groups[gk] = map[string]apitypes.UsageMetrics{}
 		}
