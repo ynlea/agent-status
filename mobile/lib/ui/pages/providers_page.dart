@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/api/rest_client.dart';
+import '../../data/desktop/desktop_platform.dart';
 import '../../data/prefs/settings_store.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
@@ -494,11 +495,13 @@ class _ProvidersPageState extends ConsumerState<ProvidersPage>
                           title: '加载失败',
                           subtitle: _error!,
                         )
-                      : RefreshIndicator(
-                          color: c.device,
-                          onRefresh: () => _reload(forceRemote: true),
-                          child: _buildBody(c),
-                        ),
+                      : isQingyaDesktop
+                          ? _buildBody(c)
+                          : RefreshIndicator(
+                              color: c.device,
+                              onRefresh: () => _reload(forceRemote: true),
+                              child: _buildBody(c),
+                            ),
             ),
           ],
         ),

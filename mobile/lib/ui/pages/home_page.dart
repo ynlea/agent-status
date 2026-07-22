@@ -7,6 +7,7 @@ import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
 import '../desktop/desktop_pane.dart';
+import '../desktop/desktop_refresh_button.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
@@ -69,49 +70,56 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
     }
 
-    final list = RefreshIndicator(
-      color: c.primary,
-      onRefresh: () => ref.read(statusRepositoryProvider.notifier).refresh(),
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(
-          parent: BouncingScrollPhysics(),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: QingyaBrandHeader(
-              trailing: ConnectionPill(connected: snapshot.connected),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: _HeroCard(activeCount: active.length),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
+    Future<void> doRefresh() =>
+        ref.read(statusRepositoryProvider.notifier).refresh();
+
+    final listView = ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: QingyaBrandHeader(
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '活跃会话（${active.length}）',
-                  style: TextStyle(
-                    fontSize: 17,
-                    color: c.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                if (snapshot.loading)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                if (isQingyaDesktop)
+                  DesktopRefreshButton(onRefresh: doRefresh),
+                ConnectionPill(connected: snapshot.connected),
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: _HeroCard(activeCount: active.length),
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: [
+              Text(
+                '活跃会话（${active.length}）',
+                style: TextStyle(
+                  fontSize: 17,
+                  color: c.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (snapshot.loading)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+        ),
           const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -173,8 +181,15 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
         ],
-      ),
     );
+
+    final list = isQingyaDesktop
+        ? listView
+        : RefreshIndicator(
+            color: c.primary,
+            onRefresh: doRefresh,
+            child: listView,
+          );
 
     if (!masterDetail) {
       return Scaffold(

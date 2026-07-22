@@ -64,20 +64,19 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
             Expanded(
               child: Padding(
-                // 给顶栏灵动岛留一点空间，内容区也更透气
-                padding: const EdgeInsets.fromLTRB(0, 4, 10, 10),
+                padding: const EdgeInsets.fromLTRB(0, 0, 10, 10),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: c.scaffold,
                     borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(22),
-                      bottomLeft: Radius.circular(22),
+                      topLeft: Radius.circular(18),
+                      bottomLeft: Radius.circular(18),
                     ),
                   ),
                   child: ClipRRect(
                     borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(22),
-                      bottomLeft: Radius.circular(22),
+                      topLeft: Radius.circular(18),
+                      bottomLeft: Radius.circular(18),
                     ),
                     child: widget.navigationShell,
                   ),

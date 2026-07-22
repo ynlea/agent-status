@@ -8,6 +8,7 @@ import '../../data/repo/status_repository.dart';
 import '../../data/repo/usage_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
+import '../desktop/desktop_refresh_button.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 
@@ -355,7 +356,13 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   ),
                 ),
               ),
-            if (snap.loading)
+            if (desktop)
+              DesktopRefreshButton(
+                onRefresh: () => ref
+                    .read(usageRepositoryProvider.notifier)
+                    .refresh(forceNetwork: true),
+              )
+            else if (snap.loading)
               const SizedBox(
                 width: 14,
                 height: 14,
@@ -376,27 +383,29 @@ class _UsagePageState extends ConsumerState<UsagePage> {
       ],
     );
 
+    Widget body = desktop
+        ? Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: kDesktopUsageMaxWidth,
+              ),
+              child: list,
+            ),
+          )
+        : RefreshIndicator(
+            color: context.qingya.primary,
+            onRefresh: () => ref
+                .read(usageRepositoryProvider.notifier)
+                .refresh(forceNetwork: true),
+            child: list,
+          );
+
     return Scaffold(
       backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         bottom: false,
-        child: RefreshIndicator(
-          color: context.qingya.primary,
-          onRefresh: () => ref
-              .read(usageRepositoryProvider.notifier)
-              .refresh(forceNetwork: true),
-          child: desktop
-              ? Align(
-                  alignment: Alignment.topCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: kDesktopUsageMaxWidth,
-                    ),
-                    child: list,
-                  ),
-                )
-              : list,
-        ),
+        child: body,
       ),
     );
   }

@@ -71,7 +71,13 @@ class SessionDetailPage extends ConsumerWidget {
                 children: [
                   if (!embedded)
                     IconButton(
-                      onPressed: () => context.pop(),
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/home');
+                        }
+                      },
                       icon: Icon(
                         Icons.arrow_back_ios_new_rounded,
                         size: 18,

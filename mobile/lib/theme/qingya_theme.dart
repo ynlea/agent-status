@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// 浅色静态别名，仅供 ThemeData 构建与迁移前兼容；UI 请用 [BuildContext.qingya]。
@@ -286,6 +287,9 @@ class QingyaTheme {
 
   static ThemeData _build(Brightness brightness, QingyaPalette p) {
     final isLight = brightness == Brightness.light;
+    // Windows 桌面优先系统 UI 字体（ClearType 更清晰）；移动端保留 Noto 回退。
+    final desktop = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows);
     final base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
@@ -301,7 +305,16 @@ class QingyaTheme {
         onError: Colors.white,
       ),
       scaffoldBackgroundColor: p.scaffold,
-      fontFamilyFallback: const ['Noto Sans CJK SC', 'Noto Sans SC'],
+      fontFamily: desktop ? 'Microsoft YaHei UI' : null,
+      fontFamilyFallback: desktop
+          ? const [
+              'Microsoft YaHei',
+              'Segoe UI',
+              'Segoe UI Variable',
+              'PingFang SC',
+              'Noto Sans CJK SC',
+            ]
+          : const ['Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC'],
       extensions: [p],
     );
 

@@ -20,18 +20,29 @@ const double kDesktopMinHeight = 620;
 /// 用量页桌面内容最大宽。
 const double kDesktopUsageMaxWidth = 1120;
 
-/// 灵动岛：贴顶细条 / 悬停胶囊 / 展开卡片。
-const double kIslandStripWidth = 96;
-const double kIslandStripHeight = 12;
-const double kIslandHoverWidth = 300;
-const double kIslandHoverHeight = 48;
-const double kIslandCardWidth = 360;
-const double kIslandCardHeightEmpty = 168;
-const double kIslandCardHeightList = 280;
-const double kIslandTopGap = 6;
+/// 灵动岛视觉尺寸（在固定透明窗内动画，不再频繁改 HWND 大小）。
+const double kIslandStripWidth = 108;
+const double kIslandStripHeight = 10;
+/// 细条命中热区（视觉仍是细条，避免难悬停）。
+const double kIslandStripHitHeight = 28;
+const double kIslandHoverWidth = 292;
+const double kIslandHoverHeight = 46;
+const double kIslandCardWidth = 352;
+const double kIslandCardHeightEmpty = 156;
+const double kIslandCardHeightList = 268;
+const double kIslandAnnounceHeight = 92;
 
-/// 兼容旧命名（避免遗漏引用）。
+/// 独立岛窗固定画布（足够容纳最大卡片，内容顶中对齐动画）。
+const double kIslandWindowWidth = 372;
+const double kIslandWindowHeight = 300;
+
+const double kIslandTopGap = 0;
+
+/// 兼容旧命名。
 const double kIslandCapsuleWidth = kIslandHoverWidth;
 const double kIslandCapsuleHeight = kIslandHoverHeight;
 const double kIslandExpandedWidth = kIslandCardWidth;
 const double kIslandExpandedHeight = kIslandCardHeightList;
+
+/// 逻辑像素对齐到整数，减轻高分屏错位。
+double islandSnap(double v) => v.roundToDouble();

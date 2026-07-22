@@ -7,6 +7,7 @@ import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
 import '../desktop/desktop_pane.dart';
+import '../desktop/desktop_refresh_button.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
@@ -144,14 +145,7 @@ class _DevicesListPane extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => onRefresh(),
-                child: const Padding(
-                  padding: EdgeInsets.all(7),
-                  child: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
-                ),
-              ),
+              DesktopRefreshButton(onRefresh: onRefresh),
             ],
           ),
         ),
@@ -163,33 +157,40 @@ class _DevicesListPane extends StatelessWidget {
                   title: '还没有设备',
                   subtitle: '等待监控端上报，或检查服务连接',
                 )
-              : RefreshIndicator(
-                  color: context.qingya.device,
-                  onRefresh: onRefresh,
-                  child: ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    itemCount: machines.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final machine = machines[index];
-                      final sessions =
-                          snapshot.sessionsFor(machine.machineId);
-                      final activeCount =
-                          sessions.where((s) => s.state.isActive).length;
-                      final selected = selectedMachineId == machine.machineId;
-                      return _DeviceTile(
-                        machine: machine,
-                        activeCount: activeCount,
-                        index: index,
-                        selected: selected,
-                        onTap: () => onSelect(machine),
-                        onRename: () => onRename(machine),
-                      );
-                    },
-                  ),
+              : Builder(
+                  builder: (context) {
+                    final list = ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      itemCount: machines.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final machine = machines[index];
+                        final sessions =
+                            snapshot.sessionsFor(machine.machineId);
+                        final activeCount =
+                            sessions.where((s) => s.state.isActive).length;
+                        final selected =
+                            selectedMachineId == machine.machineId;
+                        return _DeviceTile(
+                          machine: machine,
+                          activeCount: activeCount,
+                          index: index,
+                          selected: selected,
+                          onTap: () => onSelect(machine),
+                          onRename: () => onRename(machine),
+                        );
+                      },
+                    );
+                    if (isQingyaDesktop) return list;
+                    return RefreshIndicator(
+                      color: context.qingya.device,
+                      onRefresh: onRefresh,
+                      child: list,
+                    );
+                  },
                 ),
         ),
       ],

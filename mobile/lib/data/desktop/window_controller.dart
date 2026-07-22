@@ -11,10 +11,10 @@ import 'desktop_platform.dart';
 enum DesktopWindowMode { normal, hidden, island }
 
 /// Windows 主窗控制：默认尺寸、关窗隐藏、岛形态切换。
-class WindowController with WindowListener {
-  WindowController._();
+class QingyaWindowController with WindowListener {
+  QingyaWindowController._();
 
-  static final WindowController instance = WindowController._();
+  static final QingyaWindowController instance = QingyaWindowController._();
 
   DesktopWindowMode _mode = DesktopWindowMode.normal;
   bool _ready = false;
@@ -38,11 +38,16 @@ class WindowController with WindowListener {
       center: true,
       backgroundColor: Color(0x00000000),
       skipTaskbar: false,
-      titleBarStyle: TitleBarStyle.normal,
+      titleBarStyle: TitleBarStyle.hidden,
+      windowButtonVisibility: false,
       title: '轻芽',
     );
     await windowManager.waitUntilReadyToShow(options, () async {
       await windowManager.setPreventClose(true);
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.hidden,
+        windowButtonVisibility: false,
+      );
       // 避免错误缩放下的模糊：按逻辑像素明确尺寸
       await windowManager.setSize(
         const Size(kDesktopDefaultWidth, kDesktopDefaultHeight),
@@ -126,9 +131,10 @@ class WindowController with WindowListener {
   Future<void> _restoreNormalChrome() async {
     await windowManager.setHasShadow(true);
     await windowManager.setBackgroundColor(const Color(0x00000000));
+    // 继续使用自定义标题栏，不恢复系统标题栏
     await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
+      TitleBarStyle.hidden,
+      windowButtonVisibility: false,
     );
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setResizable(true);

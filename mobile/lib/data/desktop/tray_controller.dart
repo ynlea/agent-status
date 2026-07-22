@@ -1,14 +1,17 @@
 import 'dart:io';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart' as dmw;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'desktop_platform.dart';
+import 'island_window_bridge.dart';
 import 'window_controller.dart';
 
-/// 系统托盘：显示主窗口 / 退出。
+/// 系统托盘：显示主窗口 / 退出。Windows 必须使用 .ico。
 class TrayController with TrayListener {
   TrayController._();
 
@@ -26,8 +29,14 @@ class TrayController with TrayListener {
     this.onShowMain = onShowMain;
     this.onQuit = onQuit;
     try {
-      final iconPath = await _resolveTrayIcon();
+      final iconPath = await _resolveIco();
+      debugPrint('[TrayController] icon=$iconPath');
       await trayManager.setIcon(iconPath);
+      try {
+        await windowManager.setIcon(iconPath);
+      } catch (e) {
+        debugPrint('[TrayController] window setIcon: $e');
+      }
       await trayManager.setToolTip('轻芽');
       await trayManager.setContextMenu(
         Menu(
@@ -45,20 +54,22 @@ class TrayController with TrayListener {
     }
   }
 
-  Future<String> _resolveTrayIcon() async {
-    // Prefer packaged ICO next to runner; fallback extract PNG from assets.
+  Future<String> _resolveIco() async {
     final exeDir = File(Platform.resolvedExecutable).parent;
-    final icoCandidates = [
-      '${exeDir.path}/data/flutter_assets/assets/images/cat/cat_app_icon.png',
-      '${exeDir.path}/app_icon.ico',
+    final sep = Platform.pathSeparator;
+    final candidates = <String>[
+      '${exeDir.path}${sep}data${sep}flutter_assets${sep}assets${sep}icons${sep}app_icon.ico',
+      '${exeDir.path}${sep}app_icon.ico',
+      '${Directory.current.path}${sep}windows${sep}runner${sep}resources${sep}app_icon.ico',
+      '${Directory.current.path}${sep}assets${sep}icons${sep}app_icon.ico',
     ];
-    for (final p in icoCandidates) {
+    for (final p in candidates) {
       if (await File(p).exists()) return p;
     }
 
-    final data = await rootBundle.load('assets/images/cat/cat_app_icon.png');
+    final data = await rootBundle.load('assets/icons/app_icon.ico');
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/qingya_tray_icon.png');
+    final file = File('${dir.path}${sep}qingya_tray.ico');
     await file.writeAsBytes(
       data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       flush: true,
@@ -97,8 +108,16 @@ class TrayController with TrayListener {
 
   Future<void> quit() async {
     await dispose();
-    await WindowController.instance.quitApp();
-    // 确保进程退出（destroy 后部分环境可能仍驻留）
+    try {
+      await IslandWindowBridge.instance.destroy();
+      final all = await dmw.WindowController.getAll();
+      for (final w in all) {
+        if (w.arguments == kIslandWindowArgument) {
+          await w.hide();
+        }
+      }
+    } catch (_) {}
+    await QingyaWindowController.instance.quitApp();
     exit(0);
   }
 }

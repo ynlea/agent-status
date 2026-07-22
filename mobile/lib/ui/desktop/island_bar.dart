@@ -1,19 +1,21 @@
+import 'dart:math' as math;
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/desktop/desktop_platform.dart';
 import '../../data/desktop/island_controller.dart';
 import '../../data/desktop/island_models.dart';
-import '../../data/desktop/window_controller.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 
-const _islandBg = Color(0xF01C1816);
 const _islandFg = Color(0xFFFFF8F3);
 const _islandMuted = Color(0xFFB8AAA0);
+const _islandDeep = Color(0xF21A1614);
 
-/// 主窗内顶部灵动岛 Overlay。
+/// 主窗不再内嵌 Overlay。
 class DesktopIslandOverlay extends ConsumerWidget {
   const DesktopIslandOverlay({
     super.key,
@@ -24,91 +26,102 @@ class DesktopIslandOverlay extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!isQingyaDesktop) return const SizedBox.shrink();
-    final mode = WindowController.instance.mode;
-    if (mode != DesktopWindowMode.normal) return const SizedBox.shrink();
-
-    final vm = ref.watch(islandControllerProvider);
-    if (!vm.isVisible) return const SizedBox.shrink();
-
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: IslandSurface(
-          viewModel: vm,
-          onOpenSession: onOpenSession,
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 }
 
-/// 岛形态全窗 UI（透明底，只画胶囊/卡片）。
-class IslandStandalonePage extends ConsumerWidget {
-  const IslandStandalonePage({
-    super.key,
-    required this.onOpenSession,
-  });
-
-  final void Function(Session session) onOpenSession;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final vm = ref.watch(islandControllerProvider);
-    return Material(
-      type: MaterialType.transparency,
-      color: Colors.transparent,
-      child: ColoredBox(
-        color: Colors.transparent,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: IslandSurface(
-            viewModel: vm,
-            fillHost: true,
-            onOpenSession: onOpenSession,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class IslandSurface extends ConsumerWidget {
+class IslandSurface extends StatelessWidget {
   const IslandSurface({
     super.key,
     required this.viewModel,
     required this.onOpenSession,
+    this.onHoverEnter,
+    this.onHoverExit,
+    this.onTap,
+    this.onCollapse,
+    this.onAnnouncementFinished,
     this.fillHost = false,
+    this.standalone = false,
   });
 
   final IslandViewModel viewModel;
   final void Function(Session session) onOpenSession;
+  final VoidCallback? onHoverEnter;
+  final VoidCallback? onHoverExit;
+  final VoidCallback? onTap;
+  final VoidCallback? onCollapse;
+  final VoidCallback? onAnnouncementFinished;
   final bool fillHost;
+  final bool standalone;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ctrl = ref.read(islandControllerProvider.notifier);
+  Widget build(BuildContext context) {
+    if (!viewModel.isVisible) return const SizedBox.shrink();
+
+    final size = _visualSize(viewModel);
+
     return MouseRegion(
-      onEnter: (_) => ctrl.onHoverEnter(),
-      onExit: (_) => ctrl.onHoverExit(),
+      onEnter: (_) => onHoverEnter?.call(),
+      onExit: (_) => onHoverExit?.call(),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: ctrl.onTap,
-        child: AnimatedSize(
-          duration: const Duration(milliseconds: 220),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
           curve: Curves.easeOutCubic,
+          width: fillHost ? double.infinity : size.$1,
+          height: size.$2,
           alignment: Alignment.topCenter,
           child: _IslandBody(
             viewModel: viewModel,
             fillHost: fillHost,
             onOpenSession: onOpenSession,
-            onCollapse: ctrl.collapse,
+            onCollapse: onCollapse,
+            onAnnouncementFinished: onAnnouncementFinished,
           ),
         ),
       ),
+    );
+  }
+
+  (double, double) _visualSize(IslandViewModel vm) {
+    return switch (vm.phase) {
+      IslandPhase.hidden => (kIslandStripWidth, kIslandStripHitHeight),
+      IslandPhase.strip => (kIslandStripWidth, kIslandStripHitHeight),
+      IslandPhase.hover => (kIslandHoverWidth, kIslandHoverHeight),
+      IslandPhase.card => (
+          kIslandCardWidth,
+          vm.hasAnnouncement
+              ? kIslandAnnounceHeight
+              : (vm.hasSessions
+                  ? (vm.sessions.length == 1 ? 150.0 : kIslandCardHeightList)
+                  : kIslandCardHeightEmpty),
+        ),
+    };
+  }
+}
+
+class IslandSurfaceConnected extends ConsumerWidget {
+  const IslandSurfaceConnected({
+    super.key,
+    required this.onOpenSession,
+  });
+
+  final void Function(Session session) onOpenSession;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!isQingyaDesktop) return const SizedBox.shrink();
+    final vm = ref.watch(islandControllerProvider);
+    final ctrl = ref.read(islandControllerProvider.notifier);
+    return IslandSurface(
+      viewModel: vm,
+      onOpenSession: onOpenSession,
+      onHoverEnter: ctrl.onHoverEnter,
+      onHoverExit: ctrl.onHoverExit,
+      onTap: ctrl.onTap,
+      onCollapse: ctrl.collapse,
+      onAnnouncementFinished: ctrl.onAnnouncementFinished,
     );
   }
 }
@@ -117,13 +130,15 @@ class _IslandBody extends StatelessWidget {
   const _IslandBody({
     required this.viewModel,
     required this.onOpenSession,
-    required this.onCollapse,
+    this.onCollapse,
+    this.onAnnouncementFinished,
     this.fillHost = false,
   });
 
   final IslandViewModel viewModel;
   final void Function(Session session) onOpenSession;
-  final VoidCallback onCollapse;
+  final VoidCallback? onCollapse;
+  final VoidCallback? onAnnouncementFinished;
   final bool fillHost;
 
   Color _stateColor(QingyaPalette c, SessionState? state) {
@@ -135,20 +150,14 @@ class _IslandBody extends StatelessWidget {
     };
   }
 
-  String _notifyAsset(SessionState? state) {
-    return switch (state) {
-      SessionState.confirm => QingyaAssets.notifyConfirm,
-      SessionState.working => QingyaAssets.notifyWorking,
-      SessionState.done => QingyaAssets.notifyDone,
-      _ => QingyaAssets.catBrandAvatarV3,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
     final phase = viewModel.phase;
-    final accent = _stateColor(c, viewModel.primary?.state);
+    final accent = _stateColor(
+      c,
+      viewModel.announcement?.state ?? viewModel.primary?.state,
+    );
 
     if (phase == IslandPhase.strip) {
       return _Strip(accent: accent, fillHost: fillHost);
@@ -158,16 +167,22 @@ class _IslandBody extends StatelessWidget {
       return _HoverCapsule(
         viewModel: viewModel,
         accent: accent,
-        asset: _notifyAsset(viewModel.primary?.state),
         fillHost: fillHost,
       );
     }
 
-    // card
+    if (viewModel.hasAnnouncement) {
+      return _AnnouncementCard(
+        announcement: viewModel.announcement!,
+        accent: accent,
+        fillHost: fillHost,
+        onFinished: onAnnouncementFinished,
+      );
+    }
+
     return _CardPanel(
       viewModel: viewModel,
       accent: accent,
-      asset: _notifyAsset(viewModel.primary?.state),
       fillHost: fillHost,
       onOpenSession: onOpenSession,
       onCollapse: onCollapse,
@@ -183,26 +198,38 @@ class _Strip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // 高命中区 + 顶对齐细视觉条，悬停更稳
+    return SizedBox(
       width: fillHost ? double.infinity : kIslandStripWidth,
-      height: kIslandStripHeight,
-      margin: const EdgeInsets.only(top: 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        gradient: LinearGradient(
-          colors: [
-            accent.withValues(alpha: 0.95),
-            _islandBg,
-            accent.withValues(alpha: 0.85),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.35),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+      height: kIslandStripHitHeight,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: _GlowShell(
+          accent: accent,
+          intensity: 0.55,
+          pulse: true,
+          borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(999),
+            bottomRight: Radius.circular(999),
           ),
-        ],
+          child: Container(
+            width: fillHost ? 120 : kIslandStripWidth,
+            height: kIslandStripHeight,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(999),
+                bottomRight: Radius.circular(999),
+              ),
+              gradient: LinearGradient(
+                colors: [
+                  Color.lerp(accent, Colors.white, 0.25)!,
+                  accent,
+                  Color.lerp(accent, _islandDeep, 0.35)!,
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -212,13 +239,11 @@ class _HoverCapsule extends StatelessWidget {
   const _HoverCapsule({
     required this.viewModel,
     required this.accent,
-    required this.asset,
     this.fillHost = false,
   });
 
   final IslandViewModel viewModel;
   final Color accent;
-  final String asset;
   final bool fillHost;
 
   @override
@@ -226,52 +251,242 @@ class _HoverCapsule extends StatelessWidget {
     final label = viewModel.hasSessions
         ? (viewModel.badgeCount > 1
             ? '${viewModel.primary?.state.labelZh ?? '状态'} · ${viewModel.badgeCount}'
-            : (viewModel.primary?.state.labelZh ?? '状态'))
-        : '轻芽在线';
+            : (viewModel.primary?.title ?? viewModel.headline))
+        : (viewModel.connected ? '轻芽在线' : '轻芽 · 未连接');
 
-    return Container(
-      width: fillHost ? double.infinity : kIslandHoverWidth,
-      height: kIslandHoverHeight,
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xF028221E),
-            Color.lerp(const Color(0xF028221E), accent, 0.18)!,
-          ],
-        ),
-        border: Border.all(color: accent.withValues(alpha: 0.4)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+    return _GlowShell(
+      accent: accent,
+      intensity: 0.7,
+      pulse: true,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: fillHost ? double.infinity : kIslandHoverWidth,
+        height: kIslandHoverHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xF02C2420),
+              Color.lerp(const Color(0xF02C2420), accent, 0.22)!,
+            ],
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _DotIcon(asset: asset, accent: accent, size: 26),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _islandFg,
+          border: Border.all(color: accent.withValues(alpha: 0.45)),
+        ),
+        child: Row(
+          children: [
+            _AppBadge(accent: accent, size: 26),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: _islandFg,
+                ),
               ),
             ),
+            if (viewModel.badgeCount > 1)
+              _CountBadge(count: viewModel.badgeCount, accent: accent),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AnnouncementCard extends StatefulWidget {
+  const _AnnouncementCard({
+    required this.announcement,
+    required this.accent,
+    this.fillHost = false,
+    this.onFinished,
+  });
+
+  final IslandAnnouncement announcement;
+  final Color accent;
+  final bool fillHost;
+  final VoidCallback? onFinished;
+
+  @override
+  State<_AnnouncementCard> createState() => _AnnouncementCardState();
+}
+
+class _AnnouncementCardState extends State<_AnnouncementCard>
+    with TickerProviderStateMixin {
+  late final AnimationController _marquee;
+  late final AnimationController _glow;
+  final _textKey = GlobalKey();
+  double _textWidth = 0;
+  double _viewWidth = 0;
+  bool _finished = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _marquee = AnimationController(vsync: this);
+    _glow = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndRun());
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnnouncementCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.announcement.line != widget.announcement.line) {
+      _finished = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndRun());
+    }
+  }
+
+  void _measureAndRun() {
+    final box = _textKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !mounted) return;
+    _textWidth = box.size.width;
+    _viewWidth = (widget.fillHost
+            ? math.min(MediaQuery.sizeOf(context).width, kIslandCardWidth)
+            : kIslandCardWidth) -
+        78;
+    final overflow = (_textWidth - _viewWidth).clamp(0.0, 4000.0);
+    final ms =
+        overflow <= 0 ? 2400 : (2000 + overflow * 16).round().clamp(2400, 11000);
+    _marquee.duration = Duration(milliseconds: ms);
+    _marquee.forward(from: 0).whenComplete(() {
+      if (_finished || !mounted) return;
+      _finished = true;
+      widget.onFinished?.call();
+    });
+  }
+
+  @override
+  void dispose() {
+    _marquee.dispose();
+    _glow.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.announcement;
+    return AnimatedBuilder(
+      animation: _glow,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(_glow.value);
+        return _GlowShell(
+          accent: widget.accent,
+          intensity: 0.55 + 0.45 * t,
+          pulse: false,
+          borderRadius: BorderRadius.circular(22),
+          child: child!,
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            width: widget.fillHost ? double.infinity : kIslandCardWidth,
+            height: kIslandAnnounceHeight,
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xF228221E),
+                  Color.lerp(const Color(0xF228221E), widget.accent, 0.2)!,
+                  Color.lerp(const Color(0xF21C1816), widget.accent, 0.08)!,
+                ],
+              ),
+              border: Border.all(
+                color: widget.accent.withValues(alpha: 0.5),
+              ),
+            ),
+            child: Row(
+              children: [
+                _AppBadge(accent: widget.accent, size: 38, glowing: true),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: widget.accent,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: widget.accent.withValues(alpha: 0.7),
+                                  blurRadius: 8,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            a.state.labelZh,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: widget.accent,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRect(
+                        child: SizedBox(
+                          height: 20,
+                          child: AnimatedBuilder(
+                            animation: _marquee,
+                            builder: (context, child) {
+                              final overflow =
+                                  (_textWidth - _viewWidth).clamp(0.0, 4000.0);
+                              final dx = overflow <= 0
+                                  ? 0.0
+                                  : -overflow * _marquee.value;
+                              return Transform.translate(
+                                offset: Offset(dx, 0),
+                                child: child,
+                              );
+                            },
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                a.line,
+                                key: _textKey,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: _islandFg,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          if (viewModel.badgeCount > 1)
-            _Badge(count: viewModel.badgeCount, accent: accent),
-        ],
+        ),
       ),
     );
   }
@@ -281,17 +496,15 @@ class _CardPanel extends StatelessWidget {
   const _CardPanel({
     required this.viewModel,
     required this.accent,
-    required this.asset,
     required this.onOpenSession,
-    required this.onCollapse,
+    this.onCollapse,
     this.fillHost = false,
   });
 
   final IslandViewModel viewModel;
   final Color accent;
-  final String asset;
   final void Function(Session session) onOpenSession;
-  final VoidCallback onCollapse;
+  final VoidCallback? onCollapse;
   final bool fillHost;
 
   @override
@@ -301,192 +514,285 @@ class _CardPanel extends StatelessWidget {
         ? kIslandCardHeightEmpty
         : (sessions.length == 1 ? 148.0 : kIslandCardHeightList);
 
-    return Container(
-      width: fillHost ? double.infinity : kIslandCardWidth,
-      height: height,
-      margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xF22A2420),
-            Color.lerp(const Color(0xF22A2420), accent, 0.12)!,
-          ],
+    return _GlowShell(
+      accent: accent,
+      intensity: 0.5,
+      pulse: false,
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        width: fillHost ? double.infinity : kIslandCardWidth,
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xF22A2420),
+              Color.lerp(const Color(0xF22A2420), accent, 0.14)!,
+            ],
+          ),
+          border: Border.all(color: accent.withValues(alpha: 0.38)),
         ),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
-            child: Row(
-              children: [
-                _DotIcon(asset: asset, accent: accent, size: 30),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        sessions.isEmpty ? '轻芽' : viewModel.headline,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          color: _islandFg,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        sessions.isEmpty ? '暂无活跃会话' : viewModel.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: _islandMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  onPressed: onCollapse,
-                  icon: const Icon(
-                    Icons.keyboard_arrow_up_rounded,
-                    color: _islandMuted,
-                    size: 20,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-          Expanded(
-            child: sessions.isEmpty
-                ? const Center(
-                    child: Text(
-                      '有会话时会在这里速览',
-                      style: TextStyle(fontSize: 12, color: _islandMuted),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                    itemCount: sessions.length.clamp(0, 6),
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (context, i) {
-                      final s = sessions[i];
-                      final color = switch (s.state) {
-                        SessionState.confirm =>
-                          context.qingya.confirm,
-                        SessionState.working =>
-                          context.qingya.working,
-                        SessionState.done => context.qingya.done,
-                        _ => _islandMuted,
-                      };
-                      return Material(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(12),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => onOpenSession(s),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: color,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        s.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: _islandFg,
-                                        ),
-                                      ),
-                                      Text(
-                                        [
-                                          s.state.labelZh,
-                                          s.agent,
-                                          if ((s.machineName ?? '')
-                                              .trim()
-                                              .isNotEmpty)
-                                            s.machineName!.trim(),
-                                        ].join(' · '),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: _islandMuted,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Icon(
-                                  Icons.chevron_right_rounded,
-                                  size: 16,
-                                  color: _islandMuted,
-                                ),
-                              ],
-                            ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 6, 8),
+              child: Row(
+                children: [
+                  _AppBadge(accent: accent, size: 30),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          sessions.isEmpty ? '轻芽' : '会话列表',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: _islandFg,
                           ),
                         ),
-                      );
-                    },
+                        Text(
+                          sessions.isEmpty
+                              ? (viewModel.connected ? '暂无活跃会话' : '未连接')
+                              : '${sessions.length} 个活跃',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: _islandMuted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-          ),
-        ],
+                  if (onCollapse != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onCollapse,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_up_rounded,
+                        color: _islandMuted,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+            Expanded(
+              child: sessions.isEmpty
+                  ? const Center(
+                      child: Text(
+                        '有会话变化时会在这里提醒',
+                        style: TextStyle(fontSize: 12, color: _islandMuted),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                      itemCount: sessions.length.clamp(0, 6),
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      itemBuilder: (context, i) {
+                        final s = sessions[i];
+                        final color = switch (s.state) {
+                          SessionState.confirm => context.qingya.confirm,
+                          SessionState.working => context.qingya.working,
+                          SessionState.done => context.qingya.done,
+                          _ => _islandMuted,
+                        };
+                        return Material(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => onOpenSession(s),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: color.withValues(alpha: 0.55),
+                                          blurRadius: 6,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          s.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: _islandFg,
+                                          ),
+                                        ),
+                                        Text(
+                                          [
+                                            s.state.labelZh,
+                                            s.agent,
+                                            if ((s.machineName ?? '')
+                                                .trim()
+                                                .isNotEmpty)
+                                              s.machineName!.trim(),
+                                          ].join(' · '),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: _islandMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    size: 16,
+                                    color: _islandMuted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _DotIcon extends StatelessWidget {
-  const _DotIcon({
-    required this.asset,
+/// 主题色光晕壳：柔和外发光，可选呼吸脉冲。
+class _GlowShell extends StatefulWidget {
+  const _GlowShell({
     required this.accent,
-    required this.size,
+    required this.child,
+    required this.borderRadius,
+    this.intensity = 0.6,
+    this.pulse = false,
   });
 
-  final String asset;
+  final Color accent;
+  final Widget child;
+  final BorderRadius borderRadius;
+  final double intensity;
+  final bool pulse;
+
+  @override
+  State<_GlowShell> createState() => _GlowShellState();
+}
+
+class _GlowShellState extends State<_GlowShell>
+    with SingleTickerProviderStateMixin {
+  AnimationController? _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.pulse) {
+      _pulse = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1600),
+      )..repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _GlowShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.pulse && _pulse == null) {
+      _pulse = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1600),
+      )..repeat(reverse: true);
+    } else if (!widget.pulse && _pulse != null) {
+      _pulse!.dispose();
+      _pulse = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget shell(double t) {
+      final i = widget.intensity * (0.75 + 0.25 * t);
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          boxShadow: [
+            BoxShadow(
+              color: widget.accent.withValues(alpha: 0.22 * i),
+              blurRadius: 18 + 10 * i,
+              spreadRadius: 0.5,
+              offset: const Offset(0, 4),
+            ),
+            BoxShadow(
+              color: widget.accent.withValues(alpha: 0.12 * i),
+              blurRadius: 28 + 12 * i,
+              spreadRadius: 1,
+              offset: const Offset(0, 8),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: widget.child,
+      );
+    }
+
+    final controller = _pulse;
+    if (controller == null) return shell(1);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final t = Curves.easeInOut.transform(controller.value);
+        return shell(t);
+      },
+    );
+  }
+}
+
+class _AppBadge extends StatelessWidget {
+  const _AppBadge({
+    required this.accent,
+    required this.size,
+    this.glowing = false,
+  });
+
   final Color accent;
   final double size;
+  final bool glowing;
 
   @override
   Widget build(BuildContext context) {
@@ -494,17 +800,23 @@ class _DotIcon extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.2),
         shape: BoxShape.circle,
-        border: Border.all(color: accent.withValues(alpha: 0.5)),
+        border: Border.all(color: accent.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: glowing ? 0.45 : 0.2),
+            blurRadius: glowing ? 12 : 6,
+          ),
+        ],
       ),
-      alignment: Alignment.center,
-      child: ClipOval(
-        child: Image.asset(
-          asset,
-          width: size * 0.55,
-          height: size * 0.55,
-          fit: BoxFit.contain,
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        QingyaAssets.catAppIcon,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (_, __, ___) => Image.asset(
+          QingyaAssets.catBrandAvatarV3,
+          fit: BoxFit.cover,
           filterQuality: FilterQuality.high,
         ),
       ),
@@ -512,8 +824,8 @@ class _DotIcon extends StatelessWidget {
   }
 }
 
-class _Badge extends StatelessWidget {
-  const _Badge({required this.count, required this.accent});
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count, required this.accent});
 
   final int count;
   final Color accent;

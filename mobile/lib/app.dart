@@ -166,13 +166,16 @@ class QingyaApp extends ConsumerWidget {
   final ThemeData? darkTheme;
 
   void _openSession(WidgetRef ref, Session session) {
-    unawaited(WindowController.instance.showMain());
+    unawaited(QingyaWindowController.instance.showMain());
     final router = ref.read(routerProvider);
     final path =
         '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}';
-    // 延迟一拍，等主窗恢复后再导航
-    Future<void>.delayed(const Duration(milliseconds: 80), () {
-      router.go(path);
+    // 先落到首页再 push，保证返回键有栈可退（go 会清栈导致卡在详情）。
+    Future<void>.delayed(const Duration(milliseconds: 100), () {
+      router.go('/home');
+      Future<void>.delayed(const Duration(milliseconds: 16), () {
+        router.push(path);
+      });
     });
   }
 
