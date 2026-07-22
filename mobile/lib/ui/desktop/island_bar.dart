@@ -1,5 +1,5 @@
+import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,7 +30,7 @@ class DesktopIslandOverlay extends ConsumerWidget {
   }
 }
 
-class IslandSurface extends StatelessWidget {
+class IslandSurface extends StatefulWidget {
   const IslandSurface({
     super.key,
     required this.viewModel,
@@ -55,55 +55,198 @@ class IslandSurface extends StatelessWidget {
   final bool standalone;
 
   @override
+  State<IslandSurface> createState() => _IslandSurfaceState();
+}
+
+class _IslandSurfaceState extends State<IslandSurface>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _enter;
+  late IslandPhase _lastPhase;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastPhase = widget.viewModel.phase;
+    _enter = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    if (widget.standalone) {
+      // 关主窗进岛：细条从顶上“落入”并略回弹
+      _enter.forward(from: 0);
+    } else {
+      _enter.value = 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant IslandSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.viewModel.phase != widget.viewModel.phase) {
+      _lastPhase = oldWidget.viewModel.phase;
+    }
+    // 从主窗再次变岛时重播入场
+    if (widget.standalone &&
+        !oldWidget.standalone &&
+        widget.viewModel.isVisible) {
+      unawaited(_enter.forward(from: 0));
+    }
+  }
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    super.dispose();
+  }
+
+  bool _isExpanding(IslandPhase from, IslandPhase to) {
+    int rank(IslandPhase p) => switch (p) {
+          IslandPhase.hidden => 0,
+          IslandPhase.strip => 1,
+          IslandPhase.hover => 2,
+          IslandPhase.card => 3,
+        };
+    return rank(to) > rank(from);
+  }
+
+  Duration _morphDuration(IslandPhase from, IslandPhase to) {
+    final expanding = _isExpanding(from, to);
+    if (to == IslandPhase.card || from == IslandPhase.card) {
+      return Duration(
+        milliseconds: expanding ? kIslandCardExpandMs : kIslandCardCollapseMs,
+      );
+    }
+    return Duration(
+      milliseconds: expanding ? kIslandExpandMs : kIslandCollapseMs,
+    );
+  }
+
+  Curve _morphCurve(IslandPhase from, IslandPhase to) {
+    if (_isExpanding(from, to)) {
+      // 展开：快起缓停（回弹交给内容 Scale，避免尺寸越界裁切）
+      return const Cubic(0.16, 1.0, 0.3, 1.0);
+    }
+    // 收起：顺滑减速
+    return Curves.easeInOutCubic;
+  }
+
+  (double, double) _visualSize(IslandViewModel vm) {
+    return switch (vm.phase) {
+      IslandPhase.hidden => (kIslandStripWidth, kIslandStripHeight),
+      IslandPhase.strip => (kIslandStripWidth, kIslandStripHeight),
+      IslandPhase.hover => (kIslandHoverWidth, kIslandHoverHeight),
+      IslandPhase.card => vm.hasAnnouncement
+          ? (kIslandAnnounceWidth, kIslandAnnounceHeight)
+          : (
+              kIslandCardWidth,
+              vm.hasSessions
+                  ? (vm.sessions.length == 1 ? 150.0 : kIslandCardHeightList)
+                  : kIslandCardHeightEmpty,
+            ),
+    };
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final viewModel = widget.viewModel;
     if (!viewModel.isVisible) return const SizedBox.shrink();
 
     final size = _visualSize(viewModel);
+    final from = _lastPhase;
+    final to = viewModel.phase;
+    final duration = _morphDuration(from, to);
+    final curve = _morphCurve(from, to);
 
-    // 外层不抢多余命中：只有实际内容尺寸响应鼠标
     return Align(
       alignment: Alignment.topCenter,
-      child: MouseRegion(
-        opaque: false,
-        onEnter: (_) => onHoverEnter?.call(),
-        onExit: (_) => onHoverExit?.call(),
-        child: GestureDetector(
-          behavior: HitTestBehavior.deferToChild,
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            width: fillHost ? double.infinity : size.$1,
-            height: size.$2,
-            alignment: Alignment.topCenter,
-            child: _IslandBody(
-              viewModel: viewModel,
-              fillHost: fillHost,
-              onOpenSession: onOpenSession,
-              onCollapse: onCollapse,
-              onAnnouncementFinished: onAnnouncementFinished,
+      child: AnimatedBuilder(
+        animation: _enter,
+        builder: (context, child) {
+          final t = Curves.easeOutCubic.transform(_enter.value);
+          // 入场：自顶部轻微下移 + 缩放 + 淡入
+          final dy = (1 - t) * -10;
+          final scale = 0.72 + 0.28 * t;
+          return Opacity(
+            opacity: t.clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: Offset(0, dy),
+              child: Transform.scale(
+                scale: scale,
+                alignment: Alignment.topCenter,
+                child: child,
+              ),
+            ),
+          );
+        },
+        child: MouseRegion(
+          opaque: false,
+          onEnter: (_) => widget.onHoverEnter?.call(),
+          onExit: (_) => widget.onHoverExit?.call(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.deferToChild,
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: duration,
+              curve: curve,
+              width: widget.fillHost ? double.infinity : size.$1,
+              height: size.$2,
+              alignment: Alignment.topCenter,
+              child: AnimatedSwitcher(
+                duration: Duration(
+                  milliseconds: (duration.inMilliseconds * 0.72).round(),
+                ),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                layoutBuilder: (current, previous) {
+                  return Stack(
+                    alignment: Alignment.topCenter,
+                    children: [
+                      ...previous,
+                      if (current != null) current,
+                    ],
+                  );
+                },
+                transitionBuilder: (child, anim) {
+                  final fade = CurvedAnimation(
+                    parent: anim,
+                    curve: Curves.easeOutCubic,
+                  );
+                  final scale = Tween<double>(begin: 0.92, end: 1).animate(
+                    CurvedAnimation(
+                      parent: anim,
+                      curve: Curves.easeOutBack,
+                    ),
+                  );
+                  return FadeTransition(
+                    opacity: fade,
+                    child: ScaleTransition(
+                      scale: scale,
+                      alignment: Alignment.topCenter,
+                      child: child,
+                    ),
+                  );
+                },
+                child: KeyedSubtree(
+                  key: ValueKey(
+                    '${viewModel.phase.name}_'
+                    '${viewModel.hasAnnouncement}_'
+                    '${viewModel.pinned}_'
+                    '${viewModel.badgeCount}',
+                  ),
+                  child: _IslandBody(
+                    viewModel: viewModel,
+                    fillHost: widget.fillHost,
+                    onOpenSession: widget.onOpenSession,
+                    onCollapse: widget.onCollapse,
+                    onAnnouncementFinished: widget.onAnnouncementFinished,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
-  }
-
-  (double, double) _visualSize(IslandViewModel vm) {
-    // strip 命中区 = 视觉区，避免“靠近就展开”
-    return switch (vm.phase) {
-      IslandPhase.hidden => (kIslandStripWidth, kIslandStripHeight),
-      IslandPhase.strip => (kIslandStripWidth, kIslandStripHeight),
-      IslandPhase.hover => (kIslandHoverWidth, kIslandHoverHeight),
-      IslandPhase.card => (
-          kIslandCardWidth,
-          vm.hasAnnouncement
-              ? kIslandAnnounceHeight
-              : (vm.hasSessions
-                  ? (vm.sessions.length == 1 ? 150.0 : kIslandCardHeightList)
-                  : kIslandCardHeightEmpty),
-        ),
-    };
   }
 }
 
@@ -241,20 +384,10 @@ class _HoverCapsule extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = viewModel.primary;
-    final ann = s == null ? null : IslandAnnouncement.fromSession(s);
-    // 统一两行：状态 · 机器 · 渠道 · 项目 / 提示
-    final String line1;
-    final String line2;
-    if (viewModel.hasSessions && ann != null) {
-      final prefix = viewModel.badgeCount > 1 ? '×${viewModel.badgeCount} ' : '';
-      line1 =
-          '$prefix${ann.state.labelZh} · ${ann.machineName} · ${ann.agentLabel} · ${ann.projectLabel}';
-      line2 = ann.prompt;
-    } else {
-      line1 = viewModel.connected ? '轻芽在线' : '轻芽 · 未连接';
-      line2 = viewModel.connected ? '暂无活跃会话' : '未连接服务';
-    }
+    // 与 App 常驻监听通知同文案：x 台在线 · x 个进行中任务 · 172M
+    final summary = viewModel.connected
+        ? viewModel.liveSummaryLine
+        : '轻芽 · 未连接';
 
     return _GlowShell(
       accent: accent,
@@ -282,36 +415,18 @@ class _HoverCapsule extends StatelessWidget {
             _AppBadge(accent: accent, size: 26),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    line1,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: _islandFg,
-                      height: 1.15,
-                    ),
-                  ),
-                  Text(
-                    line2,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: _islandMuted,
-                      height: 1.15,
-                    ),
-                  ),
-                ],
+              child: Text(
+                summary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _islandFg,
+                  height: 1.15,
+                ),
               ),
             ),
-            if (viewModel.badgeCount > 1)
-              _CountBadge(count: viewModel.badgeCount, accent: accent),
           ],
         ),
       ),
@@ -339,20 +454,22 @@ class _AnnouncementCard extends StatefulWidget {
 class _AnnouncementCardState extends State<_AnnouncementCard>
     with TickerProviderStateMixin {
   late final AnimationController _marquee;
-  late final AnimationController _glow;
+  late final AnimationController _sweep;
   final _textKey = GlobalKey();
   double _textWidth = 0;
   double _viewWidth = 0;
+  bool _needsMarquee = false;
   bool _finished = false;
+  Timer? _finishTimer;
 
   @override
   void initState() {
     super.initState();
     _marquee = AnimationController(vsync: this);
-    _glow = AnimationController(
+    _sweep = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndRun());
   }
 
@@ -367,135 +484,140 @@ class _AnnouncementCardState extends State<_AnnouncementCard>
 
   void _measureAndRun() {
     final box = _textKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !mounted) return;
-    _textWidth = box.size.width;
+    if (!mounted) return;
+    _textWidth = box?.size.width ?? 0;
     _viewWidth = (widget.fillHost
-            ? math.min(MediaQuery.sizeOf(context).width, kIslandCardWidth)
-            : kIslandCardWidth) -
+            ? math.min(MediaQuery.sizeOf(context).width, kIslandAnnounceWidth)
+            : kIslandAnnounceWidth) -
         78;
-    // 固定约 10s：短文慢滚一圈多遍，长文慢滚完整；到点再收起
+    final overflow = (_textWidth - _viewWidth).clamp(0.0, 4000.0);
+    _needsMarquee = overflow > 1;
+    setState(() {});
+
+    _finishTimer?.cancel();
+    _marquee.stop();
+    // 总展示时长固定；溢出才左右滚
     const totalMs = kIslandAnnounceSeconds * 1000;
-    _marquee.duration = const Duration(milliseconds: totalMs);
-    _marquee.forward(from: 0).whenComplete(() {
+    _finishTimer = Timer(const Duration(milliseconds: totalMs), () {
       if (_finished || !mounted) return;
       _finished = true;
       widget.onFinished?.call();
     });
+    if (_needsMarquee) {
+      _marquee.duration = const Duration(milliseconds: totalMs);
+      unawaited(_marquee.forward(from: 0));
+    }
   }
 
   @override
   void dispose() {
+    _finishTimer?.cancel();
     _marquee.dispose();
-    _glow.dispose();
+    _sweep.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final a = widget.announcement;
-    return AnimatedBuilder(
-      animation: _glow,
-      builder: (context, child) {
-        final t = Curves.easeInOut.transform(_glow.value);
-        return _GlowShell(
-          accent: widget.accent,
-          intensity: 0.55 + 0.45 * t,
-          pulse: false,
-          borderRadius: BorderRadius.circular(22),
-          child: child!,
-        );
-      },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            width: widget.fillHost ? double.infinity : kIslandCardWidth,
+    final baseA = const Color(0xF02C2420);
+    final baseB = Color.lerp(baseA, widget.accent, 0.28)!;
+
+    // 与悬停胶囊同款：矮胶囊 + 从左到右循环脉冲光
+    return _GlowShell(
+      accent: widget.accent,
+      intensity: 0.85,
+      pulse: false,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedBuilder(
+        animation: _sweep,
+        builder: (context, child) {
+          final t = _sweep.value;
+          // 光带从左扫到右，循环
+          final x = -1.2 + t * 2.4;
+          return Container(
+            width: widget.fillHost ? double.infinity : kIslandAnnounceWidth,
             height: kIslandAnnounceHeight,
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(999),
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+                begin: Alignment(x - 0.55, 0),
+                end: Alignment(x + 0.55, 0),
                 colors: [
-                  const Color(0xF228221E),
-                  Color.lerp(const Color(0xF228221E), widget.accent, 0.2)!,
-                  Color.lerp(const Color(0xF21C1816), widget.accent, 0.08)!,
+                  baseA,
+                  baseB,
+                  Color.lerp(widget.accent, Colors.white, 0.55)!
+                      .withValues(alpha: 0.85),
+                  baseB,
+                  baseA,
                 ],
+                stops: const [0.0, 0.35, 0.5, 0.65, 1.0],
               ),
-              border: Border.all(
-                color: widget.accent.withValues(alpha: 0.5),
-              ),
+              border: Border.all(color: widget.accent.withValues(alpha: 0.5)),
             ),
-            child: Row(
-              children: [
-                _AppBadge(accent: widget.accent, size: 30, glowing: true),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // 第 1 行：状态 · 机器 · 渠道 · 项目
-                      Text(
-                        '${a.state.labelZh} · ${a.machineName} · ${a.agentLabel} · ${a.projectLabel}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: widget.accent,
-                          height: 1.15,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      // 第 2 行：提示（可慢滚）
-                      ClipRect(
-                        child: SizedBox(
-                          height: 18,
-                          child: AnimatedBuilder(
-                            animation: _marquee,
-                            builder: (context, child) {
-                              final overflow =
-                                  (_textWidth - _viewWidth).clamp(0.0, 4000.0);
-                              double dx;
-                              if (overflow <= 0) {
-                                final t =
-                                    math.sin(_marquee.value * math.pi * 2);
-                                dx = t * 8;
-                              } else {
-                                dx = -overflow * _marquee.value;
-                              }
-                              return Transform.translate(
-                                offset: Offset(dx, 0),
-                                child: child,
-                              );
-                            },
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                a.prompt,
-                                key: _textKey,
-                                maxLines: 1,
-                                softWrap: false,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: _islandFg,
-                                  height: 1.15,
-                                ),
-                              ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: child,
+          );
+        },
+        child: Row(
+          children: [
+            _AppBadge(accent: widget.accent, size: 26, glowing: true),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${a.state.labelZh} · ${a.machineName} · ${a.agentLabel} · ${a.projectLabel}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: widget.accent,
+                      height: 1.15,
+                    ),
+                  ),
+                  ClipRect(
+                    child: SizedBox(
+                      height: 16,
+                      child: AnimatedBuilder(
+                        animation: _marquee,
+                        builder: (context, child) {
+                          if (!_needsMarquee) return child!;
+                          final overflow =
+                              (_textWidth - _viewWidth).clamp(0.0, 4000.0);
+                          return Transform.translate(
+                            offset: Offset(-overflow * _marquee.value, 0),
+                            child: child,
+                          );
+                        },
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: 1,
+                          child: Text(
+                            a.prompt,
+                            key: _textKey,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: _needsMarquee
+                                ? TextOverflow.visible
+                                : TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: _islandMuted,
+                              height: 1.15,
                             ),
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -833,28 +955,3 @@ class _AppBadge extends StatelessWidget {
   }
 }
 
-class _CountBadge extends StatelessWidget {
-  const _CountBadge({required this.count, required this.accent});
-
-  final int count;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$count',
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: Color.lerp(_islandFg, accent, 0.15),
-        ),
-      ),
-    );
-  }
-}

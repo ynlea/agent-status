@@ -79,6 +79,21 @@ void main() {
     expect(empty.isVisible, isTrue);
   });
 
+  test('liveSummaryLine matches monitor notification style', () {
+    final vm = IslandViewModel.fromSessions(
+      const [],
+      phase: IslandPhase.hover,
+      connected: true,
+      onlineMachines: 2,
+      workingSessions: 1,
+      todayTokens: 172000000,
+    );
+    expect(vm.liveSummaryLine, '2 台在线 · 1 个进行中任务 · 172M');
+    expect(IslandViewModel.formatLiveTokens(null), '—');
+    expect(IslandViewModel.formatLiveTokens(0), '0');
+    expect(IslandViewModel.formatLiveTokens(1500), '1.5k');
+  });
+
   test('disabled island is hidden', () {
     final vm = IslandViewModel.fromSessions(
       [_s(id: '1', state: SessionState.confirm)],

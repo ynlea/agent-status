@@ -210,7 +210,11 @@ class _UsagePageState extends ConsumerState<UsagePage> {
           color: context.qingya.textSecondary,
         ),
       );
-      final heatmap = _ActivityHeatmap(data: snap.heatmap, fmtInt: _fmtInt);
+      final heatmap = _ActivityHeatmap(
+        data: snap.heatmap,
+        fmtInt: _fmtInt,
+        desktop: desktop,
+      );
       final trend = _TrendCard(
         trend: snap.trend,
         byHour: q.trendByHour,
@@ -219,6 +223,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
         fmtInt: _fmtInt,
         fmtRate: _fmtRate,
         fmtCost: _fmtCost,
+        desktop: desktop,
       );
       final detailHeader = Row(
         children: [
@@ -276,7 +281,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
         );
       }
 
-      // 桌面：统计条 + 双栏图表 + 两列明细，控制最大宽度避免被横向拉稀。
+      // 桌面：统计条 + 双栏图表（等高）+ 两列明细。
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -284,13 +289,15 @@ class _UsagePageState extends ConsumerState<UsagePage> {
           const SizedBox(height: 6),
           note,
           const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 5, child: heatmap),
-              const SizedBox(width: 12),
-              Expanded(flex: 6, child: trend),
-            ],
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(flex: 5, child: heatmap),
+                const SizedBox(width: 12),
+                Expanded(flex: 6, child: trend),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
           detailHeader,
@@ -843,69 +850,76 @@ class _ActivityHeatmap extends StatefulWidget {
   const _ActivityHeatmap({
     required this.data,
     required this.fmtInt,
+    this.desktop = false,
   });
 
   final UsageBreakdown? data;
   final String Function(int) fmtInt;
+  final bool desktop;
 
   @override
   State<_ActivityHeatmap> createState() => _ActivityHeatmapState();
 }
 
 class _ActivityHeatmapState extends State<_ActivityHeatmap> {
+  /// 移动端点击后显示在标题旁；桌面端用 Tooltip 悬停。
   String? _tip;
 
   /// 服务端按 UTC 日切桶；用本地中午映射。
   String _dayKey(DateTime localDay) {
-    final mid = DateTime(localDay.year, localDay.month, localDay.day, 12).toUtc();
+    final mid =
+        DateTime(localDay.year, localDay.month, localDay.day, 12).toUtc();
     final y = mid.year.toString().padLeft(4, '0');
     final m = mid.month.toString().padLeft(2, '0');
     final d = mid.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
   }
 
-  /// Ordered 5-step scale (empty → max), single primary hue family.
   List<Color> _scaleColors() {
     final c = context.qingya;
     return [
-      c.idleSoft, // 0
-      Color.lerp(c.idleSoft, c.primary, 0.32)!, // 1
-      Color.lerp(c.idleSoft, c.primary, 0.55)!, // 2
-      Color.lerp(c.primary, c.primaryDark, 0.45)!, // 3
-      c.primaryDark, // 4
+      c.idleSoft,
+      Color.lerp(c.idleSoft, c.primary, 0.32)!,
+      Color.lerp(c.idleSoft, c.primary, 0.55)!,
+      Color.lerp(c.primary, c.primaryDark, 0.45)!,
+      c.primaryDark,
     ];
   }
 
-  /// Cap color scale at ~p90 of positive days so one extreme day
-  /// does not crush the rest. Values above cap still paint as max.
   int _scaleCap(Iterable<int> values) {
     final positives = values.where((v) => v > 0).toList()..sort();
     if (positives.isEmpty) return 0;
     if (positives.length == 1) return positives.first;
-    final idx = ((positives.length - 1) * 0.90).round().clamp(0, positives.length - 1);
+    final idx =
+        ((positives.length - 1) * 0.90).round().clamp(0, positives.length - 1);
     final p90 = positives[idx];
-    // Guard: if p90 is still tiny vs absolute max, keep p90 (outlier ignored).
     return p90 <= 0 ? positives.last : p90;
   }
 
   Color _colorFor(int value, int cap) {
     final levels = _scaleColors();
     if (value <= 0 || cap <= 0) return levels[0];
-    // Linear within [0, cap]; above cap → top step.
     final t = (value / cap).clamp(0.0, 1.0);
     final idx = (1 + (t * 3.999).floor()).clamp(1, 4);
     return levels[idx];
+  }
+
+  String _cellTip(DateTime day, int v) {
+    final label =
+        '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    if (v <= 0) return '$label · 无用量';
+    return '$label · ${widget.fmtInt(v)}';
   }
 
   @override
   Widget build(BuildContext context) {
     final n = DateTime.now();
     final end = DateTime(n.year, n.month, n.day);
-    // 对齐到周：GitHub 列是周，行是周日→周六。这里用 周一→周日 更符合国内习惯。
-    final start = end.subtract(const Duration(days: 16 * 7 - 1));
-    // 向左对齐到周一
-    final gridStart = start.subtract(Duration(days: start.weekday - 1));
-    final weeks = 16;
+    // 以「本周周一」为最右周起点，向前 16 周 —— 始终包含最新一周
+    const weeks = 16;
+    final thisWeekMonday = end.subtract(Duration(days: end.weekday - 1));
+    final gridStart =
+        thisWeekMonday.subtract(const Duration(days: (weeks - 1) * 7));
     final byKey = <String, int>{
       for (final g in widget.data?.groups ?? const <UsageBreakdownGroup>[])
         g.key: g.metrics.realUsage,
@@ -920,16 +934,13 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
           cells.add((day: day, value: -1)); // 未来空
           continue;
         }
-        if (day.isBefore(start)) {
-          cells.add((day: day, value: -1));
-          continue;
-        }
         final v = byKey[_dayKey(day)] ?? 0;
         if (v > 0) positiveValues.add(v);
         cells.add((day: day, value: v));
       }
     }
     final cap = _scaleCap(positiveValues);
+    final desktop = widget.desktop;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -953,7 +964,9 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
               ),
               const Spacer(),
               Text(
-                _tip ?? '近 16 周 · 色阶按约九成日封顶',
+                desktop
+                    ? '近 16 周 · 悬停查看'
+                    : (_tip ?? '近 16 周 · 点格子查看'),
                 style: TextStyle(
                   fontSize: 11,
                   color: context.qingya.textSecondary,
@@ -964,7 +977,6 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
           const SizedBox(height: 8),
           LayoutBuilder(
             builder: (context, c) {
-              // 7 行 × 16 列：格子铺满整卡宽度，不再右侧留白。
               const gap = 2.5;
               final cell = ((c.maxWidth - gap * (weeks - 1)) / weeks)
                   .clamp(8.0, 28.0);
@@ -990,32 +1002,33 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
                                     final color = empty
                                         ? Colors.transparent
                                         : _colorFor(v, cap);
-                                    return GestureDetector(
-                                      onTap: empty
-                                          ? null
-                                          : () {
-                                              final day = cellData.day;
-                                              final label =
-                                                  '${day.month}/${day.day}';
-                                              setState(() {
-                                                _tip = v <= 0
-                                                    ? '$label · 无用量'
-                                                    : '$label · ${widget.fmtInt(v)}';
-                                              });
-                                            },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: color,
-                                          borderRadius: BorderRadius.circular(2),
-                                          border: empty
-                                              ? null
-                                              : Border.all(
-                                                  color: context.qingya.border
-                                                      .withValues(alpha: 0.45),
-                                                  width: 0.5,
-                                                ),
-                                        ),
+                                    final box = Container(
+                                      decoration: BoxDecoration(
+                                        color: color,
+                                        borderRadius: BorderRadius.circular(2),
+                                        border: empty
+                                            ? null
+                                            : Border.all(
+                                                color: context.qingya.border
+                                                    .withValues(alpha: 0.45),
+                                                width: 0.5,
+                                              ),
                                       ),
+                                    );
+                                    if (empty) return box;
+                                    final tip = _cellTip(cellData.day, v);
+                                    if (desktop) {
+                                      return Tooltip(
+                                        message: tip,
+                                        waitDuration:
+                                            const Duration(milliseconds: 120),
+                                        preferBelow: true,
+                                        child: box,
+                                      );
+                                    }
+                                    return GestureDetector(
+                                      onTap: () => setState(() => _tip = tip),
+                                      child: box,
                                     );
                                   },
                                 ),
@@ -1035,7 +1048,10 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
             children: [
               Text(
                 '少',
-                style: TextStyle(fontSize: 10, color: context.qingya.textSecondary),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: context.qingya.textSecondary,
+                ),
               ),
               const SizedBox(width: 4),
               for (final c in _scaleColors()) ...[
@@ -1051,7 +1067,10 @@ class _ActivityHeatmapState extends State<_ActivityHeatmap> {
               ],
               Text(
                 '多',
-                style: TextStyle(fontSize: 10, color: context.qingya.textSecondary),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: context.qingya.textSecondary,
+                ),
               ),
             ],
           ),
@@ -1070,6 +1089,7 @@ class _TrendCard extends StatefulWidget {
     required this.fmtInt,
     required this.fmtRate,
     required this.fmtCost,
+    this.desktop = false,
   });
 
   final UsageBreakdown? trend;
@@ -1081,6 +1101,7 @@ class _TrendCard extends StatefulWidget {
   final String Function(int) fmtInt;
   final String Function(double?) fmtRate;
   final String Function(double?, bool) fmtCost;
+  final bool desktop;
 
   @override
   State<_TrendCard> createState() => _TrendCardState();
@@ -1088,6 +1109,7 @@ class _TrendCard extends StatefulWidget {
 
 class _TrendCardState extends State<_TrendCard> {
   int? _selected;
+  Offset? _hoverLocal;
 
   /// 服务端按 UTC 切桶：YYYY-MM-DDTHH / YYYY-MM-DD
   String _serverHourKey(DateTime localSlot) {
@@ -1250,7 +1272,12 @@ class _TrendCardState extends State<_TrendCard> {
     ];
   }
 
-  void _selectFromLocalX(double localX, double width, int n) {
+  void _selectFromLocalX(
+    double localX,
+    double width,
+    int n, {
+    Offset? hover,
+  }) {
     if (n <= 0 || width <= 0) return;
     const padL = 4.0;
     const padR = 4.0;
@@ -1259,7 +1286,183 @@ class _TrendCardState extends State<_TrendCard> {
     final idx = n == 1
         ? 0
         : ((x - padL) / w * (n - 1)).round().clamp(0, n - 1);
-    setState(() => _selected = idx);
+    if (_selected == idx &&
+        (hover == null || _hoverLocal == hover)) {
+      return;
+    }
+    setState(() {
+      _selected = idx;
+      if (hover != null) _hoverLocal = hover;
+    });
+  }
+
+  Widget _detailChip(String k, String v) {
+    return Text(
+      '$k $v',
+      style: TextStyle(
+        fontSize: 11,
+        color: context.qingya.textPrimary,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  Widget _hoverPanel(_TrendPoint selected) {
+    final c = context.qingya;
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(10),
+      color: c.card,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 260),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: c.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              selected.title,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: c.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 3,
+              children: [
+                _detailChip(
+                  '真实用量',
+                  widget.fmtInt(selected.metrics.realUsage),
+                ),
+                _detailChip(
+                  '输入',
+                  widget.fmtInt(selected.metrics.inputTokens),
+                ),
+                _detailChip(
+                  '输出',
+                  widget.fmtInt(selected.metrics.outputTotal),
+                ),
+                _detailChip(
+                  '缓存',
+                  widget.fmtInt(selected.metrics.cacheHitTokens),
+                ),
+                _detailChip('事件', '${selected.metrics.eventCount}'),
+                _detailChip(
+                  '命中率',
+                  widget.fmtRate(selected.metrics.cacheHitRate),
+                ),
+                _detailChip(
+                  '费用',
+                  widget.fmtCost(
+                    selected.metrics.estimatedCostUsd,
+                    selected.metrics.priced,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChart(List<_TrendPoint> points, {required bool expand}) {
+    final chart = points.isEmpty
+        ? Center(
+            child: Text(
+              '暂无趋势数据',
+              style: TextStyle(
+                fontSize: 12,
+                color: context.qingya.textSecondary,
+              ),
+            ),
+          )
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              final desktop = widget.desktop;
+              final selected = (_selected != null &&
+                      _selected! >= 0 &&
+                      _selected! < points.length)
+                  ? points[_selected!]
+                  : null;
+
+              Widget paint = CustomPaint(
+                painter: _TrendPainter(
+                  points: points,
+                  selected: _selected,
+                  palette: context.qingya,
+                ),
+                child: const SizedBox.expand(),
+              );
+
+              if (desktop) {
+                paint = MouseRegion(
+                  opaque: true,
+                  onHover: (e) {
+                    _selectFromLocalX(
+                      e.localPosition.dx,
+                      constraints.maxWidth,
+                      points.length,
+                      hover: e.localPosition,
+                    );
+                  },
+                  onExit: (_) {
+                    setState(() {
+                      _selected = null;
+                      _hoverLocal = null;
+                    });
+                  },
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      paint,
+                      if (selected != null && _hoverLocal != null)
+                        Positioned(
+                          left: (_hoverLocal!.dx + 12).clamp(
+                            0.0,
+                            math.max(0.0, constraints.maxWidth - 220),
+                          ),
+                          top: (_hoverLocal!.dy - 8).clamp(
+                            0.0,
+                            math.max(0.0, constraints.maxHeight - 96),
+                          ),
+                          child: IgnorePointer(child: _hoverPanel(selected)),
+                        ),
+                    ],
+                  ),
+                );
+              } else {
+                paint = GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _selectFromLocalX(
+                    d.localPosition.dx,
+                    constraints.maxWidth,
+                    points.length,
+                  ),
+                  onHorizontalDragUpdate: (d) => _selectFromLocalX(
+                    d.localPosition.dx,
+                    constraints.maxWidth,
+                    points.length,
+                  ),
+                  child: paint,
+                );
+              }
+              return paint;
+            },
+          );
+
+    if (expand) {
+      return Expanded(child: chart);
+    }
+    return SizedBox(height: 120, child: chart);
   }
 
   @override
@@ -1270,6 +1473,7 @@ class _TrendCardState extends State<_TrendCard> {
             _selected! < points.length)
         ? points[_selected!]
         : null;
+    final desktop = widget.desktop;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
@@ -1295,9 +1499,13 @@ class _TrendCardState extends State<_TrendCard> {
               ),
               const Spacer(),
               Text(
-                widget.byHour
-                    ? '${points.length} 个时点'
-                    : (widget.bucketed ? '${points.length} 段' : '${points.length} 天'),
+                desktop
+                    ? '悬停查看详情'
+                    : (widget.byHour
+                        ? '${points.length} 个时点'
+                        : (widget.bucketed
+                            ? '${points.length} 段'
+                            : '${points.length} 天')),
                 style: TextStyle(
                   fontSize: 11,
                   color: context.qingya.textSecondary,
@@ -1305,50 +1513,18 @@ class _TrendCardState extends State<_TrendCard> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            '点击/拖动曲线节点查看详情',
-            style: TextStyle(fontSize: 11, color: context.qingya.textSecondary),
-          ),
+          if (!desktop) ...[
+            const SizedBox(height: 4),
+            Text(
+              '点击/拖动曲线节点查看详情',
+              style: TextStyle(
+                fontSize: 11,
+                color: context.qingya.textSecondary,
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
-          SizedBox(
-            height: 120,
-            child: points.isEmpty
-                ? Center(
-                    child: Text(
-                      '暂无趋势数据',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.qingya.textSecondary,
-                      ),
-                    ),
-                  )
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: (d) => _selectFromLocalX(
-                          d.localPosition.dx,
-                          constraints.maxWidth,
-                          points.length,
-                        ),
-                        onHorizontalDragUpdate: (d) => _selectFromLocalX(
-                          d.localPosition.dx,
-                          constraints.maxWidth,
-                          points.length,
-                        ),
-                        child: CustomPaint(
-                          painter: _TrendPainter(
-                            points: points,
-                            selected: _selected,
-                            palette: context.qingya,
-                          ),
-                          child: const SizedBox.expand(),
-                        ),
-                      );
-                    },
-                  ),
-          ),
+          _buildChart(points, expand: desktop),
           if (points.isNotEmpty) ...[
             const SizedBox(height: 4),
             Row(
@@ -1379,7 +1555,8 @@ class _TrendCardState extends State<_TrendCard> {
               ],
             ),
           ],
-          if (selected != null) ...[
+          // 移动端保留底部详情面板；桌面端信息只在悬停浮层
+          if (!desktop && selected != null) ...[
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -1404,22 +1581,28 @@ class _TrendCardState extends State<_TrendCard> {
                     spacing: 10,
                     runSpacing: 4,
                     children: [
-                      _tip('真实用量', widget.fmtInt(selected.metrics.realUsage)),
-                      _tip('输入', widget.fmtInt(selected.metrics.inputTokens)),
-                      _tip(
+                      _detailChip(
+                        '真实用量',
+                        widget.fmtInt(selected.metrics.realUsage),
+                      ),
+                      _detailChip(
+                        '输入',
+                        widget.fmtInt(selected.metrics.inputTokens),
+                      ),
+                      _detailChip(
                         '输出',
                         widget.fmtInt(selected.metrics.outputTotal),
                       ),
-                      _tip(
+                      _detailChip(
                         '缓存',
                         widget.fmtInt(selected.metrics.cacheHitTokens),
                       ),
-                      _tip('事件', '${selected.metrics.eventCount}'),
-                      _tip(
+                      _detailChip('事件', '${selected.metrics.eventCount}'),
+                      _detailChip(
                         '命中率',
                         widget.fmtRate(selected.metrics.cacheHitRate),
                       ),
-                      _tip(
+                      _detailChip(
                         '费用',
                         widget.fmtCost(
                           selected.metrics.estimatedCostUsd,
@@ -1433,17 +1616,6 @@ class _TrendCardState extends State<_TrendCard> {
             ),
           ],
         ],
-      ),
-    );
-  }
-
-  Widget _tip(String k, String v) {
-    return Text(
-      '$k $v',
-      style: TextStyle(
-        fontSize: 11,
-        color: context.qingya.textPrimary,
-        fontWeight: FontWeight.w600,
       ),
     );
   }

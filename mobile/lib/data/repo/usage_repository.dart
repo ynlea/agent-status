@@ -277,8 +277,11 @@ class UsageRepository extends StateNotifier<UsageSnapshot> {
       final client = RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
       final n = DateTime.now();
       final heatTo = n;
-      final heatFrom = DateTime(n.year, n.month, n.day)
-          .subtract(const Duration(days: 16 * 7 - 1));
+      // 与热力图一致：以本周周一为右端周，向前共 16 周（保证含最新一周）
+      final today = DateTime(n.year, n.month, n.day);
+      final thisWeekMonday =
+          today.subtract(Duration(days: today.weekday - 1));
+      final heatFrom = thisWeekMonday.subtract(const Duration(days: 15 * 7));
       final results = await Future.wait([
         client.fetchUsageSummary(
           from: from,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../data/desktop/desktop_platform.dart';
+import '../../data/desktop/window_controller.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 
@@ -122,7 +123,9 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
             ),
             _CaptionButton(
               icon: Icons.remove_rounded,
-              onTap: () => unawaited(windowManager.minimize()),
+              // 最小化也收进灵动岛/托盘，不走系统最小化
+              onTap: () =>
+                  QingyaWindowController.instance.requestHideToBackground(),
             ),
             _CaptionButton(
               // 固定同一套图标字号，避免悬停/最大化切换导致视觉跳动

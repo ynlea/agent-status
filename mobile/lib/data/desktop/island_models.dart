@@ -143,6 +143,9 @@ class IslandViewModel {
     this.enabled = true,
     this.announcement,
     this.connected = false,
+    this.onlineMachines = 0,
+    this.workingSessions = 0,
+    this.todayTokens,
   });
 
   final List<Session> sessions;
@@ -156,12 +159,48 @@ class IslandViewModel {
   final IslandAnnouncement? announcement;
   final bool connected;
 
+  /// 与 App 常驻通知一致：在线设备 / 工作中会话 / 今日 token。
+  final int onlineMachines;
+  final int workingSessions;
+  final int? todayTokens;
+
   bool get isVisible => enabled && phase != IslandPhase.hidden;
 
   bool get hasSessions => sessions.isNotEmpty;
 
   bool get hasAnnouncement =>
       announcement != null && (announcement!.line).trim().isNotEmpty;
+
+  /// 如：`2 台在线 · 1 个进行中任务 · 172M`
+  String get liveSummaryLine {
+    final usage = formatLiveTokens(todayTokens);
+    return '$onlineMachines 台在线 · $workingSessions 个进行中任务 · $usage';
+  }
+
+  /// 与 Android LiveStats.formatTokens / formatSessionTokens 对齐。
+  static String formatLiveTokens(int? realUsage) {
+    if (realUsage == null) return '—';
+    if (realUsage <= 0) return '0';
+    if (realUsage < 1000) return '$realUsage';
+    if (realUsage < 1000000) {
+      final v = realUsage / 1000.0;
+      final s = v >= 100
+          ? v.toStringAsFixed(0)
+          : _trimOneDecimal(v);
+      return '${s}k';
+    }
+    final v = realUsage / 1000000.0;
+    final s = v >= 100 ? v.toStringAsFixed(0) : _trimOneDecimal(v);
+    return '${s}M';
+  }
+
+  static String _trimOneDecimal(double v) {
+    final fixed = v.toStringAsFixed(1);
+    if (fixed.endsWith('.0')) {
+      return fixed.substring(0, fixed.length - 2);
+    }
+    return fixed;
+  }
 
   IslandViewModel copyWith({
     List<Session>? sessions,
@@ -174,8 +213,12 @@ class IslandViewModel {
     bool? enabled,
     IslandAnnouncement? announcement,
     bool? connected,
+    int? onlineMachines,
+    int? workingSessions,
+    int? todayTokens,
     bool clearPrimary = false,
     bool clearAnnouncement = false,
+    bool clearTodayTokens = false,
   }) {
     return IslandViewModel(
       sessions: sessions ?? this.sessions,
@@ -189,6 +232,10 @@ class IslandViewModel {
       announcement:
           clearAnnouncement ? null : (announcement ?? this.announcement),
       connected: connected ?? this.connected,
+      onlineMachines: onlineMachines ?? this.onlineMachines,
+      workingSessions: workingSessions ?? this.workingSessions,
+      todayTokens:
+          clearTodayTokens ? null : (todayTokens ?? this.todayTokens),
     );
   }
 
@@ -216,6 +263,9 @@ class IslandViewModel {
     bool enabled = true,
     IslandAnnouncement? announcement,
     bool connected = false,
+    int onlineMachines = 0,
+    int workingSessions = 0,
+    int? todayTokens,
   }) {
     if (!enabled) {
       return const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
@@ -229,6 +279,9 @@ class IslandViewModel {
         subtitle: connected ? '暂无活跃会话' : '未连接',
         announcement: announcement,
         connected: connected,
+        onlineMachines: onlineMachines,
+        workingSessions: workingSessions,
+        todayTokens: todayTokens,
       );
     }
     final primary = filtered.first;
@@ -253,6 +306,9 @@ class IslandViewModel {
       enabled: true,
       announcement: announcement,
       connected: connected,
+      onlineMachines: onlineMachines,
+      workingSessions: workingSessions,
+      todayTokens: todayTokens,
     );
   }
 
