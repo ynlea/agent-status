@@ -11,8 +11,6 @@ import 'desktop_platform.dart';
 enum DesktopWindowMode { normal, hidden, island }
 
 /// Windows 主窗控制：默认尺寸、关窗隐藏、岛形态切换。
-///
-/// 单窗方案：主窗隐藏时把同一窗口改成置顶无边框胶囊，保证岛在关主窗后仍可见。
 class WindowController with WindowListener {
   WindowController._();
 
@@ -45,6 +43,10 @@ class WindowController with WindowListener {
     );
     await windowManager.waitUntilReadyToShow(options, () async {
       await windowManager.setPreventClose(true);
+      // 避免错误缩放下的模糊：按逻辑像素明确尺寸
+      await windowManager.setSize(
+        const Size(kDesktopDefaultWidth, kDesktopDefaultHeight),
+      );
       await windowManager.show();
       await windowManager.focus();
     });
@@ -56,12 +58,12 @@ class WindowController with WindowListener {
     if (!isQingyaDesktop || !_ready) return;
     await _restoreNormalChrome();
     await windowManager.setSkipTaskbar(false);
+    await windowManager.setBackgroundColor(const Color(0x00000000));
     await windowManager.show();
     await windowManager.focus();
     _setMode(DesktopWindowMode.normal);
   }
 
-  /// 关窗：不退出；有岛内容则进入岛形态，否则完全隐藏。
   Future<void> hideToBackground({required bool preferIsland}) async {
     if (!isQingyaDesktop || !_ready) return;
     if (preferIsland) {
@@ -73,12 +75,14 @@ class WindowController with WindowListener {
   }
 
   Future<void> enterIslandMode({
-    double width = kIslandCapsuleWidth,
-    double height = kIslandCapsuleHeight,
+    double width = kIslandStripWidth,
+    double height = kIslandStripHeight,
   }) async {
     if (!isQingyaDesktop || !_ready) return;
-    await windowManager.setMinimumSize(const Size(200, 40));
+    await windowManager.setMinimumSize(const Size(40, 8));
     await windowManager.setAsFrameless();
+    await windowManager.setHasShadow(false);
+    await windowManager.setBackgroundColor(const Color(0x00000000));
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
     await windowManager.setResizable(false);
@@ -86,7 +90,7 @@ class WindowController with WindowListener {
     await _positionIslandTopCenter(width: width, height: height);
     await windowManager.show();
     try {
-      await windowManager.blur();
+      await windowManager.setIgnoreMouseEvents(false);
     } catch (_) {}
     _setMode(DesktopWindowMode.island);
   }
@@ -120,7 +124,12 @@ class WindowController with WindowListener {
   }
 
   Future<void> _restoreNormalChrome() async {
-    await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+    await windowManager.setHasShadow(true);
+    await windowManager.setBackgroundColor(const Color(0x00000000));
+    await windowManager.setTitleBarStyle(
+      TitleBarStyle.normal,
+      windowButtonVisibility: true,
+    );
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setResizable(true);
     await windowManager.setMinimumSize(
@@ -138,13 +147,17 @@ class WindowController with WindowListener {
   }) async {
     try {
       final display = await screenRetriever.getPrimaryDisplay();
-      final size = display.size;
+      // screen_retriever 在 Windows 上常见物理像素；window_manager 用逻辑像素。
+      final rawScale = display.scaleFactor;
+      final scale =
+          (rawScale == null || rawScale <= 0) ? 1.0 : rawScale.toDouble();
       final visible = display.visiblePosition;
-      final visibleSize = display.visibleSize ?? size;
-      final originX = visible?.dx ?? 0;
-      final originY = visible?.dy ?? 0;
-      final x = originX + (visibleSize.width - width) / 2;
-      final y = originY + 12;
+      final visibleSize = display.visibleSize ?? display.size;
+      final originX = (visible?.dx ?? 0) / scale;
+      final originY = (visible?.dy ?? 0) / scale;
+      final screenW = visibleSize.width / scale;
+      final x = originX + (screenW - width) / 2;
+      final y = originY + kIslandTopGap;
       await windowManager.setPosition(Offset(x, y));
     } catch (e) {
       debugPrint('[WindowController] position island: $e');

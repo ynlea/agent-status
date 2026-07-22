@@ -20,6 +20,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
   static const _kDone = 'notify_done';
   static const _kDemo = 'demo_mode';
   static const _kThemeMode = 'theme_mode';
+  static const _kIsland = 'island_enabled';
 
   void _load() {
     state = AppSettings(
@@ -30,6 +31,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
       notifyDone: _prefs.getBool(_kDone) ?? true,
       demoMode: _prefs.getBool(_kDemo) ?? false,
       themeMode: AppThemeMode.fromStorage(_prefs.getString(_kThemeMode)),
+      islandEnabled: _prefs.getBool(_kIsland) ?? true,
     );
     unawaited(MonitorBridge.apply(state));
   }
@@ -42,6 +44,7 @@ class SettingsStore extends StateNotifier<AppSettings> {
     await _prefs.setBool(_kDone, next.notifyDone);
     await _prefs.setBool(_kDemo, next.demoMode);
     await _prefs.setString(_kThemeMode, next.themeMode.storageValue);
+    await _prefs.setBool(_kIsland, next.islandEnabled);
     state = next.copyWith(
       baseUrl: next.baseUrl.trim(),
       apiKey: next.apiKey.trim(),

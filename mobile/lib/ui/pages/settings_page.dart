@@ -208,6 +208,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
             const SizedBox(height: 22),
+            if (isQingyaDesktop) ...[
+              const QingyaSectionCaption('灵动岛'),
+              QingyaGroupCard(
+                children: [
+                  _SettingsSwitchRow(
+                    label: '启用灵动岛',
+                    value: settings.islandEnabled,
+                    onChanged: (value) =>
+                        save(settings.copyWith(islandEnabled: value)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  '贴顶细条常驻；悬停预览，点击展开会话卡片；无操作约 10 秒后收起。关闭主窗口后岛仍在屏幕顶部。',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: c.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+            ],
             const QingyaSectionCaption('通知设置'),
             QingyaGroupCard(
               children: [
@@ -253,7 +279,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
                 isQingyaDesktop
-                    ? '桌面端通过顶部灵动岛展示会话变化；关闭主窗口会缩到托盘，进程与灵动岛继续运行。本机 Agent 上报仍请使用独立 monitor。'
+                    ? '三类开关决定哪些会话进入灵动岛列表。本机 Agent 上报仍请使用独立 monitor。'
                     : '成功时通知栏会出现「轻芽后台监听」。请允许通知权限；点「后台监测」可重新拉起。演示模式不会启真实后台。',
                 style: TextStyle(
                   fontSize: 11,

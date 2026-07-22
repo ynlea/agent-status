@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/desktop/desktop_platform.dart';
 import '../../data/repo/status_repository.dart';
 import '../../data/repo/usage_repository.dart';
 import '../../domain/models.dart';
@@ -93,6 +94,287 @@ class _UsagePageState extends ConsumerState<UsagePage> {
         (q.machineId != null && machineIds.contains(q.machineId))
             ? q.machineId!
             : '';
+    final desktop = isQingyaDesktop;
+
+    Widget filters() => Row(
+          children: [
+            Expanded(
+              child: _DropdownBox<UsageRangePreset>(
+                label: '日期',
+                value: q.preset,
+                items: [
+                  for (final p in UsageRangePreset.values)
+                    DropdownMenuItem(
+                      value: p,
+                      child: Text(_presetLabel(p)),
+                    ),
+                ],
+                onChanged: (p) async {
+                  if (p == null) return;
+                  if (p == UsageRangePreset.custom) {
+                    await _pickCustom(q);
+                  } else {
+                    await _apply(q.copyWith(preset: p));
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _DropdownBox<String>(
+                label: '设备',
+                value: machineValue,
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('全部设备')),
+                  for (final machine in machines)
+                    DropdownMenuItem(
+                      value: machine.machineId,
+                      child: Text(
+                        machine.machineName,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (v) async {
+                  if (v == null) return;
+                  if (v.isEmpty) {
+                    await _apply(q.copyWith(clearMachine: true));
+                  } else {
+                    await _apply(q.copyWith(machineId: v));
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _DropdownBox<String>(
+                label: '渠道',
+                value: q.agent ?? '',
+                items: const [
+                  DropdownMenuItem(value: '', child: Text('全部渠道')),
+                  DropdownMenuItem(value: 'claude', child: Text('Claude')),
+                  DropdownMenuItem(value: 'codex', child: Text('Codex')),
+                ],
+                onChanged: (v) async {
+                  if (v == null) return;
+                  if (v.isEmpty) {
+                    await _apply(q.copyWith(clearAgent: true));
+                  } else {
+                    await _apply(q.copyWith(agent: v));
+                  }
+                },
+              ),
+            ),
+          ],
+        );
+
+    Widget bodyContent() {
+      if (snap.loading && m == null) {
+        return const Padding(
+          padding: EdgeInsets.all(40),
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+      if (snap.error != null && m == null) {
+        return EmptyState(
+          asset: QingyaAssets.catError,
+          title: '用量加载失败',
+          subtitle: snap.error!,
+        );
+      }
+      if (m == null || m.eventCount == 0) {
+        return const EmptyState(
+          asset: QingyaAssets.catEmptyRest,
+          title: '这段时间还没有用量',
+          subtitle: '确认监控端已开启用量采集并完成同步',
+        );
+      }
+
+      final hero = _CompactHero(
+        realUsage: _fmtInt(m.realUsage),
+        cost: _fmtCost(m.estimatedCostUsd, m.priced),
+        hitRate: _fmtRate(m.cacheHitRate),
+        input: _fmtInt(m.inputTokens),
+        output: _fmtInt(m.outputTotal),
+        cacheHit: _fmtInt(m.cacheHitTokens),
+        events: '${m.eventCount}',
+        dense: desktop,
+      );
+      final note = Text(
+        snap.fromCache
+            ? '费用为估算 · 当前为本地缓存，下拉可强制刷新'
+            : '费用为公开列表价估算，非账单',
+        style: TextStyle(
+          fontSize: 11,
+          color: context.qingya.textSecondary,
+        ),
+      );
+      final heatmap = _ActivityHeatmap(data: snap.heatmap, fmtInt: _fmtInt);
+      final trend = _TrendCard(
+        trend: snap.trend,
+        byHour: q.trendByHour,
+        bucketed: q.trendBucketed,
+        slots: q.trendSlots(),
+        fmtInt: _fmtInt,
+        fmtRate: _fmtRate,
+        fmtCost: _fmtCost,
+      );
+      final detailHeader = Row(
+        children: [
+          Text(
+            '明细',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: context.qingya.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          _GroupByToggle(
+            value: q.groupBy,
+            onChanged: (v) => _apply(q.copyWith(groupBy: v)),
+          ),
+        ],
+      );
+      final groups = snap.breakdown?.groups ?? const <UsageBreakdownGroup>[];
+      final tiles = [
+        for (final g in groups)
+          _CompactTile(
+            group: g,
+            groupBy: q.groupBy,
+            expanded: _expanded.contains(g.key),
+            onToggle: () {
+              setState(() {
+                if (!_expanded.add(g.key)) {
+                  _expanded.remove(g.key);
+                }
+              });
+            },
+            fmtInt: _fmtInt,
+            fmtRate: _fmtRate,
+            fmtCost: _fmtCost,
+          ),
+      ];
+
+      if (!desktop) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            hero,
+            const SizedBox(height: 4),
+            note,
+            const SizedBox(height: 10),
+            heatmap,
+            const SizedBox(height: 10),
+            trend,
+            const SizedBox(height: 10),
+            detailHeader,
+            const SizedBox(height: 8),
+            ...tiles,
+          ],
+        );
+      }
+
+      // 桌面：统计条 + 双栏图表 + 两列明细，控制最大宽度避免被横向拉稀。
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          hero,
+          const SizedBox(height: 6),
+          note,
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: heatmap),
+              const SizedBox(width: 12),
+              Expanded(flex: 6, child: trend),
+            ],
+          ),
+          const SizedBox(height: 14),
+          detailHeader,
+          const SizedBox(height: 8),
+          if (tiles.isEmpty)
+            const SizedBox.shrink()
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final twoCol = constraints.maxWidth >= 720;
+                if (!twoCol) {
+                  return Column(children: tiles);
+                }
+                final left = <Widget>[];
+                final right = <Widget>[];
+                for (var i = 0; i < tiles.length; i++) {
+                  (i.isEven ? left : right).add(tiles[i]);
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: Column(children: left)),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(children: right)),
+                  ],
+                );
+              },
+            ),
+        ],
+      );
+    }
+
+    final list = ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        desktop ? 18 : 12,
+        desktop ? 12 : 8,
+        desktop ? 18 : 12,
+        20,
+      ),
+      children: [
+        Row(
+          children: [
+            Text(
+              'Token 用量',
+              style: TextStyle(
+                fontSize: desktop ? 22 : 20,
+                fontWeight: FontWeight.w800,
+                color: context.qingya.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            if (snap.fromCache)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '缓存',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: context.qingya.textSecondary,
+                  ),
+                ),
+              ),
+            if (snap.loading)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (desktop)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: filters(),
+          )
+        else
+          filters(),
+        const SizedBox(height: 12),
+        bodyContent(),
+      ],
+    );
 
     return Scaffold(
       backgroundColor: context.qingya.scaffold,
@@ -103,207 +385,17 @@ class _UsagePageState extends ConsumerState<UsagePage> {
           onRefresh: () => ref
               .read(usageRepositoryProvider.notifier)
               .refresh(forceNetwork: true),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Token 用量',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: context.qingya.textPrimary,
+          child: desktop
+              ? Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: kDesktopUsageMaxWidth,
                     ),
+                    child: list,
                   ),
-                  const Spacer(),
-                  if (snap.fromCache)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Text(
-                        '缓存',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.qingya.textSecondary,
-                        ),
-                      ),
-                    ),
-                  if (snap.loading)
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // 筛选：日期 / 设备 / 渠道 同一行
-              Row(
-                children: [
-                  Expanded(
-                    child: _DropdownBox<UsageRangePreset>(
-                      label: '日期',
-                      value: q.preset,
-                      items: [
-                        for (final p in UsageRangePreset.values)
-                          DropdownMenuItem(
-                            value: p,
-                            child: Text(_presetLabel(p)),
-                          ),
-                      ],
-                      onChanged: (p) async {
-                        if (p == null) return;
-                        if (p == UsageRangePreset.custom) {
-                          await _pickCustom(q);
-                        } else {
-                          await _apply(q.copyWith(preset: p));
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: _DropdownBox<String>(
-                      label: '设备',
-                      value: machineValue,
-                      items: [
-                        const DropdownMenuItem(value: '', child: Text('全部设备')),
-                        for (final machine in machines)
-                          DropdownMenuItem(
-                            value: machine.machineId,
-                            child: Text(
-                              machine.machineName,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (v) async {
-                        if (v == null) return;
-                        if (v.isEmpty) {
-                          await _apply(q.copyWith(clearMachine: true));
-                        } else {
-                          await _apply(q.copyWith(machineId: v));
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: _DropdownBox<String>(
-                      label: '渠道',
-                      value: q.agent ?? '',
-                      items: const [
-                        DropdownMenuItem(value: '', child: Text('全部渠道')),
-                        DropdownMenuItem(value: 'claude', child: Text('Claude')),
-                        DropdownMenuItem(value: 'codex', child: Text('Codex')),
-                      ],
-                      onChanged: (v) async {
-                        if (v == null) return;
-                        if (v.isEmpty) {
-                          await _apply(q.copyWith(clearAgent: true));
-                        } else {
-                          await _apply(q.copyWith(agent: v));
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (snap.loading && m == null)
-                const Padding(
-                  padding: EdgeInsets.all(40),
-                  child: Center(child: CircularProgressIndicator()),
                 )
-              else if (snap.error != null && m == null)
-                EmptyState(
-                  asset: QingyaAssets.catError,
-                  title: '用量加载失败',
-                  subtitle: snap.error!,
-                )
-              else if (m == null || m.eventCount == 0)
-                const EmptyState(
-                  asset: QingyaAssets.catEmptyRest,
-                  title: '这段时间还没有用量',
-                  subtitle: '确认监控端已开启用量采集并完成同步',
-                )
-              else ...[
-                _CompactHero(
-                  realUsage: _fmtInt(m.realUsage),
-                  cost: _fmtCost(m.estimatedCostUsd, m.priced),
-                  hitRate: _fmtRate(m.cacheHitRate),
-                  input: _fmtInt(m.inputTokens),
-                  output: _fmtInt(m.outputTotal),
-                  cacheHit: _fmtInt(m.cacheHitTokens),
-                  events: '${m.eventCount}',
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  snap.fromCache
-                      ? '费用为估算 · 当前为本地缓存，下拉可强制刷新'
-                      : '费用为公开列表价估算，非账单',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: context.qingya.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _ActivityHeatmap(
-                  data: snap.heatmap,
-                  fmtInt: _fmtInt,
-                ),
-                const SizedBox(height: 10),
-                _TrendCard(
-                  trend: snap.trend,
-                  byHour: q.trendByHour,
-                  bucketed: q.trendBucketed,
-                  slots: q.trendSlots(),
-                  fmtInt: _fmtInt,
-                  fmtRate: _fmtRate,
-                  fmtCost: _fmtCost,
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Text(
-                      '明细',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: context.qingya.textPrimary,
-                      ),
-                    ),
-                    const Spacer(),
-                    _GroupByToggle(
-                      value: q.groupBy,
-                      onChanged: (v) => _apply(q.copyWith(groupBy: v)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                for (final g
-                    in snap.breakdown?.groups ?? const <UsageBreakdownGroup>[])
-                  _CompactTile(
-                    group: g,
-                    groupBy: q.groupBy,
-                    expanded: _expanded.contains(g.key),
-                    onToggle: () {
-                      setState(() {
-                        if (!_expanded.add(g.key)) {
-                          _expanded.remove(g.key);
-                        }
-                      });
-                    },
-                    fmtInt: _fmtInt,
-                    fmtRate: _fmtRate,
-                    fmtCost: _fmtCost,
-                  ),
-              ],
-            ],
-          ),
+              : list,
         ),
       ),
     );
@@ -526,6 +618,7 @@ class _CompactHero extends StatelessWidget {
     required this.output,
     required this.cacheHit,
     required this.events,
+    this.dense = false,
   });
 
   final String realUsage;
@@ -535,26 +628,85 @@ class _CompactHero extends StatelessWidget {
   final String output;
   final String cacheHit;
   final String events;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.qingya;
+    if (dense) {
+      // 桌面：一行 7 个指标，信息更密，不纵向撑开。
+      final cells = <(String, String, Color?, Color?)>[
+        ('真实用量', realUsage, null, null),
+        ('估算费用', cost, c.device, null),
+        ('命中率', hitRate, null, null),
+        ('输入', input, c.device, c.deviceSoft),
+        ('输出', output, c.working, c.workingSoft),
+        ('缓存', cacheHit, c.done, c.doneSoft),
+        ('事件', events, c.textSecondary, c.idleSoft),
+      ];
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          children: [
+            for (var i = 0; i < cells.length; i++) ...[
+              if (i > 0)
+                Container(width: 1, height: 34, color: c.divider),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Column(
+                    children: [
+                      Text(
+                        cells[i].$1,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: c.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        cells[i].$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: cells[i].$3 ?? c.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
-        color: context.qingya.card,
+        color: c.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.qingya.border),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         children: [
           Row(
             children: [
               Expanded(child: _BigStat(label: '真实用量', value: realUsage)),
-              Container(width: 1, height: 36, color: context.qingya.divider),
+              Container(width: 1, height: 36, color: c.divider),
               Expanded(
                 child: _BigStat(label: '估算费用', value: cost, accent: true),
               ),
-              Container(width: 1, height: 36, color: context.qingya.divider),
+              Container(width: 1, height: 36, color: c.divider),
               Expanded(child: _BigStat(label: '命中率', value: hitRate)),
             ],
           ),
@@ -564,26 +716,26 @@ class _CompactHero extends StatelessWidget {
               _SmallStat(
                 label: '输入',
                 value: input,
-                bg: context.qingya.deviceSoft,
-                fg: context.qingya.device,
+                bg: c.deviceSoft,
+                fg: c.device,
               ),
               _SmallStat(
                 label: '输出',
                 value: output,
-                bg: context.qingya.workingSoft,
-                fg: context.qingya.working,
+                bg: c.workingSoft,
+                fg: c.working,
               ),
               _SmallStat(
                 label: '缓存',
                 value: cacheHit,
-                bg: context.qingya.doneSoft,
-                fg: context.qingya.done,
+                bg: c.doneSoft,
+                fg: c.done,
               ),
               _SmallStat(
                 label: '事件',
                 value: events,
-                bg: context.qingya.idleSoft,
-                fg: context.qingya.textSecondary,
+                bg: c.idleSoft,
+                fg: c.textSecondary,
               ),
             ],
           ),

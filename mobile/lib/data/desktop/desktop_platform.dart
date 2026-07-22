@@ -12,13 +12,26 @@ bool get isQingyaDesktop {
 const double kDesktopMasterDetailBreakpoint = 900;
 
 /// 默认主窗尺寸。
-const double kDesktopDefaultWidth = 1100;
-const double kDesktopDefaultHeight = 720;
-const double kDesktopMinWidth = 880;
-const double kDesktopMinHeight = 600;
+const double kDesktopDefaultWidth = 1180;
+const double kDesktopDefaultHeight = 760;
+const double kDesktopMinWidth = 920;
+const double kDesktopMinHeight = 620;
 
-/// 灵动岛胶囊默认尺寸。
-const double kIslandCapsuleWidth = 320;
-const double kIslandCapsuleHeight = 48;
-const double kIslandExpandedWidth = 420;
-const double kIslandExpandedHeight = 88;
+/// 用量页桌面内容最大宽。
+const double kDesktopUsageMaxWidth = 1120;
+
+/// 灵动岛：贴顶细条 / 悬停胶囊 / 展开卡片。
+const double kIslandStripWidth = 96;
+const double kIslandStripHeight = 12;
+const double kIslandHoverWidth = 300;
+const double kIslandHoverHeight = 48;
+const double kIslandCardWidth = 360;
+const double kIslandCardHeightEmpty = 168;
+const double kIslandCardHeightList = 280;
+const double kIslandTopGap = 6;
+
+/// 兼容旧命名（避免遗漏引用）。
+const double kIslandCapsuleWidth = kIslandHoverWidth;
+const double kIslandCapsuleHeight = kIslandHoverHeight;
+const double kIslandExpandedWidth = kIslandCardWidth;
+const double kIslandExpandedHeight = kIslandCardHeightList;

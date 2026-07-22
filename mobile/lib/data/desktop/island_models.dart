@@ -1,15 +1,18 @@
 import '../../domain/models.dart';
 
-/// 灵动岛展示状态。
+/// 灵动岛展示形态。
 enum IslandPhase {
-  /// 无目标会话：不显示
+  /// 功能关闭
   hidden,
 
-  /// 有会话：顶栏胶囊
-  capsule,
+  /// 贴顶细条（默认收起）
+  strip,
 
-  /// 变化后展开详情
-  expanded,
+  /// 鼠标悬停临时展开
+  hover,
+
+  /// 点击后常驻卡片
+  card,
 }
 
 /// 从活跃会话 + 通知开关派生的岛视图模型。
@@ -21,6 +24,8 @@ class IslandViewModel {
     this.badgeCount = 0,
     this.headline = '',
     this.subtitle = '',
+    this.pinned = false,
+    this.enabled = true,
   });
 
   final List<Session> sessions;
@@ -30,7 +35,15 @@ class IslandViewModel {
   final String headline;
   final String subtitle;
 
-  bool get isVisible => phase != IslandPhase.hidden && sessions.isNotEmpty;
+  /// 是否由用户点击钉住展开。
+  final bool pinned;
+
+  /// 设置项：灵动岛总开关。
+  final bool enabled;
+
+  bool get isVisible => enabled && phase != IslandPhase.hidden;
+
+  bool get hasSessions => sessions.isNotEmpty;
 
   String sessionRoute(Session s) =>
       '/sessions/${s.machineId}/${s.agent}/${Uri.encodeComponent(s.sessionId)}';
@@ -42,14 +55,19 @@ class IslandViewModel {
     int? badgeCount,
     String? headline,
     String? subtitle,
+    bool? pinned,
+    bool? enabled,
+    bool clearPrimary = false,
   }) {
     return IslandViewModel(
       sessions: sessions ?? this.sessions,
       phase: phase ?? this.phase,
-      primary: primary ?? this.primary,
+      primary: clearPrimary ? null : (primary ?? this.primary),
       badgeCount: badgeCount ?? this.badgeCount,
       headline: headline ?? this.headline,
       subtitle: subtitle ?? this.subtitle,
+      pinned: pinned ?? this.pinned,
+      enabled: enabled ?? this.enabled,
     );
   }
 
@@ -73,10 +91,23 @@ class IslandViewModel {
 
   static IslandViewModel fromSessions(
     List<Session> filtered, {
-    IslandPhase phase = IslandPhase.capsule,
+    IslandPhase phase = IslandPhase.strip,
+    bool pinned = false,
+    bool enabled = true,
   }) {
+    if (!enabled) {
+      return const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
+    }
     if (filtered.isEmpty) {
-      return const IslandViewModel();
+      return IslandViewModel(
+        phase: phase == IslandPhase.card || phase == IslandPhase.hover
+            ? phase
+            : IslandPhase.strip,
+        pinned: pinned,
+        enabled: true,
+        headline: '轻芽',
+        subtitle: '暂无活跃会话',
+      );
     }
     final primary = filtered.first;
     final n = filtered.length;
@@ -96,11 +127,13 @@ class IslandViewModel {
       badgeCount: n,
       headline: headline,
       subtitle: subtitle,
+      pinned: pinned,
+      enabled: true,
     );
   }
 
-  /// 判断过滤结果是否相对上一拍「需要展开」（新增或状态升级到 confirm）。
-  static bool shouldExpand({
+  /// 判断过滤结果是否相对上一拍「需要提示展开」（新增或状态升级到 confirm）。
+  static bool shouldNudge({
     required List<Session> previous,
     required List<Session> next,
   }) {
@@ -119,6 +152,13 @@ class IslandViewModel {
     }
     return false;
   }
+
+  /// 兼容旧测试命名。
+  static bool shouldExpand({
+    required List<Session> previous,
+    required List<Session> next,
+  }) =>
+      shouldNudge(previous: previous, next: next);
 
   static String _key(Session s) =>
       '${s.machineId}|${s.agent}|${s.sessionId}';

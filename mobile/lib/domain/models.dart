@@ -229,6 +229,7 @@ class AppSettings {
     this.notifyDone = true,
     this.demoMode = false,
     this.themeMode = AppThemeMode.system,
+    this.islandEnabled = true,
   });
 
   final String baseUrl;
@@ -238,6 +239,9 @@ class AppSettings {
   final bool notifyDone;
   final bool demoMode;
   final AppThemeMode themeMode;
+
+  /// Windows 灵动岛总开关。
+  final bool islandEnabled;
 
   bool get isConfigured =>
       demoMode || (baseUrl.trim().isNotEmpty && apiKey.trim().isNotEmpty);
@@ -250,6 +254,7 @@ class AppSettings {
     bool? notifyDone,
     bool? demoMode,
     AppThemeMode? themeMode,
+    bool? islandEnabled,
   }) {
     return AppSettings(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -259,6 +264,7 @@ class AppSettings {
       notifyDone: notifyDone ?? this.notifyDone,
       demoMode: demoMode ?? this.demoMode,
       themeMode: themeMode ?? this.themeMode,
+      islandEnabled: islandEnabled ?? this.islandEnabled,
     );
   }
 }

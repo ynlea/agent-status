@@ -36,7 +36,7 @@ void main() {
     expect(filtered.map((e) => e.sessionId).toList(), ['1', '3']);
   });
 
-  test('shouldExpand on new session or upgrade to confirm', () {
+  test('shouldExpand/shouldNudge on new session or upgrade to confirm', () {
     final prev = [_s(id: '1', state: SessionState.working)];
     final nextNew = [
       _s(id: '1', state: SessionState.working),
@@ -60,7 +60,7 @@ void main() {
     );
   });
 
-  test('fromSessions builds capsule summary', () {
+  test('fromSessions builds summary; empty still visible when strip', () {
     final vm = IslandViewModel.fromSessions([
       _s(id: '1', state: SessionState.confirm, message: 'need ok'),
       _s(id: '2', state: SessionState.working),
@@ -69,5 +69,22 @@ void main() {
     expect(vm.badgeCount, 2);
     expect(vm.primary?.sessionId, '1');
     expect(vm.headline, contains('另有'));
+
+    final empty = IslandViewModel.fromSessions(
+      const [],
+      phase: IslandPhase.strip,
+    );
+    expect(empty.enabled, isTrue);
+    expect(empty.phase, IslandPhase.strip);
+    expect(empty.isVisible, isTrue);
+  });
+
+  test('disabled island is hidden', () {
+    final vm = IslandViewModel.fromSessions(
+      [_s(id: '1', state: SessionState.confirm)],
+      enabled: false,
+    );
+    expect(vm.isVisible, isFalse);
+    expect(vm.phase, IslandPhase.hidden);
   });
 }
