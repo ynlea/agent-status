@@ -7,7 +7,7 @@ import '../../data/desktop/desktop_platform.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 
-/// 自定义标题栏：拖拽、最小化、最大化、关闭（走 preventClose → 托盘）。
+/// 自定义标题栏：固定布局，悬停只改颜色不改尺寸。
 class DesktopTitleBar extends StatefulWidget {
   const DesktopTitleBar({super.key});
 
@@ -38,8 +38,10 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
   }
 
   Future<void> _syncMax() async {
-    final m = await windowManager.isMaximized();
-    if (mounted) setState(() => _maximized = m);
+    try {
+      final m = await windowManager.isMaximized();
+      if (mounted) setState(() => _maximized = m);
+    } catch (_) {}
   }
 
   @override
@@ -58,37 +60,48 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
 
     return Material(
       color: c.card,
-      child: SizedBox(
+      elevation: 0,
+      child: Container(
         height: DesktopTitleBar.height,
+        decoration: BoxDecoration(
+          color: c.card,
+          border: Border(
+            bottom: BorderSide(color: c.border.withValues(alpha: 0.85)),
+          ),
+        ),
         child: Row(
           children: [
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onPanStart: (_) => windowManager.startDragging(),
+                onPanStart: (_) {
+                  unawaited(windowManager.startDragging());
+                },
                 onDoubleTap: () async {
-                  if (await windowManager.isMaximized()) {
-                    await windowManager.unmaximize();
-                  } else {
-                    await windowManager.maximize();
-                  }
+                  try {
+                    if (await windowManager.isMaximized()) {
+                      await windowManager.unmaximize();
+                    } else {
+                      await windowManager.maximize();
+                    }
+                  } catch (_) {}
                 },
                 child: Padding(
                   padding: const EdgeInsets.only(left: 12),
                   child: Row(
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(5),
                         child: Image.asset(
                           QingyaAssets.catAppIcon,
-                          width: 18,
-                          height: 18,
+                          width: 16,
+                          height: 16,
                           fit: BoxFit.cover,
                           filterQuality: FilterQuality.high,
                           errorBuilder: (_, __, ___) => Image.asset(
                             QingyaAssets.catBrandAvatarV3,
-                            width: 18,
-                            height: 18,
+                            width: 16,
+                            height: 16,
                           ),
                         ),
                       ),
@@ -99,18 +112,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: c.textPrimary,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'QINGYA',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.8,
-                          color: c.textSecondary,
-                          height: 1.1,
+                          height: 1,
                         ),
                       ),
                     ],
@@ -118,31 +120,29 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
                 ),
               ),
             ),
-            _TitleBtn(
+            _CaptionButton(
               icon: Icons.remove_rounded,
-              tooltip: '最小化',
-              onTap: () => windowManager.minimize(),
+              onTap: () => unawaited(windowManager.minimize()),
             ),
-            _TitleBtn(
+            _CaptionButton(
+              // 固定同一套图标字号，避免悬停/最大化切换导致视觉跳动
               icon: _maximized
-                  ? Icons.filter_none_rounded
+                  ? Icons.fullscreen_exit_rounded
                   : Icons.crop_square_rounded,
-              tooltip: _maximized ? '还原' : '最大化',
-              iconSize: _maximized ? 12 : 14,
               onTap: () async {
-                if (await windowManager.isMaximized()) {
-                  await windowManager.unmaximize();
-                } else {
-                  await windowManager.maximize();
-                }
+                try {
+                  if (await windowManager.isMaximized()) {
+                    await windowManager.unmaximize();
+                  } else {
+                    await windowManager.maximize();
+                  }
+                } catch (_) {}
               },
             ),
-            _TitleBtn(
+            _CaptionButton(
               icon: Icons.close_rounded,
-              tooltip: '关闭',
-              hoverColor: const Color(0xFFE81123),
-              hoverFg: Colors.white,
-              onTap: () => windowManager.close(), // preventClose → 托盘
+              isClose: true,
+              onTap: () => unawaited(windowManager.close()),
             ),
           ],
         ),
@@ -151,57 +151,59 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
   }
 }
 
-class _TitleBtn extends StatefulWidget {
-  const _TitleBtn({
+class _CaptionButton extends StatefulWidget {
+  const _CaptionButton({
     required this.icon,
     required this.onTap,
-    this.tooltip,
-    this.iconSize = 16,
-    this.hoverColor,
-    this.hoverFg,
+    this.isClose = false,
   });
 
   final IconData icon;
   final VoidCallback onTap;
-  final String? tooltip;
-  final double iconSize;
-  final Color? hoverColor;
-  final Color? hoverFg;
+  final bool isClose;
 
   @override
-  State<_TitleBtn> createState() => _TitleBtnState();
+  State<_CaptionButton> createState() => _CaptionButtonState();
 }
 
-class _TitleBtnState extends State<_TitleBtn> {
+class _CaptionButtonState extends State<_CaptionButton> {
   bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
-    final bg = _hover
-        ? (widget.hoverColor ?? c.primarySoft.withValues(alpha: 0.7))
-        : Colors.transparent;
-    final fg = _hover
-        ? (widget.hoverFg ?? c.textPrimary)
-        : c.textSecondary;
+    final Color bg;
+    final Color fg;
+    if (_hover) {
+      bg = widget.isClose ? const Color(0xFFE81123) : c.primarySoft;
+      fg = widget.isClose ? Colors.white : c.textPrimary;
+    } else {
+      bg = Colors.transparent;
+      fg = c.textSecondary;
+    }
 
-    final btn = MouseRegion(
+    return MouseRegion(
+      cursor: SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 80),
+        child: SizedBox(
           width: 46,
           height: DesktopTitleBar.height,
-          color: bg,
-          alignment: Alignment.center,
-          child: Icon(widget.icon, size: widget.iconSize, color: fg),
+          child: ColoredBox(
+            color: bg,
+            child: Center(
+              child: Icon(
+                widget.icon,
+                size: 16,
+                color: fg,
+              ),
+            ),
+          ),
         ),
       ),
     );
-
-    if (widget.tooltip == null) return btn;
-    return Tooltip(message: widget.tooltip!, waitDuration: const Duration(milliseconds: 400), child: btn);
   }
 }

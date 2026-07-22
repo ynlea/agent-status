@@ -1,7 +1,7 @@
 name: qingya
 description: 轻芽 — Agent 状态监控客户端
 publish_to: "none"
-version: 0.1.16+39
+version: 0.1.16+40
 
 environment:
   sdk: ^3.5.0
@@ -23,8 +23,6 @@ dependencies:
   window_manager: ^0.5.2
   tray_manager: ^0.5.3
   screen_retriever: ^0.2.2
-  desktop_multi_window: ^0.3.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

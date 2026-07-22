@@ -287,9 +287,56 @@ class QingyaTheme {
 
   static ThemeData _build(Brightness brightness, QingyaPalette p) {
     final isLight = brightness == Brightness.light;
-    // Windows 桌面优先系统 UI 字体（ClearType 更清晰）；移动端保留 Noto 回退。
+    // Windows 桌面：系统 UI 字体 + 禁用可变字体回退，减轻混排发糊。
     final desktop = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.windows);
+    // 优先雅黑 UI（中英一体、配合系统 ClearType 观感更好）
+    const winFont = 'Microsoft YaHei UI';
+    const winFallback = <String>[
+      'Microsoft YaHei',
+      'Segoe UI',
+      'PingFang SC',
+      'Noto Sans CJK SC',
+    ];
+
+    TextStyle winText(
+      double size, {
+      FontWeight weight = FontWeight.w400,
+      Color? color,
+      double height = 1.35,
+      double? letterSpacing,
+    }) {
+      return TextStyle(
+        fontFamily: desktop ? winFont : null,
+        fontFamilyFallback: desktop ? winFallback : null,
+        fontSize: size,
+        fontWeight: weight,
+        color: color ?? p.textPrimary,
+        height: height,
+        letterSpacing: letterSpacing,
+        // 避免过度装饰导致栅格化更软
+        decoration: TextDecoration.none,
+      );
+    }
+
+    final textTheme = TextTheme(
+      displayLarge: winText(28, weight: FontWeight.w700, height: 1.25),
+      displayMedium: winText(24, weight: FontWeight.w700, height: 1.25),
+      displaySmall: winText(22, weight: FontWeight.w700, height: 1.3),
+      headlineLarge: winText(22, weight: FontWeight.w700, height: 1.3),
+      headlineMedium: winText(20, weight: FontWeight.w700, height: 1.3),
+      headlineSmall: winText(18, weight: FontWeight.w700, height: 1.3),
+      titleLarge: winText(17, weight: FontWeight.w700, height: 1.3),
+      titleMedium: winText(15, weight: FontWeight.w600, height: 1.35),
+      titleSmall: winText(13, weight: FontWeight.w600, height: 1.35),
+      bodyLarge: winText(15, height: 1.4),
+      bodyMedium: winText(14, height: 1.4),
+      bodySmall: winText(12, color: p.textSecondary, height: 1.35),
+      labelLarge: winText(13, weight: FontWeight.w600, height: 1.3),
+      labelMedium: winText(12, weight: FontWeight.w600, height: 1.3),
+      labelSmall: winText(11, weight: FontWeight.w500, height: 1.3),
+    );
+
     final base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
@@ -305,16 +352,14 @@ class QingyaTheme {
         onError: Colors.white,
       ),
       scaffoldBackgroundColor: p.scaffold,
-      fontFamily: desktop ? 'Microsoft YaHei UI' : null,
+      fontFamily: desktop ? winFont : null,
       fontFamilyFallback: desktop
-          ? const [
-              'Microsoft YaHei',
-              'Segoe UI',
-              'Segoe UI Variable',
-              'PingFang SC',
-              'Noto Sans CJK SC',
-            ]
+          ? winFallback
           : const ['Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC'],
+      textTheme: textTheme,
+      primaryTextTheme: textTheme,
+      visualDensity: VisualDensity.standard,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       extensions: [p],
     );
 
@@ -325,11 +370,7 @@ class QingyaTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: p.textPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-        ),
+        titleTextStyle: winText(20, weight: FontWeight.w700, height: 1.25),
       ),
       iconTheme: IconThemeData(color: p.textPrimary),
       primaryIconTheme: IconThemeData(color: p.device),
@@ -480,7 +521,13 @@ class QingyaTintIcon extends StatelessWidget {
     final tint = color ?? context.qingya.textSecondary;
     return ColorFiltered(
       colorFilter: ColorFilter.mode(tint, BlendMode.srcIn),
-      child: Image.asset(asset, width: size, height: size),
+      child: Image.asset(
+        asset,
+        width: size,
+        height: size,
+        filterQuality: FilterQuality.high,
+        isAntiAlias: true,
+      ),
     );
   }
 }

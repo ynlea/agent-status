@@ -2,6 +2,8 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <cstdlib>
+
 #include "flutter_window.h"
 #include "utils.h"
 
@@ -13,6 +15,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // 在任何窗口创建前声明 Per-Monitor V2，避免高分屏被位图拉伸发糊。
   ::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+  // Windows 上 Impeller 文字常比 Skia 更糊；发版默认关 Impeller（可用环境变量覆盖）。
+  // 参见 flutter/flutter#165761 等。
+  _putenv_s("FLUTTER_ENGINE_SWITCHES", "1");
+  _putenv_s("FLUTTER_ENGINE_SWITCH_1", "enable-impeller=false");
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

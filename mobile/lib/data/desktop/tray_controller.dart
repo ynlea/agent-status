@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:desktop_multi_window/desktop_multi_window.dart' as dmw;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,7 +7,6 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop_platform.dart';
-import 'island_window_bridge.dart';
 import 'window_controller.dart';
 
 /// 系统托盘：显示主窗口 / 退出。Windows 必须使用 .ico。
@@ -108,15 +106,6 @@ class TrayController with TrayListener {
 
   Future<void> quit() async {
     await dispose();
-    try {
-      await IslandWindowBridge.instance.destroy();
-      final all = await dmw.WindowController.getAll();
-      for (final w in all) {
-        if (w.arguments == kIslandWindowArgument) {
-          await w.hide();
-        }
-      }
-    } catch (_) {}
     await QingyaWindowController.instance.quitApp();
     exit(0);
   }

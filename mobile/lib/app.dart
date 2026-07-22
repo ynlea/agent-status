@@ -197,9 +197,18 @@ class QingyaApp extends ConsumerWidget {
       },
       routerConfig: router,
       builder: (context, child) {
-        return DesktopHost(
+        // Windows：避免异常 text scale 把字形栅格拉糊；仍尊重 1.0 附近系统缩放。
+        final mq = MediaQuery.of(context);
+        final scale = mq.textScaler.scale(14) / 14.0;
+        final clamped = scale.clamp(0.9, 1.25);
+        final content = DesktopHost(
           onOpenSession: (session) => _openSession(ref, session),
           child: child ?? const SizedBox.shrink(),
+        );
+        if (clamped == scale) return content;
+        return MediaQuery(
+          data: mq.copyWith(textScaler: TextScaler.linear(clamped)),
+          child: content,
         );
       },
     );

@@ -15,6 +15,10 @@ Set-Location "$PSScriptRoot\.."
 Write-Host "flutter pub get"
 flutter pub get
 
+# Impeller 在部分 Windows 显示器上文字更糊；runner 内也会默认关闭。
+$env:FLUTTER_ENGINE_SWITCHES = "1"
+$env:FLUTTER_ENGINE_SWITCH_1 = "enable-impeller=false"
+
 Write-Host "flutter build windows --release"
 flutter build windows --release
 

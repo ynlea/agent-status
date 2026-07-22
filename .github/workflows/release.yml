@@ -160,6 +160,9 @@ jobs:
       - name: Build Windows release
         env:
           BUILD_NO: ${{ github.run_number }}
+          # 与 runner main.cpp 一致：默认关 Impeller，减轻 Windows 字体发糊
+          FLUTTER_ENGINE_SWITCHES: "1"
+          FLUTTER_ENGINE_SWITCH_1: "enable-impeller=false"
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"

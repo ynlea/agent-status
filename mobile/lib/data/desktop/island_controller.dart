@@ -8,12 +8,15 @@ import '../prefs/settings_store.dart';
 import '../repo/status_repository.dart';
 import 'desktop_platform.dart';
 import 'island_models.dart';
-import 'island_window_bridge.dart';
+import 'island_native_bridge.dart';
 
-/// 主进程灵动岛状态：推送到独立吸顶子窗；处理变更播报队列。
+/// 主引擎岛状态：推送到原生置顶分层岛窗，动画在岛引擎内完成。
 class IslandController extends StateNotifier<IslandViewModel> {
   IslandController(this._ref) : super(const IslandViewModel()) {
     if (!isQingyaDesktop) return;
+    unawaited(IslandNativeBridge.instance.bind());
+    unawaited(IslandNativeBridge.instance.ensure());
+
     _ref.listen<StatusSnapshot>(statusRepositoryProvider, (prev, next) {
       _recompute(
         previousSessions: prev?.sessions ?? _lastAllSessions,
@@ -23,7 +26,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
     _ref.listen<AppSettings>(settingsProvider, (_, __) {
       _recompute(previousSessions: _lastAllSessions, nudge: false);
     });
-    unawaited(IslandWindowBridge.instance.ensureCreated());
+
+    _subs.add(IslandNativeBridge.instance.announcementDone$.listen((_) {
+      onAnnouncementFinished();
+    }));
+
     _recompute(previousSessions: const [], nudge: false);
   }
 
@@ -31,8 +38,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
   List<Session> _lastAllSessions = const [];
   final Queue<IslandAnnouncement> _announceQueue = Queue();
   Timer? _collapseTimer;
-  bool _hovering = false;
   bool _playingAnnouncement = false;
+  final List<StreamSubscription<dynamic>> _subs = [];
 
   void _recompute({
     required List<Session> previousSessions,
@@ -53,84 +60,71 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
     if (!enabled) {
       _collapseTimer?.cancel();
-      _hovering = false;
       _announceQueue.clear();
       _playingAnnouncement = false;
       state = const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
-      unawaited(IslandWindowBridge.instance.pushState(state));
+      unawaited(IslandNativeBridge.instance.sync(state));
       return;
     }
 
-    // 用全量 sessions 做 diff，避免 done 被 active 列表挤掉时漏通知
-    final prevForDiff = previousSessions.isEmpty ? _lastAllSessions : previousSessions;
-    // 第一次只有当前拍时用 filtered 对比
+    final prevForDiff =
+        previousSessions.isEmpty ? _lastAllSessions : previousSessions;
     final announcements = IslandViewModel.diffAnnouncements(
-      previous: _sessionsSnapshot(prevForDiff),
+      previous: List.of(prevForDiff),
       next: all,
       notifyConfirm: settings.notifyConfirm,
       notifyWorking: settings.notifyWorking,
       notifyDone: settings.notifyDone,
     );
 
-    // 仅在 nudge（状态源变化）时入队，避免设置改动重复播报
     if (nudge) {
       for (final a in announcements) {
-        // 去重同 key+state
         final exists = _announceQueue.any(
           (e) => e.sessionKey == a.sessionKey && e.state == a.state,
         );
-        if (!exists &&
-            state.announcement?.sessionKey == a.sessionKey &&
-            state.announcement?.state == a.state) {
-          continue;
-        }
-        if (!exists) _announceQueue.add(a);
+        final samePlaying = state.announcement?.sessionKey == a.sessionKey &&
+            state.announcement?.state == a.state;
+        if (!exists && !samePlaying) _announceQueue.add(a);
       }
     }
-
-    var phase = state.phase;
-    var pinned = state.pinned;
-    if (phase == IslandPhase.hidden) phase = IslandPhase.strip;
 
     if (_playingAnnouncement || _announceQueue.isNotEmpty) {
       if (!_playingAnnouncement && _announceQueue.isNotEmpty) {
         _playNextAnnouncement(filtered, snapshot.connected);
         return;
       }
-    } else {
-      if (_hovering && !pinned) {
-        phase = IslandPhase.hover;
-      } else if (pinned) {
-        phase = IslandPhase.card;
-      } else {
-        phase = IslandPhase.strip;
-      }
+    }
+
+    // 岛窗内本地处理 hover；主状态默认 strip，播报/钉住除外
+    var phase = IslandPhase.strip;
+    if (_playingAnnouncement && state.announcement != null) {
+      phase = IslandPhase.card;
+    } else if (state.pinned) {
+      phase = IslandPhase.card;
     }
 
     state = IslandViewModel.fromSessions(
       filtered,
       phase: phase,
-      pinned: pinned,
+      pinned: state.pinned,
       enabled: true,
       announcement: state.announcement,
       connected: snapshot.connected,
     );
-    unawaited(IslandWindowBridge.instance.pushState(state));
+    unawaited(IslandNativeBridge.instance.sync(state));
   }
-
-  List<Session> _sessionsSnapshot(List<Session> list) => List.of(list);
 
   void _playNextAnnouncement(List<Session> filtered, bool connected) {
     if (_announceQueue.isEmpty) {
       _playingAnnouncement = false;
       state = IslandViewModel.fromSessions(
         filtered,
-        phase: _hovering ? IslandPhase.hover : IslandPhase.strip,
+        phase: IslandPhase.strip,
         pinned: false,
         enabled: true,
         connected: connected,
       );
-      unawaited(IslandWindowBridge.instance.pushState(state));
+      unawaited(IslandNativeBridge.instance.sync(state));
       return;
     }
     _playingAnnouncement = true;
@@ -143,12 +137,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
       announcement: ann,
       connected: connected,
     );
-    unawaited(IslandWindowBridge.instance.pushState(state));
-    // 跑马灯结束后由 UI 回调 onAnnouncementFinished；这里兜底 12s
+    unawaited(IslandNativeBridge.instance.sync(state));
     _collapseTimer?.cancel();
-    _collapseTimer = Timer(const Duration(seconds: 12), () {
-      onAnnouncementFinished();
-    });
+    _collapseTimer = Timer(const Duration(seconds: 12), onAnnouncementFinished);
   }
 
   void onAnnouncementFinished() {
@@ -168,94 +159,61 @@ class IslandController extends StateNotifier<IslandViewModel> {
     _playingAnnouncement = false;
     state = IslandViewModel.fromSessions(
       filtered,
-      phase: _hovering ? IslandPhase.hover : IslandPhase.strip,
+      phase: state.pinned ? IslandPhase.card : IslandPhase.strip,
       pinned: state.pinned,
       enabled: true,
       connected: snapshot.connected,
     );
-    unawaited(IslandWindowBridge.instance.pushState(state));
-    if (state.pinned) _scheduleCollapse();
+    unawaited(IslandNativeBridge.instance.sync(state));
   }
 
-  void _scheduleCollapse() {
-    _collapseTimer?.cancel();
-    _collapseTimer = Timer(const Duration(seconds: 10), () {
-      if (!state.enabled) return;
-      if (_hovering || _playingAnnouncement) {
-        _scheduleCollapse();
-        return;
-      }
-      if (state.phase == IslandPhase.card || state.phase == IslandPhase.hover) {
-        collapse();
-      }
-    });
-  }
-
-  void onHoverEnter() {
-    if (!state.enabled || _playingAnnouncement) return;
-    _hovering = true;
-    if (state.pinned) return;
-    state = state.copyWith(phase: IslandPhase.hover);
-    _collapseTimer?.cancel();
-    unawaited(IslandWindowBridge.instance.pushState(state));
-  }
-
-  void onHoverExit() {
-    if (!state.enabled || _playingAnnouncement) return;
-    _hovering = false;
-    if (state.pinned) {
-      _scheduleCollapse();
-      return;
-    }
-    state = state.copyWith(phase: IslandPhase.strip, pinned: false);
-    unawaited(IslandWindowBridge.instance.pushState(state));
-  }
-
+  // 岛窗内本地 hover/tap；主侧保留接口供兼容。
+  void onHoverEnter() {}
+  void onHoverExit() {}
   void onTap() {
-    if (!state.enabled) return;
-    if (_playingAnnouncement) return;
-    if (state.phase == IslandPhase.card && state.pinned) {
-      _scheduleCollapse();
-      return;
-    }
+    if (!state.enabled || _playingAnnouncement) return;
     state = state.copyWith(
       phase: IslandPhase.card,
       pinned: true,
       clearAnnouncement: true,
     );
-    _scheduleCollapse();
-    unawaited(IslandWindowBridge.instance.pushState(state));
+    unawaited(IslandNativeBridge.instance.sync(state));
+    _collapseTimer?.cancel();
+    _collapseTimer = Timer(const Duration(seconds: 10), () {
+      if (state.pinned) collapse();
+    });
   }
 
   void collapse() {
-    _hovering = false;
     _collapseTimer?.cancel();
+    _playingAnnouncement = false;
     if (!state.enabled) {
       state = const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
     } else {
-      final filtered = state.sessions;
       state = IslandViewModel.fromSessions(
-        filtered,
+        state.sessions,
         phase: IslandPhase.strip,
         pinned: false,
         enabled: true,
         connected: state.connected,
       );
     }
-    _playingAnnouncement = false;
-    unawaited(IslandWindowBridge.instance.pushState(state));
+    unawaited(IslandNativeBridge.instance.sync(state));
   }
 
   void expand() => onTap();
 
   Future<void> onMainCloseRequested() async {
-    // 主窗只隐藏；岛是独立子窗，继续留在屏顶
-    await IslandWindowBridge.instance.pushState(state);
+    // 主窗隐藏；岛窗独立继续显示
+    await IslandNativeBridge.instance.sync(state);
   }
 
   @override
   void dispose() {
     _collapseTimer?.cancel();
+    for (final s in _subs) {
+      unawaited(s.cancel());
+    }
     super.dispose();
   }
 }

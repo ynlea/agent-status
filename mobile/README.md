@@ -29,12 +29,14 @@ flutter run
 cd mobile
 flutter config --enable-windows-desktop
 flutter pub get
-flutter run -d windows
+# 建议先关 Impeller 对比字体清晰度（runner 发版默认也已关闭）
+flutter run -d windows --no-enable-impeller
 # 或 release 构建 + 安装包
 .\scripts\package_windows.ps1
 ```
 
-- 侧栏导航 + 宽屏主从分栏；关主窗缩到托盘，灵动岛按通知开关展示。
+- 侧栏导航 + 宽屏主从分栏；自定义标题栏；关主窗缩到托盘。
+- 字体：系统 `Microsoft YaHei UI`；默认 `enable-impeller=false` 减轻 Windows 发糊。
 - 检查更新资产名：`qingya-windows-setup.exe`（与 Android 共用 pubspec 版本）。
 - 本机 Agent 上报请用独立 monitor，桌面端只读。
 
