@@ -25,8 +25,19 @@ class IslandController extends StateNotifier<IslandViewModel> {
       _recompute(previousSessions: _lastAllSessions, nudge: false);
       unawaited(_refreshTodayTokens());
     });
-    _modeSub = QingyaWindowController.instance.modeStream.listen((_) {
+    _modeSub = QingyaWindowController.instance.modeStream.listen((mode) {
+      if (mode == DesktopWindowMode.normal) {
+        // 主窗打开：丢掉排队播报，避免关窗后把积压既有状态一口气上岛
+        _suppressAnnouncements(seedBaseline: true);
+      }
       unawaited(_syncWindowShape());
+      // 进岛后若仍有合法排队，确保 HWND 已是播报尺寸再播
+      if (mode == DesktopWindowMode.island &&
+          !_playingAnnouncement &&
+          _announceQueue.isNotEmpty) {
+        final snap = _ref.read(statusRepositoryProvider);
+        _playNextAnnouncement(_filteredNow(), snap.connected);
+      }
     });
     _recompute(previousSessions: const [], nudge: false);
     unawaited(_refreshTodayTokens());
@@ -45,6 +56,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
   bool _playingAnnouncement = false;
   /// 列表刚收起后强制停留在悬停胶囊，保证动画流畅。
   bool _dwellHover = false;
+  /// 已建立会话基线后才做状态播报，避免首屏既有任务全量上岛。
+  bool _hasSessionBaseline = false;
   int? _todayTokens;
   StreamSubscription<DesktopWindowMode>? _modeSub;
 
@@ -146,29 +159,42 @@ class IslandController extends StateNotifier<IslandViewModel> {
       return;
     }
 
-    final announcements = IslandViewModel.diffAnnouncements(
-      previous: prevSnapshot,
-      next: all,
-      notifyConfirm: settings.notifyConfirm,
-      notifyWorking: settings.notifyWorking,
-      notifyDone: settings.notifyDone,
-    );
+    // 首帧/冷启动：只记基线，不把既有会话当「新通知」
+    if (!_hasSessionBaseline) {
+      _lastAllSessions = List<Session>.of(all);
+      _hasSessionBaseline = true;
+      _announceQueue.clear();
+      _playingAnnouncement = false;
+    } else {
+      final announcements = IslandViewModel.diffAnnouncements(
+        previous: prevSnapshot,
+        next: all,
+        notifyConfirm: settings.notifyConfirm,
+        notifyWorking: settings.notifyWorking,
+        notifyDone: settings.notifyDone,
+      );
 
-    if (nudge) {
-      for (final a in announcements) {
-        final exists = _announceQueue.any(
-          (e) => e.sessionKey == a.sessionKey && e.state == a.state,
-        );
-        final samePlaying = state.announcement?.sessionKey == a.sessionKey &&
-            state.announcement?.state == a.state;
-        if (!exists && !samePlaying) _announceQueue.add(a);
+      // 仅主窗隐藏（岛/托盘）时上岛播报；主窗打开时只更新基线
+      final inBackground = QingyaWindowController.instance.isBackground;
+      if (nudge && inBackground) {
+        for (final a in announcements) {
+          final exists = _announceQueue.any(
+            (e) => e.sessionKey == a.sessionKey && e.state == a.state,
+          );
+          final samePlaying =
+              state.announcement?.sessionKey == a.sessionKey &&
+                  state.announcement?.state == a.state;
+          if (!exists && !samePlaying) _announceQueue.add(a);
+        }
       }
+
+      _lastAllSessions = List<Session>.of(all);
     }
 
-    _lastAllSessions = all;
-
     if (_playingAnnouncement || _announceQueue.isNotEmpty) {
-      if (!_playingAnnouncement && _announceQueue.isNotEmpty) {
+      if (!_playingAnnouncement &&
+          _announceQueue.isNotEmpty &&
+          QingyaWindowController.instance.isBackground) {
         _playNextAnnouncement(filtered, snapshot.connected);
         return;
       }
@@ -208,17 +234,36 @@ class IslandController extends StateNotifier<IslandViewModel> {
       unawaited(_syncWindowShape());
       return;
     }
+    // 主窗前台不播，避免关窗后才把积压通知挤扁显示
+    if (!QingyaWindowController.instance.isBackground) {
+      return;
+    }
     _playingAnnouncement = true;
     final ann = _announceQueue.removeFirst();
     unawaited(() async {
       final wc = QingyaWindowController.instance;
-      if (wc.isReady && wc.mode == DesktopWindowMode.island) {
-        await wc.resizeIsland(
-          width: kIslandWindowAnnounceWidth,
-          height: kIslandWindowAnnounceHeight,
-        );
-        _appliedWinW = kIslandWindowAnnounceWidth;
-        _appliedWinH = kIslandWindowAnnounceHeight;
+      // 等进岛过渡结束，再拉到播报尺寸，避免细条 HWND 把胶囊压扁
+      var wait = 0;
+      while (wc.isReady &&
+          wc.mode != DesktopWindowMode.island &&
+          wait < 40) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+        wait++;
+      }
+      wait = 0;
+      while (wc.isReady && wait < 20) {
+        // enterIslandMode 的 _transitioning 会挡 resize，稍等
+        try {
+          await wc.resizeIsland(
+            width: kIslandWindowAnnounceWidth,
+            height: kIslandWindowAnnounceHeight,
+          );
+          _appliedWinW = kIslandWindowAnnounceWidth;
+          _appliedWinH = kIslandWindowAnnounceHeight;
+          break;
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        wait++;
       }
       if (!state.enabled) return;
       state = _vmFrom(
@@ -228,13 +273,39 @@ class IslandController extends StateNotifier<IslandViewModel> {
         connected: connected,
         announcement: ann,
       );
+      // 再同步一次，防止状态与 HWND 不一致
+      unawaited(_syncWindowShape());
     }());
     _collapseTimer?.cancel();
-    // 展示满 10s 再切下一条
     _collapseTimer = Timer(
       const Duration(seconds: kIslandAnnounceSeconds),
       onAnnouncementFinished,
     );
+  }
+
+  /// 丢掉播报队列；[seedBaseline] 时把当前会话记为基线。
+  void _suppressAnnouncements({required bool seedBaseline}) {
+    _collapseTimer?.cancel();
+    _announceQueue.clear();
+    _playingAnnouncement = false;
+    // 清掉正在展示的播报内容，避免主窗↔岛切换时残留卡片态
+    if (state.announcement != null || state.phase == IslandPhase.card) {
+      if (state.enabled && !state.pinned) {
+        state = _vmFrom(
+          _filteredNow(),
+          phase: IslandPhase.strip,
+          pinned: false,
+          connected: state.connected,
+        );
+      } else if (state.enabled) {
+        state = state.copyWith(clearAnnouncement: true);
+      }
+    }
+    if (seedBaseline) {
+      final all = _ref.read(statusRepositoryProvider).sessions;
+      _lastAllSessions = List<Session>.of(all);
+      _hasSessionBaseline = true;
+    }
   }
 
   void onAnnouncementFinished() {
@@ -275,22 +346,25 @@ class IslandController extends StateNotifier<IslandViewModel> {
     });
   }
 
-  /// 列表 / 通知 → 悬停胶囊，再恢复收条计时。
+  /// 列表 / 通知 → 悬停胶囊（在线摘要），再恢复收条计时。
   void _collapseListToHover() {
     _collapseTimer?.cancel();
     _playingAnnouncement = false;
     _dwellHover = true;
-    unawaited(_morphToHover());
-    // 鼠标还在岛上：不自动收；否则 3s 后收到细条
+    // 先清 pinned，避免 _morphToHover 被旧 pin 挡住（列表收不起的根因）
+    unawaited(_morphToHover(force: true));
     if (!_hovering) {
       _scheduleHoverToStrip();
     }
   }
 
-  /// 先放大 HWND，再切 UI，内容展开不会被裁切。
-  Future<void> _morphToHover() async {
+  /// 先瞬时放大 HWND（锚点固定），再切 UI 做单段尺寸动画。
+  Future<void> _morphToHover({bool force = false}) async {
+    if (!state.enabled) return;
+    if (!force && state.pinned) return;
     final wc = QingyaWindowController.instance;
     if (wc.isReady && wc.mode == DesktopWindowMode.island) {
+      // 瞬时 setBounds，不 await 额外帧，减少「停一下再长」的卡断
       await wc.resizeIsland(
         width: kIslandWindowHoverWidth,
         height: kIslandWindowHoverHeight,
@@ -298,7 +372,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
       _appliedWinW = kIslandWindowHoverWidth;
       _appliedWinH = kIslandWindowHoverHeight;
     }
-    if (!state.enabled || state.pinned) return;
+    if (!state.enabled) return;
+    if (!force && state.pinned) return;
+    // 同一帧内切 phase，AnimatedContainer 立刻开跑
     state = _vmFrom(
       _filteredNow(),
       phase: IslandPhase.hover,
@@ -308,6 +384,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   Future<void> _morphToCard() async {
+    if (!state.enabled) return;
     final wc = QingyaWindowController.instance;
     if (wc.isReady && wc.mode == DesktopWindowMode.island) {
       await wc.resizeIsland(
@@ -338,7 +415,6 @@ class IslandController extends StateNotifier<IslandViewModel> {
       unawaited(_syncWindowShape());
       return;
     }
-    // 先让 UI 收成细条，再缩 HWND，避免动画中途被裁切
     Future<void>.delayed(
       const Duration(milliseconds: kIslandHwndShrinkDelayMs),
       () {
@@ -352,12 +428,28 @@ class IslandController extends StateNotifier<IslandViewModel> {
     );
   }
 
+  /// 主窗再进岛：清掉展开/钉住/积压播报，避免既有任务全量上岛与错位。
+  void _resetIslandPresentation() {
+    _hovering = false;
+    _dwellHover = false;
+    _appliedWinW = null;
+    _appliedWinH = null;
+    // 关主窗瞬间：以当前会话为基线，不回放主窗期间的「假新状态」
+    _suppressAnnouncements(seedBaseline: true);
+    if (!state.enabled) return;
+    state = _vmFrom(
+      _filteredNow(),
+      phase: IslandPhase.strip,
+      pinned: false,
+      connected: state.connected,
+    );
+  }
+
   void onHoverEnter() {
     if (!state.enabled || _playingAnnouncement) return;
     _hovering = true;
     _dwellHover = false;
     if (state.pinned) return;
-    // 列表展开时不计悬停收条
     _collapseTimer?.cancel();
     unawaited(_morphToHover());
   }
@@ -365,21 +457,34 @@ class IslandController extends StateNotifier<IslandViewModel> {
   void onHoverExit() {
     if (!state.enabled || _playingAnnouncement) return;
     _hovering = false;
-    if (state.pinned) {
-      // 列表开着：不收，只等列表计时
-      return;
-    }
-    // 离开胶囊：短延迟收条（避免移出一点就抖）
+    if (state.pinned) return;
     _dwellHover = true;
     _scheduleHoverToStrip(delay: const Duration(milliseconds: 450));
   }
 
   void onTap() {
-    if (!state.enabled || _playingAnnouncement) return;
+    if (!state.enabled) return;
+    // 通知播报中：点击 = 手动关闭当前通知
+    if (_playingAnnouncement || state.hasAnnouncement) {
+      _dismissAnnouncement();
+      return;
+    }
+    if (state.pinned) {
+      // 列表已开时再点空白区 → 收起回胶囊
+      _collapseListToHover();
+      return;
+    }
     _dwellHover = false;
-    // 打开列表：暂停胶囊收条计时
     _collapseTimer?.cancel();
     unawaited(_morphToCard().then((_) => _scheduleListCollapse()));
+  }
+
+  /// 手动关掉当前通知（并清空排队，避免连播）。
+  void _dismissAnnouncement() {
+    _collapseTimer?.cancel();
+    _announceQueue.clear();
+    _playingAnnouncement = false;
+    _collapseListToHover();
   }
 
   void collapse() {
@@ -392,9 +497,13 @@ class IslandController extends StateNotifier<IslandViewModel> {
       unawaited(_syncWindowShape());
       return;
     }
-    // 从列表收起：先回胶囊再计时收条
-    if (state.pinned ||
-        (state.phase == IslandPhase.card && !state.hasAnnouncement)) {
+    // 通知中点收起：等同关闭通知
+    if (_playingAnnouncement || state.hasAnnouncement) {
+      _dismissAnnouncement();
+      return;
+    }
+    // 从列表收起：必须回「x 台在线 · …」胶囊
+    if (state.pinned || state.phase == IslandPhase.card) {
       _collapseListToHover();
       return;
     }
@@ -408,8 +517,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   Future<void> onMainCloseRequested() async {
     final settings = _ref.read(settingsProvider);
-    // 开启灵动岛时：最小化/关闭都进岛（不只看当前 isVisible）
     final preferIsland = settings.islandEnabled;
+    // 从主窗进岛前复位，避免上次展开态导致错位
+    if (preferIsland) {
+      _resetIslandPresentation();
+    }
     await QingyaWindowController.instance.hideToBackground(
       preferIsland: preferIsland,
     );

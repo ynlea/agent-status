@@ -28,19 +28,22 @@ const double kIslandHoverHeight = 46;
 const double kIslandCardWidth = 352;
 const double kIslandCardHeightEmpty = 156;
 const double kIslandCardHeightList = 268;
-/// 通知播报：同悬停胶囊样式，略宽、略高。
+/// 通知播报：同悬停胶囊样式，略宽；高度保证两行字不被压扁。
 const double kIslandAnnounceWidth = 372;
-const double kIslandAnnounceHeight = 50;
+const double kIslandAnnounceHeight = 56;
 /// 播报展示总时长（溢出才滚 + 停留）。
 const int kIslandAnnounceSeconds = 10;
 
-/// 关窗后岛 HWND 必须贴内容，透明余量会在系统层挡住其它窗口点击。
-const double kIslandWindowStripWidth = 132;
-const double kIslandWindowStripHeight = 22;
-const double kIslandWindowHoverWidth = 336;
-const double kIslandWindowHoverHeight = 58;
-const double kIslandWindowAnnounceWidth = 388;
-const double kIslandWindowAnnounceHeight = 62;
+/// 关窗后岛 HWND 贴内容；左右留白统一 8，保证细条/胶囊水平中心一致。
+const double kIslandWindowPad = 8;
+const double kIslandWindowStripWidth = kIslandStripWidth + kIslandWindowPad * 2;
+const double kIslandWindowStripHeight = kIslandStripHeight + kIslandWindowPad * 2;
+const double kIslandWindowHoverWidth = kIslandHoverWidth + kIslandWindowPad * 2;
+const double kIslandWindowHoverHeight = kIslandHoverHeight + kIslandWindowPad * 2;
+const double kIslandWindowAnnounceWidth =
+    kIslandAnnounceWidth + kIslandWindowPad * 2;
+const double kIslandWindowAnnounceHeight =
+    kIslandAnnounceHeight + kIslandWindowPad * 2;
 const double kIslandWindowCardWidth = 380;
 const double kIslandWindowCardHeight = 300;
 
@@ -50,13 +53,13 @@ const double kIslandWindowHeight = kIslandWindowStripHeight;
 
 const double kIslandTopGap = 0;
 
-/// 岛形态 UI 形变时长（展开略长、收起略短，手感更跟手）。
-const int kIslandExpandMs = 340;
-const int kIslandCollapseMs = 280;
-const int kIslandCardExpandMs = 380;
-const int kIslandCardCollapseMs = 300;
+/// 岛形态 UI 形变：单一短动画，避免与 HWND 双重动画打架。
+const int kIslandExpandMs = 220;
+const int kIslandCollapseMs = 180;
+const int kIslandCardExpandMs = 260;
+const int kIslandCardCollapseMs = 220;
 /// HWND 在 UI 收起动画结束后再缩，避免裁切。
-const int kIslandHwndShrinkDelayMs = 300;
+const int kIslandHwndShrinkDelayMs = 200;
 
 /// 兼容旧命名。
 const double kIslandCapsuleWidth = kIslandHoverWidth;

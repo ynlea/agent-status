@@ -289,15 +289,14 @@ class _UsagePageState extends ConsumerState<UsagePage> {
           const SizedBox(height: 6),
           note,
           const SizedBox(height: 12),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(flex: 5, child: heatmap),
-                const SizedBox(width: 12),
-                Expanded(flex: 6, child: trend),
-              ],
-            ),
+          // 热力图保持自然高度；趋势曲线高度对齐热力图格子区（约 200）
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: heatmap),
+              const SizedBox(width: 12),
+              Expanded(flex: 6, child: trend),
+            ],
           ),
           const SizedBox(height: 14),
           detailHeader,
@@ -1459,10 +1458,10 @@ class _TrendCardState extends State<_TrendCard> {
             },
           );
 
-    if (expand) {
-      return Expanded(child: chart);
-    }
-    return SizedBox(height: 120, child: chart);
+    // 桌面：曲线区高度对齐热力图格子（7 行 × ~28 + 间距 ≈ 200）
+    // 移动：保持原先 120
+    final h = expand ? 200.0 : 120.0;
+    return SizedBox(height: h, child: chart);
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -27,8 +28,6 @@ class QingyaWindowController with WindowListener {
   Offset? _savedPosition;
   Size? _savedSize;
   bool _savedMaximized = false;
-  /// 岛 HWND 面积，用于判断展开是否用系统动画。
-  double? _appliedIslandArea;
 
   DesktopWindowMode get mode => _mode;
   Stream<DesktopWindowMode> get modeStream => _modeController.stream;
@@ -99,10 +98,9 @@ class QingyaWindowController with WindowListener {
   }
 
   /// 从托盘/岛恢复主窗。
-  /// 从岛回来时先还原 HWND 几何与实色底，再切主布局，避免小透明面放大成全黑。
+  /// 岛→主窗：先恢复边框与实色，再插值放大到记忆位置，最后切主布局。
   Future<void> showMain() async {
     if (!isQingyaDesktop || !_ready) return;
-    // 切换中不丢请求：等上一轮结束（托盘连点 / 关窗进岛交叉）
     var wait = 0;
     while (_transitioning && wait < 40) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -115,13 +113,27 @@ class QingyaWindowController with WindowListener {
       final wasHidden = _mode == DesktopWindowMode.hidden;
 
       if (wasIsland) {
-        // 1) 仍在岛 UI 时先把窗体拉回主窗尺寸 + 实色，避免大布局画进 320×72
+        Rect? from;
+        try {
+          from = await windowManager.getBounds();
+        } catch (_) {}
         await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
-        await _restoreNormalChrome(fromIsland: true);
-        await Future<void>.delayed(const Duration(milliseconds: 40));
-        // 2) 几何就绪后再切 Flutter 主布局
+        // 先在小岛尺寸上恢复边框/阴影，再平滑放大
+        await _restoreNormalChromeProps();
+        final target = _targetMainRect();
+        if (from != null) {
+          await _lerpBounds(from, target, ms: 320);
+        } else {
+          await windowManager.setBounds(target);
+        }
+        if (_savedMaximized) {
+          try {
+            await windowManager.maximize();
+          } catch (_) {}
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 24));
         _setMode(DesktopWindowMode.normal);
-        await Future<void>.delayed(const Duration(milliseconds: 48));
+        await Future<void>.delayed(const Duration(milliseconds: 40));
       } else {
         _setMode(DesktopWindowMode.normal);
         if (wasHidden || _savedSize != null) {
@@ -135,26 +147,16 @@ class QingyaWindowController with WindowListener {
       await windowManager.show();
       await windowManager.focus();
 
-      // 再推一帧，防止表面尺寸与布局不同步
-      await Future<void>.delayed(const Duration(milliseconds: 64));
+      await Future<void>.delayed(const Duration(milliseconds: 48));
       try {
-        await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
         await windowManager.show();
         await windowManager.focus();
       } catch (_) {}
     } catch (e, st) {
       debugPrint('[QingyaWindow] showMain failed: $e\n$st');
-      // 失败也尽量回到 normal，避免岛永久消失、窗体卡死
       _setMode(DesktopWindowMode.normal);
       try {
-        await windowManager.setAlwaysOnTop(false);
-        await windowManager.setResizable(true);
-        await windowManager.setHasShadow(true);
-        await windowManager.setSkipTaskbar(false);
-        await windowManager.setTitleBarStyle(
-          TitleBarStyle.hidden,
-          windowButtonVisibility: false,
-        );
+        await _restoreNormalChromeProps();
         await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
         await windowManager.setMinimumSize(
           const Size(kDesktopMinWidth, kDesktopMinHeight),
@@ -205,9 +207,7 @@ class QingyaWindowController with WindowListener {
       wait++;
     }
     if (_transitioning) return;
-    // 已在主窗显示流程中或已是岛则不再进岛
     if (_mode == DesktopWindowMode.island) {
-      // 仅调整尺寸（卡片档）
       await resizeIsland(width: width, height: height);
       return;
     }
@@ -218,12 +218,16 @@ class QingyaWindowController with WindowListener {
       }
       final w = width.roundToDouble();
       final h = height.roundToDouble();
+      Rect? from;
+      try {
+        from = await windowManager.getBounds();
+      } catch (_) {}
       await windowManager.setMinimumSize(const Size(80, 24));
       await windowManager.setMaximumSize(const Size(10000, 10000));
-      // 若当前最大化，先还原再缩，避免几何错乱
       try {
         if (await windowManager.isMaximized()) {
           await windowManager.unmaximize();
+          from = await windowManager.getBounds();
         }
       } catch (_) {}
       await windowManager.setAsFrameless();
@@ -233,14 +237,18 @@ class QingyaWindowController with WindowListener {
       await windowManager.setSkipTaskbar(true);
       await windowManager.setResizable(false);
       final pos = await _islandTopCenterOffset(width: w, height: h);
-      // 先到位再 show，避免主窗缩到屏顶时闪一下大块
-      await windowManager.setBounds(Rect.fromLTWH(pos.dx, pos.dy, w, h));
-      _appliedIslandArea = w * h;
-      await windowManager.show();
+      final to = Rect.fromLTWH(pos.dx, pos.dy, w, h);
+      // 先切岛 UI，再缩 HWND，避免主界面被压扁一截的割裂感
       _setMode(DesktopWindowMode.island);
+      if (from != null && from.width > w * 1.5) {
+        // 从当前大窗顶居中收到小岛；内容已是岛，透明底收缩更自然
+        await _lerpBounds(from, to, ms: 260);
+      } else {
+        await windowManager.setBounds(to);
+      }
+      await windowManager.show();
     } catch (e, st) {
       debugPrint('[QingyaWindow] enterIslandMode: $e\n$st');
-      // 进岛失败则至少隐藏，避免半残窗
       try {
         await windowManager.hide();
         _setMode(DesktopWindowMode.hidden);
@@ -254,21 +262,35 @@ class QingyaWindowController with WindowListener {
     required double width,
     required double height,
   }) async {
-    if (!isQingyaDesktop || !_ready || _mode != DesktopWindowMode.island) {
-      return;
+    if (!isQingyaDesktop || !_ready) return;
+    // 进岛过渡中稍等，避免播报 HWND 仍卡在细条高度被压扁
+    var wait = 0;
+    while (_transitioning && wait < 40) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      wait++;
     }
+    if (_mode != DesktopWindowMode.island) return;
     if (_transitioning) return;
     final w = width.roundToDouble();
     final h = height.roundToDouble();
-    // 一次 setBounds；展开时尝试系统动画，收起时瞬时以免拖泥带水
-    final pos = await _islandTopCenterOffset(width: w, height: h);
-    final growing = (_appliedIslandArea == null) ||
-        (w * h > (_appliedIslandArea!));
+    // 以当前窗水平中心 + 顶边为锚点缩放，避免「重新居中」导致细条左右跳
+    // 不用系统 animate：Windows 上容易和 Flutter 动画叠成卡断
+    double x;
+    double y;
+    try {
+      final cur = await windowManager.getBounds();
+      final centerX = cur.left + cur.width / 2;
+      x = (centerX - w / 2).roundToDouble();
+      y = cur.top.roundToDouble();
+    } catch (_) {
+      final pos = await _islandTopCenterOffset(width: w, height: h);
+      x = pos.dx;
+      y = pos.dy;
+    }
     await windowManager.setBounds(
-      Rect.fromLTWH(pos.dx, pos.dy, w, h),
-      animate: growing,
+      Rect.fromLTWH(x, y, w, h),
+      animate: false,
     );
-    _appliedIslandArea = w * h;
   }
 
   Future<void> hideCompletely() async {
@@ -288,8 +310,8 @@ class QingyaWindowController with WindowListener {
     }
   }
 
-  Future<void> _restoreNormalChrome({required bool fromIsland}) async {
-    // 退出无边框：文档说明用 setTitleBarStyle 恢复 frame
+  /// 仅恢复边框/阴影/最小尺寸，不改几何（用于插值动画前）。
+  Future<void> _restoreNormalChromeProps() async {
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setResizable(true);
     await windowManager.setHasShadow(true);
@@ -298,25 +320,70 @@ class QingyaWindowController with WindowListener {
       TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
-    // 主窗用暖色实底，避免透明表面在尺寸跳变后全黑
     await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
     await windowManager.setMinimumSize(
       const Size(kDesktopMinWidth, kDesktopMinHeight),
     );
     await windowManager.setMaximumSize(const Size(10000, 10000));
+  }
 
+  Rect _targetMainRect() {
     final size = _savedSize ??
         const Size(kDesktopDefaultWidth, kDesktopDefaultHeight);
-    // 防止误存成小岛尺寸
     final safeW = size.width < kDesktopMinWidth
         ? kDesktopDefaultWidth
         : size.width;
     final safeH = size.height < kDesktopMinHeight
         ? kDesktopDefaultHeight
         : size.height;
-    await windowManager.setSize(
-      Size(safeW.roundToDouble(), safeH.roundToDouble()),
+    final pos = _savedPosition;
+    if (pos != null) {
+      return Rect.fromLTWH(
+        pos.dx.roundToDouble(),
+        pos.dy.roundToDouble(),
+        safeW.roundToDouble(),
+        safeH.roundToDouble(),
+      );
+    }
+    // 无记忆位置时尽量落在主屏中心（同步路径用近似值，异步居中在 restore 里补）
+    return Rect.fromLTWH(
+      120,
+      80,
+      safeW.roundToDouble(),
+      safeH.roundToDouble(),
     );
+  }
+
+  /// 窗口几何插值：缓入缓出，接近 macOS 缩放手感（纯 window_manager，无第三方库）。
+  Future<void> _lerpBounds(Rect from, Rect to, {int ms = 300}) async {
+    const steps = 8;
+    final stepMs = (ms / steps).round().clamp(16, 36);
+    for (var i = 1; i <= steps; i++) {
+      // easeInOutCubic
+      final p = i / steps;
+      final t = p < 0.5
+          ? 4 * p * p * p
+          : 1 - math.pow(-2 * p + 2, 3) / 2;
+      final r = Rect.lerp(from, to, t.toDouble())!;
+      await windowManager.setBounds(
+        Rect.fromLTWH(
+          r.left.roundToDouble(),
+          r.top.roundToDouble(),
+          r.width.roundToDouble().clamp(80, 10000),
+          r.height.roundToDouble().clamp(24, 10000),
+        ),
+      );
+      if (i < steps) {
+        await Future<void>.delayed(Duration(milliseconds: stepMs));
+      }
+    }
+  }
+
+  Future<void> _restoreNormalChrome({required bool fromIsland}) async {
+    await _restoreNormalChromeProps();
+
+    final target = _targetMainRect();
+    await windowManager.setSize(Size(target.width, target.height));
 
     final pos = _savedPosition;
     if (pos != null) {
@@ -324,7 +391,7 @@ class QingyaWindowController with WindowListener {
         Offset(pos.dx.roundToDouble(), pos.dy.roundToDouble()),
       );
     } else {
-      await _centerOnActiveDisplay(width: safeW, height: safeH);
+      await _centerOnActiveDisplay(width: target.width, height: target.height);
     }
 
     if (_savedMaximized) {
