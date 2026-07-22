@@ -6,6 +6,7 @@ import '../../data/desktop/desktop_platform.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
+import '../desktop/desktop_pane.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
@@ -64,36 +65,37 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
       );
     }
 
+    final c = context.qingya;
     return Scaffold(
-      backgroundColor: context.qingya.scaffold,
+      backgroundColor: c.scaffold,
       body: SafeArea(
         bottom: false,
-        child: Row(
-          children: [
-            SizedBox(width: 360, child: listPane),
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: context.qingya.border.withValues(alpha: 0.8),
-            ),
-            Expanded(
-              child: _selectedMachineId == null
-                  ? Center(
-                      child: Text(
-                        '选择一台设备',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: context.qingya.textSecondary,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 360,
+                child: DesktopPane(child: listPane),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DesktopPane(
+                  child: _selectedMachineId == null
+                      ? const DesktopPickHint(
+                          asset: QingyaAssets.catEmptyDevices,
+                          title: '选择一台设备',
+                          subtitle: '右侧会显示会话与状态详情',
+                        )
+                      : DeviceDetailPage(
+                          key: ValueKey(_selectedMachineId),
+                          machineId: _selectedMachineId!,
+                          embedded: true,
                         ),
-                      ),
-                    )
-                  : DeviceDetailPage(
-                      key: ValueKey(_selectedMachineId),
-                      machineId: _selectedMachineId!,
-                      embedded: true,
-                    ),
-            ),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

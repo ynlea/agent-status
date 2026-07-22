@@ -9,6 +9,11 @@ import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
 import '../widgets/assets.dart';
 
+/// 暖黑灵动岛底色（贴近品牌，而不是冷灰工具条）。
+const _islandBg = Color(0xFF2C2622);
+const _islandFg = Color(0xFFFFF8F3);
+const _islandMuted = Color(0xFFC9BDB4);
+
 /// 正常主窗模式下的顶栏灵动岛（Overlay）。
 class DesktopIslandOverlay extends ConsumerWidget {
   const DesktopIslandOverlay({
@@ -28,22 +33,25 @@ class DesktopIslandOverlay extends ConsumerWidget {
     if (!vm.isVisible) return const SizedBox.shrink();
 
     return Positioned(
-      top: 10,
+      top: 12,
       left: 0,
       right: 0,
-      child: Center(
-        child: IslandCapsule(
-          viewModel: vm,
-          onTapCapsule: () {
-            if (vm.phase == IslandPhase.capsule) {
-              ref.read(islandControllerProvider.notifier).expand();
-            } else if (vm.primary != null) {
-              onOpenSession(vm.primary!);
-            }
-          },
-          onOpenPrimary: vm.primary == null
-              ? null
-              : () => onOpenSession(vm.primary!),
+      child: IgnorePointer(
+        ignoring: false,
+        child: Center(
+          child: IslandCapsule(
+            viewModel: vm,
+            onTapCapsule: () {
+              if (vm.phase == IslandPhase.capsule) {
+                ref.read(islandControllerProvider.notifier).expand();
+              } else if (vm.primary != null) {
+                onOpenSession(vm.primary!);
+              }
+            },
+            onOpenPrimary: vm.primary == null
+                ? null
+                : () => onOpenSession(vm.primary!),
+          ),
         ),
       ),
     );
@@ -62,11 +70,10 @@ class IslandStandalonePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vm = ref.watch(islandControllerProvider);
-    final c = context.qingya;
     return Material(
       color: Colors.transparent,
       child: ColoredBox(
-        color: c.scaffold.withValues(alpha: 0.01),
+        color: Colors.transparent,
         child: Center(
           child: IslandCapsule(
             viewModel: vm,
@@ -131,48 +138,67 @@ class IslandCapsule extends StatelessWidget {
         : (expanded ? kIslandExpandedWidth : kIslandCapsuleWidth);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       width: width,
       height: expanded ? kIslandExpandedHeight : kIslandCapsuleHeight,
       child: Material(
         color: Colors.transparent,
+        elevation: 0,
         child: InkWell(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(999),
           onTap: onTapCapsule,
           onDoubleTap: onOpenPrimary,
           child: Ink(
             decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: c.border.withValues(alpha: 0.9)),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: accent.withValues(alpha: 0.35),
+                width: 1.2,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: c.shadow,
+                  color: accent.withValues(alpha: 0.22),
+                  blurRadius: 22,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.28),
                   blurRadius: 18,
                   offset: const Offset(0, 6),
                 ),
               ],
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  _islandBg,
+                  Color.lerp(_islandBg, accent, 0.14)!,
+                ],
+              ),
             ),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: 14,
+                horizontal: expanded ? 16 : 12,
                 vertical: expanded ? 12 : 8,
               ),
               child: Row(
                 children: [
                   Container(
-                    width: 28,
-                    height: 28,
+                    width: expanded ? 34 : 28,
+                    height: expanded ? 34 : 28,
                     decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.16),
+                      color: accent.withValues(alpha: 0.22),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.55),
+                      ),
                     ),
                     alignment: Alignment.center,
                     child: Image.asset(
                       _notifyAsset(state),
-                      width: 16,
-                      height: 16,
+                      width: expanded ? 18 : 15,
+                      height: expanded ? 18 : 15,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -186,20 +212,22 @@ class IslandCapsule extends StatelessWidget {
                                 viewModel.headline,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
                                   fontWeight: FontWeight.w700,
-                                  color: c.textPrimary,
+                                  color: _islandFg,
+                                  height: 1.15,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 3),
                               Text(
                                 viewModel.subtitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: c.textSecondary,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: _islandMuted,
+                                  height: 1.15,
                                 ),
                               ),
                             ],
@@ -210,32 +238,40 @@ class IslandCapsule extends StatelessWidget {
                                 : (viewModel.primary?.state.labelZh ?? '状态'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: c.textPrimary,
+                              color: _islandFg,
                             ),
                           ),
                   ),
                   if (viewModel.badgeCount > 1) ...[
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
+                        horizontal: 8,
+                        vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(10),
+                        color: accent.withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
                         '${viewModel.badgeCount}',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: accent,
+                          color: Color.lerp(_islandFg, accent, 0.2),
                         ),
                       ),
+                    ),
+                  ],
+                  if (expanded) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.north_east_rounded,
+                      size: 16,
+                      color: _islandMuted.withValues(alpha: 0.9),
                     ),
                   ],
                 ],

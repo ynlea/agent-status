@@ -6,6 +6,7 @@ import '../../data/desktop/desktop_platform.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
+import '../desktop/desktop_pane.dart';
 import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
@@ -186,34 +187,34 @@ class _HomePageState extends ConsumerState<HomePage> {
       backgroundColor: c.scaffold,
       body: SafeArea(
         bottom: false,
-        child: Row(
-          children: [
-            SizedBox(width: 420, child: list),
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: c.border.withValues(alpha: 0.8),
-            ),
-            Expanded(
-              child: _selected == null
-                  ? Center(
-                      child: Text(
-                        '选择一个会话',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: c.textSecondary,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 400,
+                child: DesktopPane(child: list),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DesktopPane(
+                  child: _selected == null
+                      ? const DesktopPickHint(
+                          asset: QingyaAssets.catEmptySleepV3,
+                          title: '点左侧会话看看详情',
+                          subtitle: '有新状态时，顶部灵动岛也会提醒你',
+                        )
+                      : SessionDetailPage(
+                          key: ValueKey(_sessionKey(_selected!)),
+                          machineId: _selected!.machineId,
+                          agent: _selected!.agent,
+                          sessionId: _selected!.sessionId,
+                          embedded: true,
                         ),
-                      ),
-                    )
-                  : SessionDetailPage(
-                      key: ValueKey(_sessionKey(_selected!)),
-                      machineId: _selected!.machineId,
-                      agent: _selected!.agent,
-                      sessionId: _selected!.sessionId,
-                      embedded: true,
-                    ),
-            ),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

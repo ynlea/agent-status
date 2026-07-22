@@ -62,12 +62,28 @@ class _MainShellState extends ConsumerState<MainShell>
               accents: accents,
               onTap: _onTap,
             ),
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: c.border.withValues(alpha: 0.8),
+            Expanded(
+              child: Padding(
+                // 给顶栏灵动岛留一点空间，内容区也更透气
+                padding: const EdgeInsets.fromLTRB(0, 4, 10, 10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: c.scaffold,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(22),
+                      bottomLeft: Radius.circular(22),
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(22),
+                      bottomLeft: Radius.circular(22),
+                    ),
+                    child: widget.navigationShell,
+                  ),
+                ),
+              ),
             ),
-            Expanded(child: widget.navigationShell),
           ],
         ),
       );
@@ -134,6 +150,7 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 }
 
+/// 暖色圆角侧栏：横排图标+文案，选中为柔和胶囊，贴近手机端气质。
 class _DesktopSideRail extends StatelessWidget {
   const _DesktopSideRail({
     required this.index,
@@ -149,84 +166,151 @@ class _DesktopSideRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.qingya;
     return Container(
-      width: 88,
-      color: c.card,
-      child: SafeArea(
-        right: false,
-        child: Column(
-          children: [
-            const SizedBox(height: 18),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Column(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.asset(
-                      QingyaAssets.catBrandAvatarV3,
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.cover,
-                    ),
+      width: 196,
+      margin: const EdgeInsets.fromLTRB(10, 10, 0, 10),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: c.border.withValues(alpha: 0.85)),
+        boxShadow: [
+          BoxShadow(
+            color: c.shadow,
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.asset(
+                    QingyaAssets.catBrandAvatarV3,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '轻芽',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: c.textPrimary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '轻芽',
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                          color: c.textPrimary,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Q I N G Y A',
+                        style: TextStyle(
+                          fontSize: 8,
+                          height: 1,
+                          fontWeight: FontWeight.w600,
+                          color: c.textSecondary,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+            child: Container(
+              height: 1,
+              color: c.divider.withValues(alpha: 0.9),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              children: [
+                _SideNavTile(
+                  asset: QingyaAssets.navHomeV2,
+                  label: '首页',
+                  selected: index == 0,
+                  color: accents[0],
+                  onTap: () => onTap(0),
+                ),
+                _SideNavTile(
+                  asset: QingyaAssets.navDevicesV2,
+                  label: '设备',
+                  selected: index == 1,
+                  color: accents[1],
+                  onTap: () => onTap(1),
+                ),
+                _SideNavIconTile(
+                  icon: Icons.insights_rounded,
+                  label: '用量',
+                  selected: index == 2,
+                  color: accents[2],
+                  onTap: () => onTap(2),
+                ),
+                _SideNavTile(
+                  asset: QingyaAssets.navSettingsV2,
+                  label: '设置',
+                  selected: index == 3,
+                  color: accents[3],
+                  onTap: () => onTap(3),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: c.primarySoft.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Image.asset(
+                    QingyaAssets.catHeroWinkV3,
+                    width: 28,
+                    height: 28,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '状态一眼就懂～',
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                        color: c.textSecondary,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 22),
-            _SideRailItem(
-              asset: QingyaAssets.navHomeV2,
-              label: '首页',
-              selected: index == 0,
-              color: accents[0],
-              onTap: () => onTap(0),
-            ),
-            _SideRailItem(
-              asset: QingyaAssets.navDevicesV2,
-              label: '设备',
-              selected: index == 1,
-              color: accents[1],
-              onTap: () => onTap(1),
-            ),
-            _SideRailIconItem(
-              icon: Icons.insights_rounded,
-              label: '用量',
-              selected: index == 2,
-              color: accents[2],
-              onTap: () => onTap(2),
-            ),
-            _SideRailItem(
-              asset: QingyaAssets.navSettingsV2,
-              label: '设置',
-              selected: index == 3,
-              color: accents[3],
-              onTap: () => onTap(3),
-            ),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                '桌面',
-                style: TextStyle(fontSize: 10, color: c.textSecondary),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _SideRailItem extends StatelessWidget {
-  const _SideRailItem({
+class _SideNavTile extends StatelessWidget {
+  const _SideNavTile({
     required this.asset,
     required this.label,
     required this.selected,
@@ -243,41 +327,43 @@ class _SideRailItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
-    final effective = selected ? color : c.navInactive;
+    final fg = selected ? color : c.navInactive;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: selected ? color.withValues(alpha: 0.12) : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: selected
-                ? BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border(
-                      left: BorderSide(color: color, width: 3),
-                    ),
-                  )
-                : null,
-            child: Column(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            child: Row(
               children: [
                 ColorFiltered(
-                  colorFilter: ColorFilter.mode(effective, BlendMode.srcIn),
-                  child: Image.asset(asset, width: 22, height: 22),
+                  colorFilter: ColorFilter.mode(fg, BlendMode.srcIn),
+                  child: Image.asset(asset, width: 20, height: 20),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(width: 10),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 14,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: effective,
+                    color: selected ? c.textPrimary : c.textSecondary,
                   ),
                 ),
+                if (selected) ...[
+                  const Spacer(),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -287,8 +373,8 @@ class _SideRailItem extends StatelessWidget {
   }
 }
 
-class _SideRailIconItem extends StatelessWidget {
-  const _SideRailIconItem({
+class _SideNavIconTile extends StatelessWidget {
+  const _SideNavIconTile({
     required this.icon,
     required this.label,
     required this.selected,
@@ -305,38 +391,40 @@ class _SideRailIconItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.qingya;
-    final effective = selected ? color : c.navInactive;
+    final fg = selected ? color : c.navInactive;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: selected ? color.withValues(alpha: 0.12) : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: selected
-                ? BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border(
-                      left: BorderSide(color: color, width: 3),
-                    ),
-                  )
-                : null,
-            child: Column(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            child: Row(
               children: [
-                Icon(icon, size: 22, color: effective),
-                const SizedBox(height: 4),
+                Icon(icon, size: 20, color: fg),
+                const SizedBox(width: 10),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 14,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: effective,
+                    color: selected ? c.textPrimary : c.textSecondary,
                   ),
                 ),
+                if (selected) ...[
+                  const Spacer(),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
