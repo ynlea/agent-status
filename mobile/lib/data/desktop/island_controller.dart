@@ -8,15 +8,12 @@ import '../prefs/settings_store.dart';
 import '../repo/status_repository.dart';
 import 'desktop_platform.dart';
 import 'island_models.dart';
-import 'island_native_bridge.dart';
+import 'window_controller.dart';
 
-/// 主引擎岛状态：推送到原生置顶分层岛窗，动画在岛引擎内完成。
+/// 单窗灵动岛：主窗 Overlay；关主窗后主窗变形为屏顶岛。
 class IslandController extends StateNotifier<IslandViewModel> {
   IslandController(this._ref) : super(const IslandViewModel()) {
     if (!isQingyaDesktop) return;
-    unawaited(IslandNativeBridge.instance.bind());
-    unawaited(IslandNativeBridge.instance.ensure());
-
     _ref.listen<StatusSnapshot>(statusRepositoryProvider, (prev, next) {
       _recompute(
         previousSessions: prev?.sessions ?? _lastAllSessions,
@@ -26,11 +23,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
     _ref.listen<AppSettings>(settingsProvider, (_, __) {
       _recompute(previousSessions: _lastAllSessions, nudge: false);
     });
-
-    _subs.add(IslandNativeBridge.instance.announcementDone$.listen((_) {
-      onAnnouncementFinished();
-    }));
-
+    _modeSub = QingyaWindowController.instance.modeStream.listen((_) {
+      unawaited(_syncWindowShape());
+    });
     _recompute(previousSessions: const [], nudge: false);
   }
 
@@ -38,8 +33,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
   List<Session> _lastAllSessions = const [];
   final Queue<IslandAnnouncement> _announceQueue = Queue();
   Timer? _collapseTimer;
+  bool _hovering = false;
   bool _playingAnnouncement = false;
-  final List<StreamSubscription<dynamic>> _subs = [];
+  StreamSubscription<DesktopWindowMode>? _modeSub;
 
   void _recompute({
     required List<Session> previousSessions,
@@ -60,10 +56,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
     if (!enabled) {
       _collapseTimer?.cancel();
+      _hovering = false;
       _announceQueue.clear();
       _playingAnnouncement = false;
       state = const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
-      unawaited(IslandNativeBridge.instance.sync(state));
+      unawaited(_syncWindowShape());
       return;
     }
 
@@ -95,12 +92,16 @@ class IslandController extends StateNotifier<IslandViewModel> {
       }
     }
 
-    // 岛窗内本地处理 hover；主状态默认 strip，播报/钉住除外
-    var phase = IslandPhase.strip;
+    var phase = state.phase;
+    if (phase == IslandPhase.hidden) phase = IslandPhase.strip;
     if (_playingAnnouncement && state.announcement != null) {
       phase = IslandPhase.card;
     } else if (state.pinned) {
       phase = IslandPhase.card;
+    } else if (_hovering) {
+      phase = IslandPhase.hover;
+    } else {
+      phase = IslandPhase.strip;
     }
 
     state = IslandViewModel.fromSessions(
@@ -111,7 +112,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
       announcement: state.announcement,
       connected: snapshot.connected,
     );
-    unawaited(IslandNativeBridge.instance.sync(state));
+    unawaited(_syncWindowShape());
   }
 
   void _playNextAnnouncement(List<Session> filtered, bool connected) {
@@ -119,12 +120,12 @@ class IslandController extends StateNotifier<IslandViewModel> {
       _playingAnnouncement = false;
       state = IslandViewModel.fromSessions(
         filtered,
-        phase: IslandPhase.strip,
+        phase: _hovering ? IslandPhase.hover : IslandPhase.strip,
         pinned: false,
         enabled: true,
         connected: connected,
       );
-      unawaited(IslandNativeBridge.instance.sync(state));
+      unawaited(_syncWindowShape());
       return;
     }
     _playingAnnouncement = true;
@@ -137,7 +138,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
       announcement: ann,
       connected: connected,
     );
-    unawaited(IslandNativeBridge.instance.sync(state));
+    unawaited(_syncWindowShape());
     _collapseTimer?.cancel();
     _collapseTimer = Timer(const Duration(seconds: 12), onAnnouncementFinished);
   }
@@ -159,17 +160,49 @@ class IslandController extends StateNotifier<IslandViewModel> {
     _playingAnnouncement = false;
     state = IslandViewModel.fromSessions(
       filtered,
-      phase: state.pinned ? IslandPhase.card : IslandPhase.strip,
+      phase: _hovering ? IslandPhase.hover : IslandPhase.strip,
       pinned: state.pinned,
       enabled: true,
       connected: snapshot.connected,
     );
-    unawaited(IslandNativeBridge.instance.sync(state));
+    unawaited(_syncWindowShape());
+    if (state.pinned) _scheduleCollapse();
   }
 
-  // 岛窗内本地 hover/tap；主侧保留接口供兼容。
-  void onHoverEnter() {}
-  void onHoverExit() {}
+  void _scheduleCollapse() {
+    _collapseTimer?.cancel();
+    _collapseTimer = Timer(const Duration(seconds: 10), () {
+      if (!state.enabled) return;
+      if (_hovering || _playingAnnouncement) {
+        _scheduleCollapse();
+        return;
+      }
+      if (state.phase == IslandPhase.card || state.phase == IslandPhase.hover) {
+        collapse();
+      }
+    });
+  }
+
+  void onHoverEnter() {
+    if (!state.enabled || _playingAnnouncement) return;
+    _hovering = true;
+    if (state.pinned) return;
+    state = state.copyWith(phase: IslandPhase.hover);
+    _collapseTimer?.cancel();
+    unawaited(_syncWindowShape());
+  }
+
+  void onHoverExit() {
+    if (!state.enabled || _playingAnnouncement) return;
+    _hovering = false;
+    if (state.pinned) {
+      _scheduleCollapse();
+      return;
+    }
+    state = state.copyWith(phase: IslandPhase.strip, pinned: false);
+    unawaited(_syncWindowShape());
+  }
+
   void onTap() {
     if (!state.enabled || _playingAnnouncement) return;
     state = state.copyWith(
@@ -177,14 +210,12 @@ class IslandController extends StateNotifier<IslandViewModel> {
       pinned: true,
       clearAnnouncement: true,
     );
-    unawaited(IslandNativeBridge.instance.sync(state));
-    _collapseTimer?.cancel();
-    _collapseTimer = Timer(const Duration(seconds: 10), () {
-      if (state.pinned) collapse();
-    });
+    _scheduleCollapse();
+    unawaited(_syncWindowShape());
   }
 
   void collapse() {
+    _hovering = false;
     _collapseTimer?.cancel();
     _playingAnnouncement = false;
     if (!state.enabled) {
@@ -198,22 +229,59 @@ class IslandController extends StateNotifier<IslandViewModel> {
         connected: state.connected,
       );
     }
-    unawaited(IslandNativeBridge.instance.sync(state));
+    unawaited(_syncWindowShape());
   }
 
   void expand() => onTap();
 
   Future<void> onMainCloseRequested() async {
-    // 主窗隐藏；岛窗独立继续显示
-    await IslandNativeBridge.instance.sync(state);
+    final settings = _ref.read(settingsProvider);
+    final preferIsland = settings.islandEnabled && state.isVisible;
+    await QingyaWindowController.instance.hideToBackground(
+      preferIsland: preferIsland,
+    );
+  }
+
+  (double, double) _islandWindowSize() {
+    final vm = state;
+    if (!vm.isVisible) return (kIslandStripWidth + 24, kIslandStripHitHeight + 12);
+    return switch (vm.phase) {
+      IslandPhase.hidden => (kIslandStripWidth + 24, kIslandStripHitHeight + 12),
+      IslandPhase.strip => (kIslandStripWidth + 24, kIslandStripHitHeight + 12),
+      IslandPhase.hover => (kIslandHoverWidth + 16, kIslandHoverHeight + 16),
+      IslandPhase.card => (
+          kIslandCardWidth + 16,
+          (vm.hasAnnouncement
+                  ? kIslandAnnounceHeight
+                  : (vm.hasSessions
+                      ? (vm.sessions.length == 1 ? 150.0 : kIslandCardHeightList)
+                      : kIslandCardHeightEmpty)) +
+              16,
+        ),
+    };
+  }
+
+  Future<void> _syncWindowShape() async {
+    final wc = QingyaWindowController.instance;
+    if (!wc.isReady || !isQingyaDesktop) return;
+    if (wc.mode == DesktopWindowMode.normal) return;
+
+    if (!state.isVisible) {
+      await wc.hideCompletely();
+      return;
+    }
+    final size = _islandWindowSize();
+    if (wc.mode != DesktopWindowMode.island) {
+      await wc.enterIslandMode(width: size.$1, height: size.$2);
+    } else {
+      await wc.resizeIsland(width: size.$1, height: size.$2);
+    }
   }
 
   @override
   void dispose() {
     _collapseTimer?.cancel();
-    for (final s in _subs) {
-      unawaited(s.cancel());
-    }
+    unawaited(_modeSub?.cancel() ?? Future.value());
     super.dispose();
   }
 }

@@ -3,7 +3,6 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
-#include "island_window.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -26,8 +25,6 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
-  // 注册原生灵动岛宿主通道（方案 1）。
-  IslandWindow::Instance().BindMainEngine(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -43,7 +40,6 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
-  IslandWindow::Instance().Destroy();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

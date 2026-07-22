@@ -2,14 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop_platform.dart';
 
-/// 主窗生命周期：正常 / 隐藏（岛由原生窗独立承载）。
-enum DesktopWindowMode { normal, hidden }
+/// 主窗：正常 / 隐藏 / 关窗后变形为岛。
+enum DesktopWindowMode { normal, hidden, island }
 
-/// Windows 主窗控制：自定义标题栏、关窗隐藏。
+/// Windows 主窗控制（单窗方案）。
 class QingyaWindowController with WindowListener {
   QingyaWindowController._();
 
@@ -25,7 +26,8 @@ class QingyaWindowController with WindowListener {
   Stream<DesktopWindowMode> get modeStream => _modeController.stream;
   Stream<void> get closeRequested => _closeRequested.stream;
   bool get isReady => _ready;
-  bool get isBackground => _mode == DesktopWindowMode.hidden;
+  bool get isBackground =>
+      _mode == DesktopWindowMode.hidden || _mode == DesktopWindowMode.island;
 
   Future<void> init() async {
     if (!isQingyaDesktop || _ready) return;
@@ -54,11 +56,10 @@ class QingyaWindowController with WindowListener {
     _ready = true;
   }
 
-  /// 窗口尺寸取整，减轻非整数 DPR 下的二次拉伸发糊。
   Future<void> _setSnappedSize(double width, double height) async {
-    final w = width.roundToDouble();
-    final h = height.roundToDouble();
-    await windowManager.setSize(Size(w, h));
+    await windowManager.setSize(
+      Size(width.roundToDouble(), height.roundToDouble()),
+    );
   }
 
   Future<void> showMain() async {
@@ -73,8 +74,49 @@ class QingyaWindowController with WindowListener {
 
   Future<void> hideToBackground({required bool preferIsland}) async {
     if (!isQingyaDesktop || !_ready) return;
-    await windowManager.hide();
-    _setMode(DesktopWindowMode.hidden);
+    if (preferIsland) {
+      await enterIslandMode();
+    } else {
+      await windowManager.hide();
+      _setMode(DesktopWindowMode.hidden);
+    }
+  }
+
+  /// 关主窗：整窗变成屏顶小条（内部再画岛 UI）。
+  Future<void> enterIslandMode({
+    double width = kIslandHoverWidth,
+    double height = kIslandHoverHeight + 16,
+  }) async {
+    if (!isQingyaDesktop || !_ready) return;
+    final w = width.roundToDouble().clamp(120.0, 420.0);
+    final h = height.roundToDouble().clamp(40.0, 120.0);
+    await windowManager.setMinimumSize(Size(w, h));
+    await windowManager.setMaximumSize(Size(w, h));
+    await windowManager.setAsFrameless();
+    await windowManager.setHasShadow(false);
+    await windowManager.setBackgroundColor(const Color(0x00000000));
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setSkipTaskbar(true);
+    await windowManager.setResizable(false);
+    await windowManager.setSize(Size(w, h));
+    await _positionIslandTopCenter(width: w, height: h);
+    await windowManager.show();
+    _setMode(DesktopWindowMode.island);
+  }
+
+  Future<void> resizeIsland({
+    required double width,
+    required double height,
+  }) async {
+    if (!isQingyaDesktop || !_ready || _mode != DesktopWindowMode.island) {
+      return;
+    }
+    final w = width.roundToDouble().clamp(120.0, 420.0);
+    final h = height.roundToDouble().clamp(40.0, 320.0);
+    await windowManager.setMinimumSize(Size(w, h));
+    await windowManager.setMaximumSize(Size(w, h));
+    await windowManager.setSize(Size(w, h));
+    await _positionIslandTopCenter(width: w, height: h);
   }
 
   Future<void> hideCompletely() async {
@@ -110,6 +152,31 @@ class QingyaWindowController with WindowListener {
     await windowManager.setSkipTaskbar(false);
     await _setSnappedSize(kDesktopDefaultWidth, kDesktopDefaultHeight);
     await windowManager.center();
+  }
+
+  Future<void> _positionIslandTopCenter({
+    required double width,
+    required double height,
+  }) async {
+    try {
+      final display = await screenRetriever.getPrimaryDisplay();
+      final rawScale = display.scaleFactor;
+      final scale =
+          (rawScale == null || rawScale <= 0) ? 1.0 : rawScale.toDouble();
+      final visible = display.visiblePosition;
+      final visibleSize = display.visibleSize ?? display.size;
+      final originX = (visible?.dx ?? 0) / scale;
+      final originY = (visible?.dy ?? 0) / scale;
+      final screenW = visibleSize.width / scale;
+      final x = (originX + (screenW - width) / 2).roundToDouble();
+      final y = originY.roundToDouble();
+      await windowManager.setPosition(Offset(x, y));
+    } catch (e) {
+      debugPrint('[QingyaWindow] position island: $e');
+      try {
+        await windowManager.setAlignment(Alignment.topCenter);
+      } catch (_) {}
+    }
   }
 
   void _setMode(DesktopWindowMode next) {
