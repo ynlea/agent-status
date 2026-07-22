@@ -23,6 +23,21 @@ flutter pub get
 flutter run
 ```
 
+### Windows 桌面
+
+```powershell
+cd mobile
+flutter config --enable-windows-desktop
+flutter pub get
+flutter run -d windows
+# 或 release 构建 + 安装包
+.\scripts\package_windows.ps1
+```
+
+- 侧栏导航 + 宽屏主从分栏；关主窗缩到托盘，灵动岛按通知开关展示。
+- 检查更新资产名：`qingya-windows-setup.exe`（与 Android 共用 pubspec 版本）。
+- 本机 Agent 上报请用独立 monitor，桌面端只读。
+
 首次进入可点 **「先用演示数据看看」** 预览 UI；或 **开始配置** 填写服务地址与密钥。
 
 接 mock：

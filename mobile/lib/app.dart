@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'data/desktop/window_controller.dart';
 import 'data/prefs/settings_store.dart';
 import 'domain/models.dart';
 import 'theme/qingya_theme.dart';
+import 'ui/desktop/desktop_host.dart';
 import 'ui/pages/devices_page.dart';
 import 'ui/pages/home_page.dart';
 import 'ui/pages/providers_page.dart';
@@ -14,13 +18,13 @@ import 'ui/pages/usage_page.dart';
 import 'ui/pages/welcome_page.dart';
 import 'ui/shell/main_shell.dart';
 
-final _rootKey = GlobalKey<NavigatorState>();
+final rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final configured = ref.watch(settingsProvider.select((s) => s.isConfigured));
 
   return GoRouter(
-    navigatorKey: _rootKey,
+    navigatorKey: rootNavigatorKey,
     initialLocation: configured ? '/home' : '/welcome',
     refreshListenable: _SettingsRefresh(ref),
     redirect: (context, state) {
@@ -76,7 +80,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                       // root navigator keeps full-screen (no tab bar).
                       GoRoute(
                         path: 'sessions/:agent/:sessionId',
-                        parentNavigatorKey: _rootKey,
+                        parentNavigatorKey: rootNavigatorKey,
                         builder: (_, state) => SessionDetailPage(
                           machineId: state.pathParameters['machineId']!,
                           agent: state.pathParameters['agent']!,
@@ -161,6 +165,17 @@ class QingyaApp extends ConsumerWidget {
   final ThemeData? theme;
   final ThemeData? darkTheme;
 
+  void _openSession(WidgetRef ref, Session session) {
+    unawaited(WindowController.instance.showMain());
+    final router = ref.read(routerProvider);
+    final path =
+        '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}';
+    // 延迟一拍，等主窗恢复后再导航
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      router.go(path);
+    });
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
@@ -178,6 +193,12 @@ class QingyaApp extends ConsumerWidget {
         AppThemeMode.dark => ThemeMode.dark,
       },
       routerConfig: router,
+      builder: (context, child) {
+        return DesktopHost(
+          onOpenSession: (session) => _openSession(ref, session),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 }

@@ -15,11 +15,15 @@ class SessionDetailPage extends ConsumerWidget {
     required this.machineId,
     required this.agent,
     required this.sessionId,
+    this.embedded = false,
   });
 
   final String machineId;
   final String agent;
   final String sessionId;
+
+  /// 桌面主从分栏右侧嵌入时为 true：隐藏返回按钮。
+  final bool embedded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -65,14 +69,17 @@ class SessionDetailPage extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(4, 2, 8, 0),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: () => context.pop(),
-                    icon: Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      size: 18,
-                      color: c.textPrimary,
-                    ),
-                  ),
+                  if (!embedded)
+                    IconButton(
+                      onPressed: () => context.pop(),
+                      icon: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 18,
+                        color: c.textPrimary,
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 12),
                   Text(
                     '会话',
                     style: TextStyle(

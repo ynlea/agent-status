@@ -12,23 +12,32 @@ class AppUpdateService {
     this.repoOwner = 'ynlea',
     this.repoName = 'agent-status',
     this.apkAssetName = 'qingya-android-release.apk',
+    this.windowsSetupAssetName = 'qingya-windows-setup.exe',
   }) : _client = client ?? http.Client();
 
   final http.Client _client;
   final String repoOwner;
   final String repoName;
   final String apkAssetName;
+  final String windowsSetupAssetName;
 
   static const _installChannel = MethodChannel('qingya/updater');
+
+  /// 当前平台期望的安装包资产名。
+  String get platformAssetName {
+    if (Platform.isAndroid) return apkAssetName;
+    if (Platform.isWindows) return windowsSetupAssetName;
+    return apkAssetName;
+  }
 
   Uri get _latestUri => Uri.https(
         'api.github.com',
         '/repos/$repoOwner/$repoName/releases/latest',
       );
 
-  Map<String, String> get _headers => const {
+  Map<String, String> get _headers => {
         'Accept': 'application/vnd.github+json',
-        'User-Agent': 'qingya-android',
+        'User-Agent': Platform.isWindows ? 'qingya-windows' : 'qingya-android',
         'X-GitHub-Api-Version': '2022-11-28',
       };
 
@@ -59,15 +68,16 @@ class AppUpdateService {
       return AppUpdateCheckResult.failure('无法解析版本 $tag');
     }
 
-    String? apkUrl;
+    final want = platformAssetName;
+    String? assetUrl;
     final assets = body['assets'];
     if (assets is List) {
       for (final a in assets) {
         if (a is! Map) continue;
         final name = '${a['name'] ?? ''}';
-        if (name == apkAssetName) {
+        if (name == want) {
           final url = '${a['browser_download_url'] ?? ''}'.trim();
-          if (url.isNotEmpty) apkUrl = url;
+          if (url.isNotEmpty) assetUrl = url;
           break;
         }
       }
@@ -80,15 +90,15 @@ class AppUpdateService {
       tag: tag.startsWith('v') || tag.startsWith('V') ? tag : 'v$tag',
       remoteVersion: remote,
       localVersion: local.isEmpty ? currentVersion : local,
-      apkUrl: apkUrl,
+      apkUrl: assetUrl,
       releaseNotes: notes,
       message: newer
-          ? (apkUrl == null ? '发现新版本，但未找到安装包' : null)
+          ? (assetUrl == null ? '发现新版本，但未找到安装包' : null)
           : '已是最新版本',
     );
   }
 
-  /// 下载 APK，[onProgress] 为 0~1（未知总长时为 null 进度用 received 字节）。
+  /// 下载安装包，[onProgress] 为 0~1（未知总长时为 null 进度用 received 字节）。
   Future<File> downloadApk({
     required String url,
     required String tag,
@@ -109,7 +119,8 @@ class AppUpdateService {
       await outDir.create(recursive: true);
     }
     final safeTag = tag.replaceAll(RegExp(r'[^0-9A-Za-z._-]'), '_');
-    final file = File('${outDir.path}/qingya-$safeTag.apk');
+    final ext = Platform.isWindows ? 'exe' : 'apk';
+    final file = File('${outDir.path}/qingya-$safeTag.$ext');
     if (await file.exists()) {
       await file.delete();
     }
@@ -139,14 +150,39 @@ class AppUpdateService {
     return file;
   }
 
+  /// 安装：Android 走 MethodChannel；Windows 调起 setup.exe。
   Future<void> installApk(String path) async {
+    if (Platform.isWindows) {
+      await installWindowsSetup(path);
+      return;
+    }
     if (!Platform.isAndroid) {
-      throw AppUpdateException('仅支持 Android 安装');
+      throw AppUpdateException('当前平台不支持应用内安装');
     }
     try {
       await _installChannel.invokeMethod<void>('installApk', {'path': path});
     } on PlatformException catch (e) {
       throw AppUpdateException(e.message ?? e.code);
+    }
+  }
+
+  /// 调起 Windows 安装程序（Inno Setup 等生成的 setup.exe）。
+  Future<void> installWindowsSetup(String path) async {
+    if (!Platform.isWindows) {
+      throw AppUpdateException('仅支持 Windows 安装');
+    }
+    final file = File(path);
+    if (!await file.exists()) {
+      throw AppUpdateException('安装包不存在');
+    }
+    try {
+      await Process.start(
+        path,
+        const [],
+        mode: ProcessStartMode.detached,
+      );
+    } catch (e) {
+      throw AppUpdateException('无法打开安装程序：$e');
     }
   }
 
@@ -205,6 +241,7 @@ class AppUpdateCheckResult {
   final String tag;
   final String remoteVersion;
   final String localVersion;
+  /// 下载地址（历史字段名 apkUrl；Windows 下为 setup.exe URL）。
   final String? apkUrl;
   final String releaseNotes;
   final String? message;

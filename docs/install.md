@@ -98,8 +98,9 @@ Windows 常驻：进程 + 可选「登录时」计划任务（`AgentStatusServer
 推送符合 `v*` 的 tag 后，GitHub Actions（`.github/workflows/release.yml`）会：
 
 1. **Go**：在 Ubuntu 上交叉编译 Linux/Windows 的 server、monitor  
-2. **Flutter**：在 Ubuntu 上编译 Android `qingya-android-release.apk`  
-3. 汇总上传到同一 GitHub Release  
+2. **Flutter Android**：在 Ubuntu 上编译 `qingya-android-release.apk`  
+3. **Flutter Windows**：在 `windows-latest` 上编译桌面端并打包 `qingya-windows-setup.exe`  
+4. 汇总上传到同一 GitHub Release  
 
 ```bash
 # 确保 main 已包含 scripts/、mobile/ 与 workflow
@@ -125,7 +126,22 @@ gh release create v0.1.0 dist/release/* --generate-notes
 - `agent-status-server-windows-amd64.exe`
 - `agent-status-monitor-windows-amd64.exe`
 - `qingya-android-release.apk`
-- `sha256sums.txt`（仅 Go 产物校验和；APK 另附）
+- `qingya-windows-setup.exe`（轻芽 Windows 桌面端安装包）
+- `sha256sums.txt`（仅 Go 产物校验和；客户端安装包另附）
+
+### 轻芽 Windows 桌面端
+
+- 与 Android 共用 `mobile/pubspec.yaml` 版本号；同一 GitHub Release 挂两端产物。
+- 应用内「检查更新」会匹配资产名 `qingya-windows-setup.exe`，下载后调起安装程序。
+- 本机打包（需 Windows + Flutter + 可选 Inno Setup 6）：
+
+```powershell
+cd mobile
+.\scripts\package_windows.ps1
+```
+
+- 关闭主窗口会缩到系统托盘，进程与灵动岛继续；仅托盘「退出」结束进程。
+- 桌面端只读查看，本机 Agent 上报仍使用独立 `agent-status-monitor`。
 
 ## 与手动部署的关系
 

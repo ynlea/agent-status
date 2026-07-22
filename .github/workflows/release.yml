@@ -139,8 +139,68 @@ jobs:
           path: dist/flutter/*
           if-no-files-found: error
 
+  build-flutter-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Windows release
+        env:
+          BUILD_NO: ${{ github.run_number }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          flutter config --enable-windows-desktop
+          $tag = $env:GITHUB_REF_NAME
+          $ver = $tag -replace '^v',''
+          if ([string]::IsNullOrWhiteSpace($ver)) { throw "empty version from tag $tag" }
+          flutter build windows --release --build-name="$ver" --build-number="$env:BUILD_NO"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          # Chinese language file may be missing on some images; English-only is fine
+
+      - name: Package setup.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "ISCC not found" }
+          $tag = $env:GITHUB_REF_NAME
+          $ver = $tag -replace '^v',''
+          if ([string]::IsNullOrWhiteSpace($ver)) { throw "empty version from tag $tag" }
+          $iss = "scripts\qingya_windows.iss"
+          & $iscc "/DMyAppVersion=$ver" $iss
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\dist\flutter" | Out-Null
+          Copy-Item -Force "build\windows\qingya-windows-setup.exe" `
+            "$env:GITHUB_WORKSPACE\dist\flutter\qingya-windows-setup.exe"
+          Get-ChildItem "$env:GITHUB_WORKSPACE\dist\flutter"
+
+      - name: Upload Flutter Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-windows
+          path: dist/flutter/*
+          if-no-files-found: error
+
   release:
-    needs: [build-go, build-flutter-android]
+    needs: [build-go, build-flutter-android, build-flutter-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -155,10 +215,16 @@ jobs:
           name: go-binaries
           path: dist/release
 
-      - name: Download Flutter artifacts
+      - name: Download Flutter Android artifacts
         uses: actions/download-artifact@v4
         with:
           name: flutter-android
+          path: dist/release
+
+      - name: Download Flutter Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-windows
           path: dist/release
 
       - name: List assets

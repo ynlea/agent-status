@@ -10,10 +10,14 @@ class SessionCard extends StatelessWidget {
     super.key,
     required this.session,
     this.onTap,
+    this.selected = false,
   });
 
   final Session session;
   final VoidCallback? onTap;
+
+  /// 桌面主从分栏左侧列表选中态。
+  final bool selected;
 
   String get _stateIcon => switch (session.state) {
         SessionState.confirm => QingyaAssets.notifyConfirm,
@@ -92,7 +96,12 @@ class SessionCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: c.card,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: stateColor.withValues(alpha: 0.18)),
+            border: Border.all(
+              color: selected
+                  ? stateColor.withValues(alpha: 0.85)
+                  : stateColor.withValues(alpha: 0.18),
+              width: selected ? 1.5 : 1,
+            ),
             boxShadow: [
               BoxShadow(
                 color: c.shadow,

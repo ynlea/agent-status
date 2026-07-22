@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/desktop/desktop_platform.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
@@ -9,6 +10,7 @@ import '../widgets/assets.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/prototype_widgets.dart';
 import '../widgets/session_card.dart';
+import 'session_detail_page.dart';
 
 enum _HomeFilter { all, confirm, working, done }
 
@@ -21,6 +23,15 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   _HomeFilter _filter = _HomeFilter.all;
+  Session? _selected;
+
+  bool _useMasterDetail(BuildContext context) {
+    if (!isQingyaDesktop) return false;
+    return MediaQuery.sizeOf(context).width >= kDesktopMasterDetailBreakpoint;
+  }
+
+  String _sessionKey(Session s) =>
+      '${s.machineId}|${s.agent}|${s.sessionId}';
 
   @override
   Widget build(BuildContext context) {
@@ -35,118 +46,174 @@ class _HomePageState extends ConsumerState<HomePage> {
         _HomeFilter.done => session.state == SessionState.done,
       };
     }).toList();
+    final masterDetail = _useMasterDetail(context);
+
+    if (masterDetail && _selected != null) {
+      final key = _sessionKey(_selected!);
+      final stillThere = visible.any((s) => _sessionKey(s) == key);
+      if (!stillThere) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _selected = null);
+        });
+      }
+    }
+
+    void openSession(Session session) {
+      if (masterDetail) {
+        setState(() => _selected = session);
+      } else {
+        context.push(
+          '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
+        );
+      }
+    }
+
+    final list = RefreshIndicator(
+      color: c.primary,
+      onRefresh: () => ref.read(statusRepositoryProvider.notifier).refresh(),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: QingyaBrandHeader(
+              trailing: ConnectionPill(connected: snapshot.connected),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: _HeroCard(activeCount: active.length),
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                Text(
+                  '活跃会话（${active.length}）',
+                  style: TextStyle(
+                    fontSize: 17,
+                    color: c.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                if (snapshot.loading)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _FilterButton(
+                  label: '全部',
+                  selected: _filter == _HomeFilter.all,
+                  onTap: () => setState(() => _filter = _HomeFilter.all),
+                ),
+                _FilterButton(
+                  label: '需确认',
+                  selected: _filter == _HomeFilter.confirm,
+                  onTap: () => setState(() => _filter = _HomeFilter.confirm),
+                ),
+                _FilterButton(
+                  label: '工作中',
+                  selected: _filter == _HomeFilter.working,
+                  onTap: () => setState(() => _filter = _HomeFilter.working),
+                ),
+                _FilterButton(
+                  label: '已完成',
+                  selected: _filter == _HomeFilter.done,
+                  onTap: () => setState(() => _filter = _HomeFilter.done),
+                ),
+              ],
+            ),
+          ),
+          if (snapshot.error != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              snapshot.error!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: c.confirm),
+            ),
+          ],
+          const SizedBox(height: 12),
+          if (visible.isEmpty)
+            const SizedBox(
+              height: 320,
+              child: EmptyState(
+                asset: QingyaAssets.catEmptySleepV3,
+                title: '当前没有活跃会话',
+                subtitle: '当有新的会话时，会及时通知你哦～',
+              ),
+            )
+          else
+            ...visible.map(
+              (session) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SessionCard(
+                  session: session,
+                  selected: masterDetail &&
+                      _selected != null &&
+                      _sessionKey(_selected!) == _sessionKey(session),
+                  onTap: () => openSession(session),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (!masterDetail) {
+      return Scaffold(
+        backgroundColor: c.scaffold,
+        body: SafeArea(bottom: false, child: list),
+      );
+    }
 
     return Scaffold(
       backgroundColor: c.scaffold,
       body: SafeArea(
         bottom: false,
-        child: RefreshIndicator(
-          color: c.primary,
-          onRefresh: () =>
-              ref.read(statusRepositoryProvider.notifier).refresh(),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            SizedBox(width: 420, child: list),
+            VerticalDivider(
+              width: 1,
+              thickness: 1,
+              color: c.border.withValues(alpha: 0.8),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: QingyaBrandHeader(
-                  trailing: ConnectionPill(connected: snapshot.connected),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: _HeroCard(activeCount: active.length),
-              ),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  children: [
-                    Text(
-                      '活跃会话（${active.length}）',
-                      style: TextStyle(
-                        fontSize: 17,
-                        color: c.textPrimary,
-                        fontWeight: FontWeight.w700,
+            Expanded(
+              child: _selected == null
+                  ? Center(
+                      child: Text(
+                        '选择一个会话',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: c.textSecondary,
+                        ),
                       ),
+                    )
+                  : SessionDetailPage(
+                      key: ValueKey(_sessionKey(_selected!)),
+                      machineId: _selected!.machineId,
+                      agent: _selected!.agent,
+                      sessionId: _selected!.sessionId,
+                      embedded: true,
                     ),
-                    const Spacer(),
-                    if (snapshot.loading)
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterButton(
-                      label: '全部',
-                      selected: _filter == _HomeFilter.all,
-                      onTap: () => setState(() => _filter = _HomeFilter.all),
-                    ),
-                    _FilterButton(
-                      label: '需确认',
-                      selected: _filter == _HomeFilter.confirm,
-                      onTap: () =>
-                          setState(() => _filter = _HomeFilter.confirm),
-                    ),
-                    _FilterButton(
-                      label: '工作中',
-                      selected: _filter == _HomeFilter.working,
-                      onTap: () =>
-                          setState(() => _filter = _HomeFilter.working),
-                    ),
-                    _FilterButton(
-                      label: '已完成',
-                      selected: _filter == _HomeFilter.done,
-                      onTap: () => setState(() => _filter = _HomeFilter.done),
-                    ),
-                  ],
-                ),
-              ),
-              if (snapshot.error != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  snapshot.error!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: c.confirm),
-                ),
-              ],
-              const SizedBox(height: 12),
-              if (visible.isEmpty)
-                const SizedBox(
-                  height: 320,
-                  child: EmptyState(
-                    asset: QingyaAssets.catEmptySleepV3,
-                    title: '当前没有活跃会话',
-                    subtitle: '当有新的会话时，会及时通知你哦～',
-                  ),
-                )
-              else
-                ...visible.map(
-                  (session) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SessionCard(
-                      session: session,
-                      onTap: () => context.push(
-                        '/sessions/${session.machineId}/${session.agent}/${Uri.encodeComponent(session.sessionId)}',
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

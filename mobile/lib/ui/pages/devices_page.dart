@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/desktop/desktop_platform.dart';
 import '../../data/repo/status_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/qingya_theme.dart';
@@ -11,97 +12,185 @@ import '../widgets/prototype_widgets.dart';
 import '../widgets/status_dot.dart';
 import '../widgets/session_card.dart';
 
-class DevicesPage extends ConsumerWidget {
+class DevicesPage extends ConsumerStatefulWidget {
   const DevicesPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DevicesPage> createState() => _DevicesPageState();
+}
+
+class _DevicesPageState extends ConsumerState<DevicesPage> {
+  String? _selectedMachineId;
+
+  bool _useMasterDetail(BuildContext context) {
+    if (!isQingyaDesktop) return false;
+    return MediaQuery.sizeOf(context).width >= kDesktopMasterDetailBreakpoint;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final snapshot = ref.watch(statusRepositoryProvider);
     final machines = snapshot.machines;
+    final masterDetail = _useMasterDetail(context);
+
+    if (masterDetail &&
+        _selectedMachineId != null &&
+        machines.every((m) => m.machineId != _selectedMachineId)) {
+      // 设备列表变更后清理失效选中
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _selectedMachineId = null);
+      });
+    }
+
+    final listPane = _DevicesListPane(
+      snapshot: snapshot,
+      machines: machines,
+      selectedMachineId: masterDetail ? _selectedMachineId : null,
+      onSelect: (machine) {
+        if (masterDetail) {
+          setState(() => _selectedMachineId = machine.machineId);
+        } else {
+          context.push('/devices/${machine.machineId}');
+        }
+      },
+      onRename: (machine) => showRenameMachineDialog(context, ref, machine),
+      onRefresh: () => ref.read(statusRepositoryProvider.notifier).refresh(),
+    );
+
+    if (!masterDetail) {
+      return Scaffold(
+        backgroundColor: context.qingya.scaffold,
+        body: SafeArea(bottom: false, child: listPane),
+      );
+    }
 
     return Scaffold(
       backgroundColor: context.qingya.scaffold,
       body: SafeArea(
         bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: QingyaBrandHeader(
-                trailing: ConnectionPill(connected: snapshot.connected),
-              ),
+            SizedBox(width: 360, child: listPane),
+            VerticalDivider(
+              width: 1,
+              thickness: 1,
+              color: context.qingya.border.withValues(alpha: 0.8),
             ),
-            const SizedBox(height: 26),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Text(
-                    '我的设备（${machines.length}）',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: context.qingya.textPrimary,
-                    ),
-                  ),
-                  const Spacer(),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () =>
-                        ref.read(statusRepositoryProvider.notifier).refresh(),
-                    child: const Padding(
-                      padding: EdgeInsets.all(7),
-                      child: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
             Expanded(
-              child: machines.isEmpty
-                  ? const EmptyState(
-                      asset: QingyaAssets.catDetailPeekV3,
-                      title: '还没有设备',
-                      subtitle: '等待监控端上报，或检查服务连接',
-                    )
-                  : RefreshIndicator(
-                      color: context.qingya.device,
-                      onRefresh: () =>
-                          ref.read(statusRepositoryProvider.notifier).refresh(),
-                      child: ListView.separated(
-                        physics: const AlwaysScrollableScrollPhysics(
-                          parent: BouncingScrollPhysics(),
+              child: _selectedMachineId == null
+                  ? Center(
+                      child: Text(
+                        '选择一台设备',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: context.qingya.textSecondary,
                         ),
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                        itemCount: machines.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final machine = machines[index];
-                          final sessions =
-                              snapshot.sessionsFor(machine.machineId);
-                          final activeCount =
-                              sessions.where((s) => s.state.isActive).length;
-                          return _DeviceTile(
-                            machine: machine,
-                            activeCount: activeCount,
-                            index: index,
-                            onTap: () =>
-                                context.push('/devices/${machine.machineId}'),
-                            onRename: () => showRenameMachineDialog(
-                              context,
-                              ref,
-                              machine,
-                            ),
-                          );
-                        },
                       ),
+                    )
+                  : DeviceDetailPage(
+                      key: ValueKey(_selectedMachineId),
+                      machineId: _selectedMachineId!,
+                      embedded: true,
                     ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DevicesListPane extends StatelessWidget {
+  const _DevicesListPane({
+    required this.snapshot,
+    required this.machines,
+    required this.selectedMachineId,
+    required this.onSelect,
+    required this.onRename,
+    required this.onRefresh,
+  });
+
+  final StatusSnapshot snapshot;
+  final List<Machine> machines;
+  final String? selectedMachineId;
+  final ValueChanged<Machine> onSelect;
+  final ValueChanged<Machine> onRename;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          child: QingyaBrandHeader(
+            trailing: ConnectionPill(connected: snapshot.connected),
+          ),
+        ),
+        const SizedBox(height: 26),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              Text(
+                '我的设备（${machines.length}）',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: context.qingya.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => onRefresh(),
+                child: const Padding(
+                  padding: EdgeInsets.all(7),
+                  child: QingyaTintIcon(QingyaAssets.refreshV2, size: 20),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: machines.isEmpty
+              ? const EmptyState(
+                  asset: QingyaAssets.catDetailPeekV3,
+                  title: '还没有设备',
+                  subtitle: '等待监控端上报，或检查服务连接',
+                )
+              : RefreshIndicator(
+                  color: context.qingya.device,
+                  onRefresh: onRefresh,
+                  child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    itemCount: machines.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final machine = machines[index];
+                      final sessions =
+                          snapshot.sessionsFor(machine.machineId);
+                      final activeCount =
+                          sessions.where((s) => s.state.isActive).length;
+                      final selected = selectedMachineId == machine.machineId;
+                      return _DeviceTile(
+                        machine: machine,
+                        activeCount: activeCount,
+                        index: index,
+                        selected: selected,
+                        onTap: () => onSelect(machine),
+                        onRename: () => onRename(machine),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }
@@ -113,6 +202,7 @@ class _DeviceTile extends StatelessWidget {
     required this.index,
     required this.onTap,
     required this.onRename,
+    this.selected = false,
   });
 
   final Machine machine;
@@ -120,6 +210,7 @@ class _DeviceTile extends StatelessWidget {
   final int index;
   final VoidCallback onTap;
   final VoidCallback onRename;
+  final bool selected;
 
   String get _deviceAsset {
     final value = '${machine.platform} ${machine.machineName}'.toLowerCase();
@@ -156,13 +247,17 @@ class _DeviceTile extends StatelessWidget {
         onTap: onTap,
         onLongPress: onRename,
         child: Container(
-          height: 82,
+          height: 86,
           padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
           decoration: BoxDecoration(
             color: _backgroundOf(c),
             borderRadius: BorderRadius.circular(16),
-            border:
-                Border.all(color: c.border.withValues(alpha: 0.85)),
+            border: Border.all(
+              color: selected
+                  ? c.device.withValues(alpha: 0.9)
+                  : c.border.withValues(alpha: 0.85),
+              width: selected ? 1.5 : 1,
+            ),
             boxShadow: [
               BoxShadow(
                   color: c.shadow,
@@ -315,9 +410,16 @@ String _lastSeen(DateTime? time) {
 }
 
 class DeviceDetailPage extends ConsumerStatefulWidget {
-  const DeviceDetailPage({super.key, required this.machineId});
+  const DeviceDetailPage({
+    super.key,
+    required this.machineId,
+    this.embedded = false,
+  });
 
   final String machineId;
+
+  /// 桌面主从分栏右侧嵌入时为 true：隐藏返回按钮。
+  final bool embedded;
 
   @override
   ConsumerState<DeviceDetailPage> createState() => _DeviceDetailPageState();
@@ -353,6 +455,7 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                   _DetailHeader(
                     machine: machine,
                     fallbackId: widget.machineId,
+                    showBack: !widget.embedded,
                     onRename: machine == null
                         ? null
                         : () => showRenameMachineDialog(
@@ -443,11 +546,13 @@ class _DetailHeader extends StatelessWidget {
     required this.machine,
     required this.fallbackId,
     this.onRename,
+    this.showBack = true,
   });
 
   final Machine? machine;
   final String fallbackId;
   final VoidCallback? onRename;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
@@ -466,18 +571,21 @@ class _DetailHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconButton(
-                onPressed: () => context.pop(),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                icon: Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 20,
-                  color: c.textPrimary,
+              if (showBack) ...[
+                IconButton(
+                  onPressed: () => context.pop(),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  icon: Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    size: 20,
+                    color: c.textPrimary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+              ] else
+                const SizedBox(height: 4),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

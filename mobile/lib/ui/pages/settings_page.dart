@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/desktop/desktop_platform.dart';
 import '../../data/monitor/monitor_bridge.dart';
 import '../../data/prefs/package_info_provider.dart';
 import '../../data/prefs/settings_store.dart';
@@ -198,9 +199,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
                 Divider(height: 1, indent: 12, endIndent: 12, color: c.divider),
                 _SettingsValueRow(
-                  label: '后台监测',
-                  value: _monitorStatus,
-                  onTap: _refreshMonitorLabel,
+                  label: isQingyaDesktop ? '桌面状态' : '后台监测',
+                  value: isQingyaDesktop
+                      ? '灵动岛 + 托盘驻留'
+                      : _monitorStatus,
+                  onTap: isQingyaDesktop ? null : _refreshMonitorLabel,
                 ),
               ],
             ),
@@ -249,7 +252,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
-                '成功时通知栏会出现「轻芽后台监听」。请允许通知权限；点「后台监测」可重新拉起。演示模式不会启真实后台。',
+                isQingyaDesktop
+                    ? '桌面端通过顶部灵动岛展示会话变化；关闭主窗口会缩到托盘，进程与灵动岛继续运行。本机 Agent 上报仍请使用独立 monitor。'
+                    : '成功时通知栏会出现「轻芽后台监听」。请允许通知权限；点「后台监测」可重新拉起。演示模式不会启真实后台。',
                 style: TextStyle(
                   fontSize: 11,
                   color: c.textSecondary,
@@ -322,7 +327,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ? (_updateHint ?? '下载中…')
                       : (_checkingUpdate
                           ? '检查中…'
-                          : (_updateHint ?? 'GitHub Release')),
+                          : (_updateHint ??
+                              (isQingyaDesktop
+                                  ? 'GitHub Release（Windows）'
+                                  : 'GitHub Release'))),
                   onTap: (_checkingUpdate || _downloading)
                       ? null
                       : _checkForUpdate,
