@@ -60,24 +60,29 @@ class IslandSurface extends StatelessWidget {
 
     final size = _visualSize(viewModel);
 
-    return MouseRegion(
-      onEnter: (_) => onHoverEnter?.call(),
-      onExit: (_) => onHoverExit?.call(),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOutCubic,
-          width: fillHost ? double.infinity : size.$1,
-          height: size.$2,
-          alignment: Alignment.topCenter,
-          child: _IslandBody(
-            viewModel: viewModel,
-            fillHost: fillHost,
-            onOpenSession: onOpenSession,
-            onCollapse: onCollapse,
-            onAnnouncementFinished: onAnnouncementFinished,
+    // 外层不抢多余命中：只有实际内容尺寸响应鼠标
+    return Align(
+      alignment: Alignment.topCenter,
+      child: MouseRegion(
+        opaque: false,
+        onEnter: (_) => onHoverEnter?.call(),
+        onExit: (_) => onHoverExit?.call(),
+        child: GestureDetector(
+          behavior: HitTestBehavior.deferToChild,
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            width: fillHost ? double.infinity : size.$1,
+            height: size.$2,
+            alignment: Alignment.topCenter,
+            child: _IslandBody(
+              viewModel: viewModel,
+              fillHost: fillHost,
+              onOpenSession: onOpenSession,
+              onCollapse: onCollapse,
+              onAnnouncementFinished: onAnnouncementFinished,
+            ),
           ),
         ),
       ),
@@ -85,9 +90,10 @@ class IslandSurface extends StatelessWidget {
   }
 
   (double, double) _visualSize(IslandViewModel vm) {
+    // strip 命中区 = 视觉区，避免“靠近就展开”
     return switch (vm.phase) {
-      IslandPhase.hidden => (kIslandStripWidth, kIslandStripHitHeight),
-      IslandPhase.strip => (kIslandStripWidth, kIslandStripHitHeight),
+      IslandPhase.hidden => (kIslandStripWidth, kIslandStripHeight),
+      IslandPhase.strip => (kIslandStripWidth, kIslandStripHeight),
       IslandPhase.hover => (kIslandHoverWidth, kIslandHoverHeight),
       IslandPhase.card => (
           kIslandCardWidth,
@@ -198,36 +204,23 @@ class _Strip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 高命中区 + 顶对齐细视觉条，悬停更稳
-    return SizedBox(
-      width: fillHost ? double.infinity : kIslandStripWidth,
-      height: kIslandStripHitHeight,
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: _GlowShell(
-          accent: accent,
-          intensity: 0.55,
-          pulse: true,
-          borderRadius: const BorderRadius.only(
-            bottomLeft: Radius.circular(999),
-            bottomRight: Radius.circular(999),
-          ),
-          child: Container(
-            width: fillHost ? 120 : kIslandStripWidth,
-            height: kIslandStripHeight,
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(999),
-                bottomRight: Radius.circular(999),
-              ),
-              gradient: LinearGradient(
-                colors: [
-                  Color.lerp(accent, Colors.white, 0.25)!,
-                  accent,
-                  Color.lerp(accent, _islandDeep, 0.35)!,
-                ],
-              ),
-            ),
+    // 命中像素 = 细条本身；颜色代表当前最高优先级状态
+    return _GlowShell(
+      accent: accent,
+      intensity: 0.65,
+      pulse: true,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: fillHost ? double.infinity : kIslandStripWidth,
+        height: kIslandStripHeight,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: LinearGradient(
+            colors: [
+              Color.lerp(accent, Colors.white, 0.28)!,
+              accent,
+              Color.lerp(accent, _islandDeep, 0.28)!,
+            ],
           ),
         ),
       ),
@@ -248,11 +241,20 @@ class _HoverCapsule extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = viewModel.hasSessions
-        ? (viewModel.badgeCount > 1
-            ? '${viewModel.primary?.state.labelZh ?? '状态'} · ${viewModel.badgeCount}'
-            : (viewModel.primary?.title ?? viewModel.headline))
-        : (viewModel.connected ? '轻芽在线' : '轻芽 · 未连接');
+    final s = viewModel.primary;
+    final ann = s == null ? null : IslandAnnouncement.fromSession(s);
+    // 统一两行：状态 · 机器 · 渠道 · 项目 / 提示
+    final String line1;
+    final String line2;
+    if (viewModel.hasSessions && ann != null) {
+      final prefix = viewModel.badgeCount > 1 ? '×${viewModel.badgeCount} ' : '';
+      line1 =
+          '$prefix${ann.state.labelZh} · ${ann.machineName} · ${ann.agentLabel} · ${ann.projectLabel}';
+      line2 = ann.prompt;
+    } else {
+      line1 = viewModel.connected ? '轻芽在线' : '轻芽 · 未连接';
+      line2 = viewModel.connected ? '暂无活跃会话' : '未连接服务';
+    }
 
     return _GlowShell(
       accent: accent,
@@ -280,15 +282,32 @@ class _HoverCapsule extends StatelessWidget {
             _AppBadge(accent: accent, size: 26),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _islandFg,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    line1,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: _islandFg,
+                      height: 1.15,
+                    ),
+                  ),
+                  Text(
+                    line2,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: _islandMuted,
+                      height: 1.15,
+                    ),
+                  ),
+                ],
               ),
             ),
             if (viewModel.badgeCount > 1)
@@ -354,10 +373,9 @@ class _AnnouncementCardState extends State<_AnnouncementCard>
             ? math.min(MediaQuery.sizeOf(context).width, kIslandCardWidth)
             : kIslandCardWidth) -
         78;
-    final overflow = (_textWidth - _viewWidth).clamp(0.0, 4000.0);
-    final ms =
-        overflow <= 0 ? 2400 : (2000 + overflow * 16).round().clamp(2400, 11000);
-    _marquee.duration = Duration(milliseconds: ms);
+    // 固定约 10s：短文慢滚一圈多遍，长文慢滚完整；到点再收起
+    const totalMs = kIslandAnnounceSeconds * 1000;
+    _marquee.duration = const Duration(milliseconds: totalMs);
     _marquee.forward(from: 0).whenComplete(() {
       if (_finished || !mounted) return;
       _finished = true;
@@ -394,9 +412,9 @@ class _AnnouncementCardState extends State<_AnnouncementCard>
           child: Container(
             width: widget.fillHost ? double.infinity : kIslandCardWidth,
             height: kIslandAnnounceHeight,
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(18),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -412,52 +430,43 @@ class _AnnouncementCardState extends State<_AnnouncementCard>
             ),
             child: Row(
               children: [
-                _AppBadge(accent: widget.accent, size: 38, glowing: true),
-                const SizedBox(width: 12),
+                _AppBadge(accent: widget.accent, size: 30, glowing: true),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: widget.accent,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: widget.accent.withValues(alpha: 0.7),
-                                  blurRadius: 8,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            a.state.labelZh,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: widget.accent,
-                            ),
-                          ),
-                        ],
+                      // 第 1 行：状态 · 机器 · 渠道 · 项目
+                      Text(
+                        '${a.state.labelZh} · ${a.machineName} · ${a.agentLabel} · ${a.projectLabel}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: widget.accent,
+                          height: 1.15,
+                        ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
+                      // 第 2 行：提示（可慢滚）
                       ClipRect(
                         child: SizedBox(
-                          height: 20,
+                          height: 18,
                           child: AnimatedBuilder(
                             animation: _marquee,
                             builder: (context, child) {
                               final overflow =
                                   (_textWidth - _viewWidth).clamp(0.0, 4000.0);
-                              final dx = overflow <= 0
-                                  ? 0.0
-                                  : -overflow * _marquee.value;
+                              double dx;
+                              if (overflow <= 0) {
+                                final t =
+                                    math.sin(_marquee.value * math.pi * 2);
+                                dx = t * 8;
+                              } else {
+                                dx = -overflow * _marquee.value;
+                              }
                               return Transform.translate(
                                 offset: Offset(dx, 0),
                                 child: child,
@@ -466,14 +475,15 @@ class _AnnouncementCardState extends State<_AnnouncementCard>
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                a.line,
+                                a.prompt,
                                 key: _textKey,
                                 maxLines: 1,
                                 softWrap: false,
                                 style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                   color: _islandFg,
+                                  height: 1.15,
                                 ),
                               ),
                             ),
@@ -597,6 +607,7 @@ class _CardPanel extends StatelessWidget {
                       separatorBuilder: (_, __) => const SizedBox(height: 6),
                       itemBuilder: (context, i) {
                         final s = sessions[i];
+                        final ann = IslandAnnouncement.fromSession(s);
                         final color = switch (s.state) {
                           SessionState.confirm => context.qingya.confirm,
                           SessionState.working => context.qingya.working,
@@ -637,24 +648,22 @@ class _CardPanel extends StatelessWidget {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          s.title,
+                                          [
+                                            ann.state.labelZh,
+                                            ann.machineName,
+                                            ann.agentLabel,
+                                            ann.projectLabel,
+                                          ].join(' · '),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w600,
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
                                             color: _islandFg,
                                           ),
                                         ),
                                         Text(
-                                          [
-                                            s.state.labelZh,
-                                            s.agent,
-                                            if ((s.machineName ?? '')
-                                                .trim()
-                                                .isNotEmpty)
-                                              s.machineName!.trim(),
-                                          ].join(' · '),
+                                          ann.prompt,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(

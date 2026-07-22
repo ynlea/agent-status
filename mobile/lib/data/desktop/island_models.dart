@@ -15,44 +15,118 @@ enum IslandPhase {
   card,
 }
 
-/// 单次状态变更播报（用于跑马灯）。
+/// 单次状态变更播报：分层信息，一眼看清机器/区段/项目/提示。
 class IslandAnnouncement {
   const IslandAnnouncement({
     required this.sessionKey,
-    required this.title,
     required this.state,
+    required this.machineName,
+    required this.agentLabel,
+    required this.projectLabel,
+    required this.prompt,
     required this.line,
-    this.agent = '',
-    this.machineName = '',
   });
 
   final String sessionKey;
-  final String title;
   final SessionState state;
-  final String agent;
+
+  /// 机器名，如 ThinkPad-X1
   final String machineName;
 
-  /// 完整播报文案，例如：`优化登录逻辑 · Claude · 已完成`
+  /// 渠道/Agent，如 Claude / Codex
+  final String agentLabel;
+
+  /// 项目短名（路径末段或 displayName）
+  final String projectLabel;
+
+  /// 提示词/任务摘要（message 优先）
+  final String prompt;
+
+  /// 跑马灯整行备用文案
   final String line;
 
   Map<String, dynamic> toJson() => {
         'sessionKey': sessionKey,
-        'title': title,
         'state': state.name,
-        'agent': agent,
         'machineName': machineName,
+        'agentLabel': agentLabel,
+        'projectLabel': projectLabel,
+        'prompt': prompt,
         'line': line,
       };
 
   factory IslandAnnouncement.fromJson(Map<String, dynamic> json) {
     return IslandAnnouncement(
       sessionKey: '${json['sessionKey'] ?? ''}',
-      title: '${json['title'] ?? ''}',
       state: sessionStateFrom('${json['state']}'),
-      agent: '${json['agent'] ?? ''}',
       machineName: '${json['machineName'] ?? ''}',
+      agentLabel: '${json['agentLabel'] ?? json['agent'] ?? ''}',
+      projectLabel: '${json['projectLabel'] ?? ''}',
+      prompt: '${json['prompt'] ?? json['title'] ?? ''}',
       line: '${json['line'] ?? ''}',
     );
+  }
+
+  /// 从 Session 生成结构化播报。
+  static IslandAnnouncement fromSession(Session s) {
+    final machine = (s.machineName ?? '').trim();
+    final agent = _agentLabel(s.agent);
+    final project = _projectLabel(s);
+    final prompt = _promptLabel(s);
+    final line = [
+      if (machine.isNotEmpty) machine,
+      agent,
+      if (project.isNotEmpty) project,
+      if (prompt.isNotEmpty) prompt,
+      s.state.labelZh,
+    ].where((e) => e.trim().isNotEmpty).join(' · ');
+    return IslandAnnouncement(
+      sessionKey: IslandViewModel.sessionKey(s),
+      state: s.state,
+      machineName: machine.isEmpty ? '未知机器' : machine,
+      agentLabel: agent,
+      projectLabel: project.isEmpty ? '未知项目' : project,
+      prompt: prompt.isEmpty ? '（无提示词）' : prompt,
+      line: line,
+    );
+  }
+
+  static String _agentLabel(String raw) {
+    switch (raw.toLowerCase().trim()) {
+      case 'claude':
+        return 'Claude';
+      case 'codex':
+        return 'Codex';
+      case 'opencode':
+        return 'OpenCode';
+      case '':
+      case 'unknown':
+        return '未知渠道';
+      default:
+        return raw;
+    }
+  }
+
+  static String _projectLabel(Session s) {
+    final cwd = s.cwd.trim();
+    final source = cwd.isNotEmpty ? cwd : s.displayName.trim();
+    if (source.isEmpty) return '';
+    final norm = source.replaceAll('\\', '/');
+    final parts = norm.split('/').where((e) => e.isNotEmpty).toList();
+    if (parts.isEmpty) return source;
+    // 取末 1～2 段，过长时仍可读
+    if (parts.length >= 2 && parts.last.length < 4) {
+      return '${parts[parts.length - 2]}/${parts.last}';
+    }
+    return parts.last;
+  }
+
+  static String _promptLabel(Session s) {
+    final m = s.message.trim();
+    if (m.isNotEmpty) return m;
+    final d = s.displayName.trim();
+    if (d.isNotEmpty && d != s.sessionId) return d;
+    return '';
   }
 }
 
@@ -159,14 +233,14 @@ class IslandViewModel {
     }
     final primary = filtered.first;
     final n = filtered.length;
+    final ann = IslandAnnouncement.fromSession(primary);
     final headline = n == 1
-        ? primary.title
-        : '${primary.state.labelZh} · 另有 ${n - 1} 个';
-    final machine = primary.machineName?.trim();
+        ? ann.prompt
+        : '${ann.state.labelZh} · 另有 ${n - 1} 个';
     final subtitle = [
-      if (machine != null && machine.isNotEmpty) machine,
-      primary.agent,
-      primary.state.labelZh,
+      ann.machineName,
+      ann.agentLabel,
+      ann.projectLabel,
     ].join(' · ');
     return IslandViewModel(
       sessions: filtered,
@@ -230,23 +304,7 @@ class IslandViewModel {
       if (!allowed(s.state)) continue;
       final old = prevMap[sessionKey(s)];
       if (old == null || old.state != s.state) {
-        final machine = s.machineName?.trim() ?? '';
-        final line = [
-          s.title,
-          if (s.agent.isNotEmpty) s.agent,
-          if (machine.isNotEmpty) machine,
-          s.state.labelZh,
-        ].join(' · ');
-        out.add(
-          IslandAnnouncement(
-            sessionKey: sessionKey(s),
-            title: s.title,
-            state: s.state,
-            agent: s.agent,
-            machineName: machine,
-            line: line,
-          ),
-        );
+        out.add(IslandAnnouncement.fromSession(s));
       }
     }
     // 高优在前

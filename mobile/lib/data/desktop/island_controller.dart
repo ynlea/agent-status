@@ -45,7 +45,10 @@ class IslandController extends StateNotifier<IslandViewModel> {
     final snapshot = _ref.read(statusRepositoryProvider);
     final enabled = settings.islandEnabled;
     final all = snapshot.sessions;
-    _lastAllSessions = all;
+    // 先算 diff 再更新快照，避免 prev/next 被写成同一拍导致漏通知。
+    final prevSnapshot = previousSessions.isEmpty
+        ? List<Session>.of(_lastAllSessions)
+        : previousSessions;
 
     final filtered = IslandViewModel.filterSessions(
       activeSessions: snapshot.activeSessions,
@@ -59,15 +62,14 @@ class IslandController extends StateNotifier<IslandViewModel> {
       _hovering = false;
       _announceQueue.clear();
       _playingAnnouncement = false;
+      _lastAllSessions = all;
       state = const IslandViewModel(enabled: false, phase: IslandPhase.hidden);
       unawaited(_syncWindowShape());
       return;
     }
 
-    final prevForDiff =
-        previousSessions.isEmpty ? _lastAllSessions : previousSessions;
     final announcements = IslandViewModel.diffAnnouncements(
-      previous: List.of(prevForDiff),
+      previous: prevSnapshot,
       next: all,
       notifyConfirm: settings.notifyConfirm,
       notifyWorking: settings.notifyWorking,
@@ -84,6 +86,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
         if (!exists && !samePlaying) _announceQueue.add(a);
       }
     }
+
+    _lastAllSessions = all;
 
     if (_playingAnnouncement || _announceQueue.isNotEmpty) {
       if (!_playingAnnouncement && _announceQueue.isNotEmpty) {
@@ -112,7 +116,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
       announcement: state.announcement,
       connected: snapshot.connected,
     );
-    unawaited(_syncWindowShape());
+    // 悬停不改 HWND，只改 UI，避免乱跳/错位
+    unawaited(_syncWindowShape(allowHoverResize: false));
   }
 
   void _playNextAnnouncement(List<Session> filtered, bool connected) {
@@ -140,7 +145,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
     );
     unawaited(_syncWindowShape());
     _collapseTimer?.cancel();
-    _collapseTimer = Timer(const Duration(seconds: 12), onAnnouncementFinished);
+    // 展示满 10s 再切下一条（跑马灯同步该时长，不提前收）
+    _collapseTimer = Timer(
+      const Duration(seconds: kIslandAnnounceSeconds),
+      onAnnouncementFinished,
+    );
   }
 
   void onAnnouncementFinished() {
@@ -187,9 +196,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
     if (!state.enabled || _playingAnnouncement) return;
     _hovering = true;
     if (state.pinned) return;
+    // 仅改 phase；主窗 Overlay / 关窗岛形态都不要为 hover 改窗口尺寸
     state = state.copyWith(phase: IslandPhase.hover);
     _collapseTimer?.cancel();
-    unawaited(_syncWindowShape());
   }
 
   void onHoverExit() {
@@ -200,7 +209,6 @@ class IslandController extends StateNotifier<IslandViewModel> {
       return;
     }
     state = state.copyWith(phase: IslandPhase.strip, pinned: false);
-    unawaited(_syncWindowShape());
   }
 
   void onTap() {
@@ -211,7 +219,6 @@ class IslandController extends StateNotifier<IslandViewModel> {
       clearAnnouncement: true,
     );
     _scheduleCollapse();
-    unawaited(_syncWindowShape());
   }
 
   void collapse() {
@@ -242,39 +249,50 @@ class IslandController extends StateNotifier<IslandViewModel> {
     );
   }
 
-  (double, double) _islandWindowSize() {
-    final vm = state;
-    if (!vm.isVisible) return (kIslandStripWidth + 24, kIslandStripHitHeight + 12);
-    return switch (vm.phase) {
-      IslandPhase.hidden => (kIslandStripWidth + 24, kIslandStripHitHeight + 12),
-      IslandPhase.strip => (kIslandStripWidth + 24, kIslandStripHitHeight + 12),
-      IslandPhase.hover => (kIslandHoverWidth + 16, kIslandHoverHeight + 16),
-      IslandPhase.card => (
-          kIslandCardWidth + 16,
-          (vm.hasAnnouncement
-                  ? kIslandAnnounceHeight
-                  : (vm.hasSessions
-                      ? (vm.sessions.length == 1 ? 150.0 : kIslandCardHeightList)
-                      : kIslandCardHeightEmpty)) +
-              16,
-        ),
-    };
-  }
+  bool _islandCardSized = false;
 
-  Future<void> _syncWindowShape() async {
+  Future<void> _syncWindowShape({bool allowHoverResize = false}) async {
     final wc = QingyaWindowController.instance;
     if (!wc.isReady || !isQingyaDesktop) return;
-    if (wc.mode == DesktopWindowMode.normal) return;
+    // 主窗打开：不显示岛
+    if (wc.mode == DesktopWindowMode.normal) {
+      _islandCardSized = false;
+      return;
+    }
 
     if (!state.isVisible) {
       await wc.hideCompletely();
+      _islandCardSized = false;
       return;
     }
-    final size = _islandWindowSize();
+
+    final wantCard = state.phase == IslandPhase.card ||
+        state.hasAnnouncement ||
+        state.pinned;
+
     if (wc.mode != DesktopWindowMode.island) {
-      await wc.enterIslandMode(width: size.$1, height: size.$2);
-    } else {
-      await wc.resizeIsland(width: size.$1, height: size.$2);
+      // 进入岛：先用小画布（strip/hover），避免大透明挡屏
+      await wc.enterIslandMode(
+        width: wantCard ? kIslandWindowCardWidth : kIslandWindowWidth,
+        height: wantCard ? kIslandWindowCardHeight : kIslandWindowHeight,
+      );
+      _islandCardSized = wantCard;
+      return;
+    }
+
+    // 已在岛形态：悬停绝不改尺寸；只在进入/离开卡片档时改一次
+    if (wantCard && !_islandCardSized) {
+      await wc.resizeIsland(
+        width: kIslandWindowCardWidth,
+        height: kIslandWindowCardHeight,
+      );
+      _islandCardSized = true;
+    } else if (!wantCard && _islandCardSized) {
+      await wc.resizeIsland(
+        width: kIslandWindowWidth,
+        height: kIslandWindowHeight,
+      );
+      _islandCardSized = false;
     }
   }
 

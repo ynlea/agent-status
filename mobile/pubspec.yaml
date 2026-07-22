@@ -1,7 +1,7 @@
 name: qingya
 description: 轻芽 — Agent 状态监控客户端
 publish_to: "none"
-version: 0.1.16+42
+version: 0.1.16+43
 
 environment:
   sdk: ^3.5.0

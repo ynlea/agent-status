@@ -8,10 +8,12 @@ import '../../data/desktop/island_controller.dart';
 import '../../data/desktop/tray_controller.dart';
 import '../../data/desktop/window_controller.dart';
 import '../../domain/models.dart';
+import '../../theme/qingya_theme.dart';
 import 'desktop_title_bar.dart';
 import 'island_bar.dart';
 
-/// 单窗方案：自定义标题栏 + 主窗内岛 Overlay；关窗后主窗变形为岛。
+/// 主窗打开：只有标题栏 + 内容，不画灵动岛。
+/// 主窗隐藏：整窗变形为屏顶岛。
 class DesktopHost extends ConsumerStatefulWidget {
   const DesktopHost({
     super.key,
@@ -63,61 +65,36 @@ class _DesktopHostState extends ConsumerState<DesktopHost> {
     final island = ref.watch(islandControllerProvider);
     final ctrl = ref.read(islandControllerProvider.notifier);
 
-    // 关主窗后的岛形态：只画岛
+    // 仅主窗隐藏（岛形态）时在屏幕上显示灵动岛
     if (_mode == DesktopWindowMode.island) {
+      // 不用全透明 MaterialType，减少缩回主窗时表面残留全黑
       return Material(
-        type: MaterialType.transparency,
-        color: Colors.transparent,
-        child: ColoredBox(
-          color: Colors.transparent,
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: IslandSurface(
-              viewModel: island,
-              standalone: true,
-              onOpenSession: widget.onOpenSession,
-              onHoverEnter: ctrl.onHoverEnter,
-              onHoverExit: ctrl.onHoverExit,
-              onTap: ctrl.onTap,
-              onCollapse: ctrl.collapse,
-              onAnnouncementFinished: ctrl.onAnnouncementFinished,
-            ),
+        color: const Color(0x00000000),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: IslandSurface(
+            viewModel: island,
+            standalone: true,
+            onOpenSession: widget.onOpenSession,
+            onHoverEnter: ctrl.onHoverEnter,
+            onHoverExit: ctrl.onHoverExit,
+            onTap: ctrl.onTap,
+            onCollapse: ctrl.collapse,
+            onAnnouncementFinished: ctrl.onAnnouncementFinished,
           ),
         ),
       );
     }
 
-    // 正常主窗：标题栏 + 内容 + 顶部岛 Overlay
-    return Column(
-      children: [
-        const DesktopTitleBar(),
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              widget.child,
-              if (island.isVisible)
-                Positioned(
-                  top: 8,
-                  left: 0,
-                  right: 0,
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: IslandSurface(
-                      viewModel: island,
-                      onOpenSession: widget.onOpenSession,
-                      onHoverEnter: ctrl.onHoverEnter,
-                      onHoverExit: ctrl.onHoverExit,
-                      onTap: ctrl.onTap,
-                      onCollapse: ctrl.collapse,
-                      onAnnouncementFinished: ctrl.onAnnouncementFinished,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
+    // 主窗打开：不展示灵动岛
+    return ColoredBox(
+      color: context.qingya.scaffold,
+      child: Column(
+        children: [
+          const DesktopTitleBar(),
+          Expanded(child: widget.child),
+        ],
+      ),
     );
   }
 }

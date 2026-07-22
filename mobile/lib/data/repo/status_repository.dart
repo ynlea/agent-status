@@ -101,22 +101,27 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
     try {
       final client = RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
       final machines = await client.fetchMachines();
-      final sessions = <Session>[];
-      for (final m in machines) {
-        final list = await client.fetchSessions(m.machineId);
-        sessions.addAll(
-          list.map((e) => e.copyWith(machineName: m.machineName)),
-        );
-      }
+      // 并行拉会话，降低多设备时的刷新延迟
+      final sessionLists = await Future.wait(
+        machines.map((m) async {
+          final list = await client.fetchSessions(m.machineId);
+          return list
+              .map((e) => e.copyWith(machineName: m.machineName))
+              .toList();
+        }),
+      );
+      final sessions = <Session>[
+        for (final list in sessionLists) ...list,
+      ];
       state = StatusSnapshot(
         machines: machines,
         sessions: sessions,
         connected: true,
       );
       _bindWs(s);
-      // 首页/设备列表实时性：缩短轮询，并配合 WS + 回前台刷新。
+      // WS 为主；轮询兜底再缩短一点
       _poll =
-          Timer.periodic(const Duration(seconds: 8), (_) => softRefresh());
+          Timer.periodic(const Duration(seconds: 5), (_) => softRefresh());
     } catch (e) {
       final msg = e.toString();
       final friendly = msg.contains('SocketException') ||
@@ -181,13 +186,17 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
     try {
       final client = RestClient(baseUrl: s.baseUrl, apiKey: s.apiKey);
       final machines = await client.fetchMachines();
-      final sessions = <Session>[];
-      for (final m in machines) {
-        final list = await client.fetchSessions(m.machineId);
-        sessions.addAll(
-          list.map((e) => e.copyWith(machineName: m.machineName)),
-        );
-      }
+      final sessionLists = await Future.wait(
+        machines.map((m) async {
+          final list = await client.fetchSessions(m.machineId);
+          return list
+              .map((e) => e.copyWith(machineName: m.machineName))
+              .toList();
+        }),
+      );
+      final sessions = <Session>[
+        for (final list in sessionLists) ...list,
+      ];
       state = state.copyWith(
         machines: machines,
         sessions: sessions,
