@@ -10,8 +10,9 @@ import '../../data/desktop/tray_controller.dart';
 import '../../data/desktop/window_controller.dart';
 import '../../domain/models.dart';
 import 'desktop_title_bar.dart';
+import 'island_bar.dart';
 
-/// 托盘、关窗、自定义标题栏；灵动岛走原生置顶分层窗。
+/// 托盘、关窗、自定义标题栏；优先原生岛窗，失败则主窗内 Overlay 兜底。
 class DesktopHost extends ConsumerStatefulWidget {
   const DesktopHost({
     super.key,
@@ -29,6 +30,8 @@ class DesktopHost extends ConsumerStatefulWidget {
 class _DesktopHostState extends ConsumerState<DesktopHost> {
   StreamSubscription<void>? _closeSub;
   final List<StreamSubscription<dynamic>> _subs = [];
+  bool _nativeIslandOk = false;
+  bool _nativeChecked = false;
 
   @override
   void initState() {
@@ -39,11 +42,12 @@ class _DesktopHostState extends ConsumerState<DesktopHost> {
       unawaited(_onClose());
     });
 
-    // 启动岛控制器（会 ensure 原生岛窗）
     ref.read(islandControllerProvider);
 
     final bridge = IslandNativeBridge.instance;
     unawaited(bridge.bind());
+    unawaited(_probeNative());
+
     _subs.add(bridge.openSession$.listen((m) {
       widget.onOpenSession(
         Session(
@@ -64,9 +68,21 @@ class _DesktopHostState extends ConsumerState<DesktopHost> {
     }));
   }
 
+  Future<void> _probeNative() async {
+    final ok = await IslandNativeBridge.instance.ensure();
+    if (!mounted) return;
+    setState(() {
+      _nativeIslandOk = ok;
+      _nativeChecked = true;
+    });
+    if (ok) {
+      final vm = ref.read(islandControllerProvider);
+      await IslandNativeBridge.instance.sync(vm);
+    }
+  }
+
   Future<void> _onClose() async {
     await ref.read(islandControllerProvider.notifier).onMainCloseRequested();
-    // 只隐藏主窗；岛窗独立
     await QingyaWindowController.instance.hideToBackground(preferIsland: false);
   }
 
@@ -83,15 +99,48 @@ class _DesktopHostState extends ConsumerState<DesktopHost> {
   Widget build(BuildContext context) {
     if (!isQingyaDesktop) return widget.child;
 
-    // 持续把状态推到原生岛窗
+    final island = ref.watch(islandControllerProvider);
+    final ctrl = ref.read(islandControllerProvider.notifier);
+
     ref.listen(islandControllerProvider, (_, next) {
-      unawaited(IslandNativeBridge.instance.sync(next));
+      if (_nativeIslandOk) {
+        unawaited(IslandNativeBridge.instance.sync(next));
+      }
     });
+
+    final useOverlayFallback =
+        island.isVisible && (_nativeChecked && !_nativeIslandOk);
 
     return Column(
       children: [
         const DesktopTitleBar(),
-        Expanded(child: widget.child),
+        Expanded(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              widget.child,
+              // 原生岛失败时：主窗顶部 Overlay，至少看得见、不挡全屏
+              if (useOverlayFallback)
+                Positioned(
+                  top: 8,
+                  left: 0,
+                  right: 0,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: IslandSurface(
+                      viewModel: island,
+                      onOpenSession: widget.onOpenSession,
+                      onHoverEnter: ctrl.onHoverEnter,
+                      onHoverExit: ctrl.onHoverExit,
+                      onTap: ctrl.onTap,
+                      onCollapse: ctrl.collapse,
+                      onAnnouncementFinished: ctrl.onAnnouncementFinished,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }

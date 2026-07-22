@@ -1,13 +1,9 @@
 #include "island_window.h"
 
-#include <dwmapi.h>
-
 #include <cmath>
 #include <optional>
 
-#include "flutter/generated_plugin_registrant.h"
-
-#pragma comment(lib, "dwmapi.lib")
+// 注意：岛引擎不 RegisterPlugins，避免托盘/window_manager 双实例冲突。
 
 namespace {
 
@@ -81,6 +77,30 @@ void IslandWindow::BindMainEngine(flutter::FlutterEngine* main_engine) {
           }
           return;
         }
+        if (method == "set_size") {
+          const auto* map = std::get_if<flutter::EncodableMap>(call.arguments());
+          if (!map) {
+            result->Error("bad_args", "set_size expects map");
+            return;
+          }
+          int w = width_dip_;
+          int h = height_dip_;
+          auto itw = map->find(flutter::EncodableValue("width"));
+          auto ith = map->find(flutter::EncodableValue("height"));
+          if (itw != map->end()) {
+            if (const auto* v = std::get_if<int32_t>(&itw->second)) w = *v;
+            if (const auto* v = std::get_if<double>(&itw->second))
+              w = static_cast<int>(*v);
+          }
+          if (ith != map->end()) {
+            if (const auto* v = std::get_if<int32_t>(&ith->second)) h = *v;
+            if (const auto* v = std::get_if<double>(&ith->second))
+              h = static_cast<int>(*v);
+          }
+          SetContentSize(w, h);
+          result->Success(true);
+          return;
+        }
         result->NotImplemented();
       });
 }
@@ -107,46 +127,43 @@ bool IslandWindow::CreateNativeWindow() {
   wc.hInstance = instance;
   wc.lpszClassName = kClassName;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-  wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+  // 不用 DWM 全透明扩展，避免“看不见却挡点击”的玻璃空窗。
+  wc.hbrBackground = CreateSolidBrush(RGB(28, 24, 22));
   RegisterClassW(&wc);
 
-  // 先用主屏估算位置；DPI 在创建后校正。
   int screen_w = GetSystemMetrics(SM_CXSCREEN);
-  int width = Scale(kWidthDip, 96);
-  int height = Scale(kHeightDip, 96);
+  int width = Scale(width_dip_, 96);
+  int height = Scale(height_dip_, 96);
   int x = (screen_w - width) / 2;
   int y = 0;
 
   hwnd_ = CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
-      kClassName, L"Qingya Island", WS_POPUP, x, y, width, height, nullptr,
-      nullptr, instance, this);
+      WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      kClassName, L"", WS_POPUP, x, y, width, height, nullptr, nullptr,
+      instance, this);
 
   if (!hwnd_) return false;
 
-  ApplyLayeredStyles();
-  PositionTopCenter(kWidthDip, kHeightDip);
-  // 默认隐藏，等 Dart sync/show
+  ApplyWindowStyles();
+  PositionTopCenter();
   ShowWindow(hwnd_, SW_HIDE);
   return true;
 }
 
-void IslandWindow::ApplyLayeredStyles() {
+void IslandWindow::ApplyWindowStyles() {
   if (!hwnd_) return;
-  // 整体不透明 alpha=255；由 Flutter 画透明像素 + DWM 扩展实现“无矩形感”。
-  SetLayeredWindowAttributes(hwnd_, 0, 255, LWA_ALPHA);
-  MARGINS margins = {-1};
-  DwmExtendFrameIntoClientArea(hwnd_, &margins);
-  BOOL value = TRUE;
-  DwmSetWindowAttribute(hwnd_, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &value,
-                        sizeof(value));
+  // 保持置顶工具窗；不做 LWA 全窗透明（Flutter 子 HWND 在 layered 下常整片透明）。
+  LONG ex = GetWindowLong(hwnd_, GWL_EXSTYLE);
+  ex |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+  ex &= ~WS_EX_LAYERED;
+  SetWindowLong(hwnd_, GWL_EXSTYLE, ex);
 }
 
-void IslandWindow::PositionTopCenter(int width_dip, int height_dip) {
+void IslandWindow::PositionTopCenter() {
   if (!hwnd_) return;
   UINT dpi = GetDpiForWindowSafe(hwnd_);
-  int width = Scale(width_dip, dpi);
-  int height = Scale(height_dip, dpi);
+  int width = Scale(width_dip_, dpi);
+  int height = Scale(height_dip_, dpi);
 
   HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
   MONITORINFO mi{};
@@ -154,12 +171,29 @@ void IslandWindow::PositionTopCenter(int width_dip, int height_dip) {
   GetMonitorInfo(monitor, &mi);
   int work_w = mi.rcWork.right - mi.rcWork.left;
   int x = mi.rcWork.left + (work_w - width) / 2;
-  int y = mi.rcWork.top;  // 吸顶
+  int y = mi.rcWork.top;
 
-  SetWindowPos(hwnd_, HWND_TOPMOST, x, y, width, height,
-               SWP_NOACTIVATE | SWP_SHOWWINDOW * (visible_ ? 1 : 0));
+  UINT flags = SWP_NOACTIVATE;
+  if (visible_) flags |= SWP_SHOWWINDOW;
+  SetWindowPos(hwnd_, HWND_TOPMOST, x, y, width, height, flags);
+  if (controller_ && controller_->view()) {
+    MoveWindow(controller_->view()->GetNativeWindow(), 0, 0, width, height,
+               TRUE);
+  }
   if (!visible_) {
     ShowWindow(hwnd_, SW_HIDE);
+  }
+}
+
+void IslandWindow::SetContentSize(int width_dip, int height_dip) {
+  if (width_dip < 80) width_dip = 80;
+  if (height_dip < 28) height_dip = 28;
+  if (width_dip > 480) width_dip = 480;
+  if (height_dip > 360) height_dip = 360;
+  width_dip_ = width_dip;
+  height_dip_ = height_dip;
+  if (hwnd_) {
+    PositionTopCenter();
   }
 }
 
@@ -171,8 +205,8 @@ bool IslandWindow::CreateFlutterView() {
   GetClientRect(hwnd_, &rect);
   int width = rect.right - rect.left;
   int height = rect.bottom - rect.top;
-  if (width <= 0) width = Scale(kWidthDip, GetDpiForWindowSafe(hwnd_));
-  if (height <= 0) height = Scale(kHeightDip, GetDpiForWindowSafe(hwnd_));
+  if (width <= 0) width = Scale(width_dip_, GetDpiForWindowSafe(hwnd_));
+  if (height <= 0) height = Scale(height_dip_, GetDpiForWindowSafe(hwnd_));
 
   flutter::DartProject project(L"data");
   project.set_dart_entrypoint("islandMain");
@@ -184,11 +218,13 @@ bool IslandWindow::CreateFlutterView() {
     return false;
   }
 
-  // 岛引擎尽量也注册插件，保证 MethodChannel / 字体等可用。
-  RegisterPlugins(controller_->engine());
-
+  // 不注册插件：岛 UI 仅需 MethodChannel + 自绘。
   HWND view = controller_->view()->GetNativeWindow();
   SetParent(view, hwnd_);
+  LONG style = GetWindowLong(view, GWL_STYLE);
+  style |= WS_CHILD;
+  style &= ~WS_POPUP;
+  SetWindowLong(view, GWL_STYLE, style);
   MoveWindow(view, 0, 0, width, height, TRUE);
   ShowWindow(view, SW_SHOW);
 
@@ -203,7 +239,31 @@ bool IslandWindow::CreateFlutterView() {
                  result) {
         const auto& method = call.method_name();
         if (method == "open_session" || method == "show_main" ||
-            method == "announcement_done") {
+            method == "announcement_done" || method == "set_size") {
+          if (method == "set_size") {
+            // 岛引擎请求改尺寸：在本窗处理
+            const auto* map =
+                std::get_if<flutter::EncodableMap>(call.arguments());
+            if (map) {
+              int w = width_dip_;
+              int h = height_dip_;
+              auto itw = map->find(flutter::EncodableValue("width"));
+              auto ith = map->find(flutter::EncodableValue("height"));
+              if (itw != map->end()) {
+                if (const auto* v = std::get_if<double>(&itw->second))
+                  w = static_cast<int>(*v);
+                if (const auto* v = std::get_if<int32_t>(&itw->second)) w = *v;
+              }
+              if (ith != map->end()) {
+                if (const auto* v = std::get_if<double>(&ith->second))
+                  h = static_cast<int>(*v);
+                if (const auto* v = std::get_if<int32_t>(&ith->second)) h = *v;
+              }
+              SetContentSize(w, h);
+            }
+            result->Success();
+            return;
+          }
           ForwardToMain(method, call.arguments());
           result->Success();
           return;
@@ -229,10 +289,13 @@ void IslandWindow::ForwardToMain(const std::string& method,
 void IslandWindow::Show() {
   if (!EnsureCreated()) return;
   visible_ = true;
-  PositionTopCenter(kWidthDip, kHeightDip);
+  PositionTopCenter();
   ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (controller_) {
+    controller_->ForceRedraw();
+  }
 }
 
 void IslandWindow::Hide() {
@@ -249,10 +312,10 @@ void IslandWindow::PushState(const std::string& json) {
     view_channel_->InvokeMethod(
         "sync", std::make_unique<flutter::EncodableValue>(json));
   }
-  // 有状态且启用时由 Dart 侧再决定 show；这里若已 visible 保持置顶
   if (visible_) {
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (controller_) controller_->ForceRedraw();
   }
 }
 
@@ -293,6 +356,19 @@ LRESULT IslandWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam,
   }
 
   switch (msg) {
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC hdc = BeginPaint(hwnd, &ps);
+      RECT rc;
+      GetClientRect(hwnd, &rc);
+      HBRUSH brush = CreateSolidBrush(RGB(28, 24, 22));
+      FillRect(hdc, &rc, brush);
+      DeleteObject(brush);
+      EndPaint(hwnd, &ps);
+      return 0;
+    }
     case WM_SIZE: {
       if (controller_ && controller_->view()) {
         RECT rect{};
@@ -303,14 +379,12 @@ LRESULT IslandWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam,
       return 0;
     }
     case WM_DPICHANGED: {
-      PositionTopCenter(kWidthDip, kHeightDip);
+      PositionTopCenter();
       return 0;
     }
     case WM_NCHITTEST:
-      // 整窗可点（岛内容自己处理）；不拖动标题栏。
       return HTCLIENT;
     case WM_DESTROY:
-      // 不退出进程
       hwnd_ = nullptr;
       return 0;
     default:

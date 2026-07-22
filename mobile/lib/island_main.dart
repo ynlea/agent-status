@@ -4,12 +4,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'data/desktop/desktop_platform.dart';
 import 'data/desktop/island_models.dart';
 import 'domain/models.dart';
 import 'theme/qingya_theme.dart';
 import 'ui/desktop/island_bar.dart';
 
-/// 原生岛窗入口：只跑灵动岛 UI，状态由主引擎经 C++ 桥同步。
+/// 原生岛窗入口：只跑灵动岛 UI。
 @pragma('vm:entry-point')
 void islandMain() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +34,7 @@ class _IslandRootState extends State<_IslandRoot> {
 
   Timer? _enterDebounce;
   Timer? _exitDebounce;
+  Timer? _sizeDebounce;
   bool _pointerInside = false;
 
   @override
@@ -50,22 +52,25 @@ class _IslandRootState extends State<_IslandRoot> {
       }
       return null;
     });
+    // 首帧后按 strip 收紧窗口
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requestNativeSize());
   }
 
   @override
   void dispose() {
     _enterDebounce?.cancel();
     _exitDebounce?.cancel();
+    _sizeDebounce?.cancel();
     super.dispose();
   }
 
   void _applyRemote(IslandViewModel next) {
     if (!next.enabled || next.phase == IslandPhase.hidden) {
       setState(() => _vm = next);
+      _requestNativeSize();
       return;
     }
     var merged = next;
-    // 保留本地悬停/钉住，避免主进程 strip 冲掉动画中间态
     if (next.hasAnnouncement) {
       merged = next;
     } else if (_vm.pinned) {
@@ -74,6 +79,40 @@ class _IslandRootState extends State<_IslandRoot> {
       merged = next.copyWith(phase: IslandPhase.hover);
     }
     setState(() => _vm = merged);
+    _requestNativeSize();
+  }
+
+  (double, double) _sizeFor(IslandViewModel vm) {
+    if (!vm.isVisible) return (120, 32);
+    return switch (vm.phase) {
+      IslandPhase.hidden => (120.0, 32.0),
+      IslandPhase.strip => (kIslandStripWidth + 24, kIslandStripHitHeight + 8),
+      IslandPhase.hover => (kIslandHoverWidth + 16, kIslandHoverHeight + 12),
+      IslandPhase.card => (
+          kIslandCardWidth + 16,
+          (vm.hasAnnouncement
+                  ? kIslandAnnounceHeight
+                  : (vm.hasSessions
+                      ? (vm.sessions.length == 1
+                          ? 150.0
+                          : kIslandCardHeightList)
+                      : kIslandCardHeightEmpty)) +
+              12,
+        ),
+    };
+  }
+
+  void _requestNativeSize() {
+    _sizeDebounce?.cancel();
+    _sizeDebounce = Timer(const Duration(milliseconds: 16), () async {
+      final s = _sizeFor(_vm);
+      try {
+        await _view.invokeMethod('set_size', {
+          'width': s.$1.round(),
+          'height': s.$2.round(),
+        });
+      } catch (_) {}
+    });
   }
 
   void _onHoverEnter() {
@@ -89,6 +128,7 @@ class _IslandRootState extends State<_IslandRoot> {
         return;
       }
       setState(() => _vm = _vm.copyWith(phase: IslandPhase.hover));
+      _requestNativeSize();
     });
   }
 
@@ -101,6 +141,7 @@ class _IslandRootState extends State<_IslandRoot> {
         return;
       }
       setState(() => _vm = _vm.copyWith(phase: IslandPhase.strip));
+      _requestNativeSize();
     });
   }
 
@@ -115,6 +156,7 @@ class _IslandRootState extends State<_IslandRoot> {
         clearAnnouncement: true,
       );
     });
+    _requestNativeSize();
   }
 
   void _onCollapse() {
@@ -127,6 +169,7 @@ class _IslandRootState extends State<_IslandRoot> {
         clearAnnouncement: true,
       );
     });
+    _requestNativeSize();
   }
 
   Future<void> _openSession(Session s) async {
@@ -146,6 +189,7 @@ class _IslandRootState extends State<_IslandRoot> {
         clearAnnouncement: true,
       );
     });
+    _requestNativeSize();
     try {
       await _view.invokeMethod('announcement_done');
     } catch (_) {}
@@ -153,13 +197,14 @@ class _IslandRootState extends State<_IslandRoot> {
 
   @override
   Widget build(BuildContext context) {
+    // 深色底：即便透明合成失败，也能看见岛区，而不是“隐形挡点击”。
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: QingyaTheme.light(),
       home: Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF1C1816),
         body: ColoredBox(
-          color: Colors.transparent,
+          color: const Color(0xFF1C1816),
           child: Align(
             alignment: Alignment.topCenter,
             child: !_vm.isVisible
