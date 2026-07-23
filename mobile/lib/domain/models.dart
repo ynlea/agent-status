@@ -103,6 +103,7 @@ class Session {
     this.machineName,
     this.cwd = '',
     this.lastAssistantMessage = '',
+    this.parentSessionId = '',
     this.source = '',
   });
 
@@ -122,7 +123,11 @@ class Session {
   final String cwd;
   /// Agent 最后一条完整输出
   final String lastAssistantMessage;
+  /// Codex subagent 的主会话 id；空表示主会话
+  final String parentSessionId;
   final String source;
+
+  bool get isRoot => parentSessionId.trim().isEmpty;
 
   String get title {
     final m = message.trim();
@@ -161,6 +166,7 @@ class Session {
           json['machine_name'] == null ? null : '${json['machine_name']}',
       cwd: '${json['cwd'] ?? ''}'.trim(),
       lastAssistantMessage: '${json['last_assistant_message'] ?? ''}',
+      parentSessionId: '${json['parent_session_id'] ?? ''}'.trim(),
       source: '${json['source'] ?? ''}',
     );
   }
@@ -171,6 +177,7 @@ class Session {
     String? machineName,
     String? cwd,
     String? lastAssistantMessage,
+    String? parentSessionId,
     String? source,
     DateTime? updatedAt,
     DateTime? startedAt,
@@ -189,6 +196,7 @@ class Session {
       machineName: machineName ?? this.machineName,
       cwd: cwd ?? this.cwd,
       lastAssistantMessage: lastAssistantMessage ?? this.lastAssistantMessage,
+      parentSessionId: parentSessionId ?? this.parentSessionId,
       source: source ?? this.source,
     );
   }

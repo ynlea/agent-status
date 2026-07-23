@@ -245,7 +245,9 @@ class IslandViewModel {
     required bool notifyWorking,
     required bool notifyDone,
   }) {
+    // activeSessions 已是 root；这里再兜底一次防漏过滤。
     final filtered = activeSessions.where((s) {
+      if (!s.isRoot) return false;
       return switch (s.state) {
         SessionState.confirm => notifyConfirm,
         SessionState.working => notifyWorking,
@@ -317,8 +319,12 @@ class IslandViewModel {
     required List<Session> next,
   }) {
     if (next.isEmpty) return false;
-    final prevKeys = {for (final s in previous) sessionKey(s): s.state};
+    final prevKeys = {
+      for (final s in previous)
+        if (s.isRoot) sessionKey(s): s.state,
+    };
     for (final s in next) {
+      if (!s.isRoot) continue;
       final k = sessionKey(s);
       final old = prevKeys[k];
       if (old == null) return true;
@@ -354,9 +360,14 @@ class IslandViewModel {
           SessionState.idle => false,
         };
 
-    final prevMap = {for (final s in previous) sessionKey(s): s};
+    // 只播报 root；子会话状态变化应体现在折叠后的主会话上。
+    final prevMap = {
+      for (final s in previous)
+        if (s.isRoot) sessionKey(s): s,
+    };
     final out = <IslandAnnouncement>[];
     for (final s in next) {
+      if (!s.isRoot) continue;
       if (!allowed(s.state)) continue;
       final old = prevMap[sessionKey(s)];
       if (old == null || old.state != s.state) {

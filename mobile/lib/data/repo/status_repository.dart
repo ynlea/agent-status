@@ -23,7 +23,7 @@ class StatusSnapshot {
   final bool connected;
 
   List<Session> get activeSessions => sortActiveSessions(
-        sessions.map((s) {
+        sessions.where((s) => s.isRoot).map((s) {
           final m = machines.where((e) => e.machineId == s.machineId);
           return s.copyWith(
             machineName: m.isEmpty ? s.machineName : m.first.machineName,
@@ -32,7 +32,7 @@ class StatusSnapshot {
       );
 
   List<Session> sessionsFor(String machineId) {
-    final list = sessions.where((s) => s.machineId == machineId).toList();
+    final list = sessions.where((s) => s.machineId == machineId && s.isRoot).toList();
     list.sort((a, b) {
       final c = a.state.sortRank.compareTo(b.state.sortRank);
       if (c != 0) return c;
@@ -254,6 +254,7 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
         state = state.copyWith(machines: machines, connected: true);
       } else if (type == 'notification') {
         // 状态推送也写进列表，避免只靠 20s 轮询才看到变化。
+        // 必须保留 parent / cwd 等字段，否则会把 subagent 冲成“假主会话”。
         final machineId = '${payload['machine_id'] ?? ''}';
         final sessionId = '${payload['session_id'] ?? ''}';
         final agent = '${payload['agent'] ?? 'unknown'}';
@@ -263,18 +264,42 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
           if (rawAt is String && rawAt.isNotEmpty) {
             at = DateTime.tryParse(rawAt);
           }
+          Session? existing;
+          for (final e in state.sessions) {
+            if (e.machineId == machineId &&
+                e.sessionId == sessionId &&
+                e.agent == agent) {
+              existing = e;
+              break;
+            }
+          }
+          final parentFromPayload =
+              '${payload['parent_session_id'] ?? ''}'.trim();
+          final displayFromPayload = '${payload['display_name'] ?? ''}'.trim();
           _upsertSession(
             Session(
               machineId: machineId,
               agent: agent,
               sessionId: sessionId,
-              displayName: '${payload['display_name'] ?? sessionId}',
+              displayName: displayFromPayload.isNotEmpty
+                  ? displayFromPayload
+                  : (existing?.displayName.isNotEmpty == true
+                      ? existing!.displayName
+                      : sessionId),
               state: sessionStateFrom('${payload['state'] ?? ''}'),
               message: '${payload['message'] ?? ''}',
-              updatedAt: at ?? DateTime.now(),
+              updatedAt: at ?? existing?.updatedAt ?? DateTime.now(),
+              startedAt: existing?.startedAt,
+              realUsage: existing?.realUsage,
               machineName: payload['machine_name'] == null
-                  ? null
+                  ? existing?.machineName
                   : '${payload['machine_name']}',
+              cwd: existing?.cwd ?? '',
+              lastAssistantMessage: existing?.lastAssistantMessage ?? '',
+              parentSessionId: parentFromPayload.isNotEmpty
+                  ? parentFromPayload
+                  : (existing?.parentSessionId ?? ''),
+              source: existing?.source ?? '',
             ),
           );
         } else {
@@ -369,6 +394,22 @@ final _demoSessions = [
     updatedAt: DateTime.now().subtract(const Duration(minutes: 5)),
     startedAt: DateTime.now().subtract(const Duration(hours: 1, minutes: 12)),
     realUsage: 1200000,
+  ),
+  Session(
+    machineId: 'm-macbook',
+    agent: 'codex',
+    sessionId: 's2-child-a',
+    displayName: 'Maxwell',
+    state: SessionState.working,
+    message: '补充分片测试',
+    machineName: 'MacBook-Pro',
+    cwd: '/Users/demo/projects/file-center',
+    lastAssistantMessage: '正在写 multipart 用例。',
+    parentSessionId: 's2',
+    source: 'codex-file',
+    updatedAt: DateTime.now().subtract(const Duration(minutes: 3)),
+    startedAt: DateTime.now().subtract(const Duration(minutes: 20)),
+    realUsage: 12000,
   ),
   Session(
     machineId: 'm-macmini',

@@ -45,6 +45,20 @@ class SessionDetailPage extends ConsumerWidget {
       }
     }
 
+    final children = snapshot.sessions
+        .where(
+          (s) =>
+              s.machineId == machineId &&
+              s.agent == agent &&
+              s.parentSessionId == sessionId,
+        )
+        .toList()
+      ..sort((a, b) {
+        final c = a.state.sortRank.compareTo(b.state.sortRank);
+        if (c != 0) return c;
+        return (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0));
+      });
+
     final title = session?.title ?? sessionId;
     final path = session?.projectPath ?? '';
     final body = session?.lastAssistantMessage.trim() ?? '';
@@ -336,6 +350,94 @@ class SessionDetailPage extends ConsumerWidget {
                             ),
                           ),
                   ),
+                  if (children.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Container(
+                          width: 4,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: context.qingya.primary,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '子会话',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: context.qingya.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${children.length}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.qingya.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    for (final child in children) ...[
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        decoration: BoxDecoration(
+                          color: context.qingya.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: context.qingya.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: StatusDot(state: child.state, size: 8),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    child.displayName.isNotEmpty
+                                        ? child.displayName
+                                        : child.sessionId,
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: context.qingya.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    [
+                                      child.state.labelZh,
+                                      if (child.message.trim().isNotEmpty)
+                                        child.message.trim(),
+                                    ].join(' · '),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.35,
+                                      color: context.qingya.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ],
               ),
             ),
