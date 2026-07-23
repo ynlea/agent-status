@@ -159,7 +159,13 @@ class QingyaWindowController with WindowListener {
       wait++;
     }
     if (_transitioning) return;
-    if (_mode == DesktopWindowMode.island) return;
+    // 已在岛模式：仍要落到目标尺寸，避免细条停留在错误 HWND 上被压扁。
+    if (_mode == DesktopWindowMode.island) {
+      if (preferIsland) {
+        await enterIslandMode();
+      }
+      return;
+    }
     if (_mode == DesktopWindowMode.normal) {
       await _rememberMainBounds();
     }
@@ -192,14 +198,17 @@ class QingyaWindowController with WindowListener {
       if (_mode == DesktopWindowMode.normal) {
         await _rememberMainBounds();
       }
-      final w = width.roundToDouble();
-      final h = height.roundToDouble();
+      final w = width.roundToDouble().clamp(1.0, 10000.0);
+      final h = height.roundToDouble().clamp(1.0, 10000.0);
       try {
         if (await windowManager.isMaximized()) {
           await windowManager.unmaximize();
         }
       } catch (_) {}
-      await windowManager.setMinimumSize(const Size(80, 24));
+      // 最小尺寸必须明显小于细条目标，否则 Windows 会把条卡在 min 上显得压扁。
+      await windowManager.setMinimumSize(
+        Size((w * 0.4).clamp(1.0, 40.0), (h * 0.4).clamp(1.0, 8.0)),
+      );
       await windowManager.setMaximumSize(const Size(10000, 10000));
       await windowManager.setAsFrameless();
       await windowManager.setHasShadow(false);
@@ -209,9 +218,14 @@ class QingyaWindowController with WindowListener {
       await windowManager.setResizable(false);
       final pos = await _islandTopCenterOffset(width: w, height: h);
       final to = Rect.fromLTWH(pos.dx, pos.dy, w, h);
+      // 先落到目标 HWND，再切 island UI，避免大窗画细条再猛缩造成视觉压缩。
+      await windowManager.setBounds(to, animate: false);
       _setMode(DesktopWindowMode.island);
-      await windowManager.setBounds(to);
       await windowManager.show();
+      // Windows 偶发丢掉首帧尺寸，show 后再写一次。
+      try {
+        await windowManager.setBounds(to, animate: false);
+      } catch (_) {}
     } catch (e, st) {
       debugPrint('[QingyaWindow] enterIslandMode: $e\n$st');
       // 进岛过程中任一步失败，都不能留下透明、置顶或不可调整大小的主窗。

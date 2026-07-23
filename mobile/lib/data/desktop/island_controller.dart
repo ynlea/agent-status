@@ -83,7 +83,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
   void _invalidateAsyncWork() {
     _morphGen++;
     _shapeGen++;
-    _shapeSyncPending = false;
+    // 不把 pending 清成 false：进行中的 shape 会因版本过期退出；
+    // 若期间又有 _syncWindowShape，drain 仍能再跑一轮最新目标。
     _collapseTimer?.cancel();
   }
 
@@ -655,6 +656,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
       ),
       isCurrent: () => !_disposed,
     );
+    if (_disposed || !preferIsland) return;
+    // 关窗进岛后再用控制器目标尺寸校准一次，避免细条 HWND 残留错误高度。
+    _appliedWinW = null;
+    _appliedWinH = null;
+    await _syncWindowShape();
   }
 
   /// 当前已应用的岛 HWND 尺寸，避免重复 setBounds。
@@ -778,14 +784,20 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   Future<void> _drainWindowShape() async {
     try {
-      while (!_disposed && _shapeSyncPending) {
+      while (!_disposed) {
+        if (!_shapeSyncPending) break;
         _shapeSyncPending = false;
         final request = _shapeGen;
         await _applyWindowShape(request);
+        // invalidate 会抬 gen；若期间又有 sync，pending 为 true，继续跑最新目标。
       }
     } finally {
-      // 循环条件到释放执行器之间没有 await，不会漏掉新请求。
+      final again = !_disposed && _shapeSyncPending;
       _shapeSyncRunner = null;
+      if (again) {
+        // finally 释放执行器后，把尾部请求重新挂上。
+        unawaited(_syncWindowShape());
+      }
     }
   }
 
