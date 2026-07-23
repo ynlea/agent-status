@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS session_projects (
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN last_assistant_message TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE machines ADD COLUMN name_locked INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN started_at TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''`)
 	// Approximate first-seen for rows that predate the column.
 	_, _ = s.db.Exec(`UPDATE sessions SET started_at = updated_at WHERE started_at IS NULL OR started_at = ''`)
 	// Durable session→project map (survives session row deletion).
@@ -724,8 +725,8 @@ VALUES(?,?,?,?,?,?,?,?,?)
 			changed = append(changed, sess)
 		}
 		_, err = tx.Exec(`
-INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, cwd, last_assistant_message, started_at, updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO sessions(machine_id, agent, session_id, machine_name, display_name, state, message, cwd, last_assistant_message, parent_session_id, started_at, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   machine_name=excluded.machine_name,
   display_name=excluded.display_name,
@@ -733,9 +734,10 @@ ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
   message=excluded.message,
   cwd=CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE sessions.cwd END,
   last_assistant_message=CASE WHEN excluded.last_assistant_message != '' THEN excluded.last_assistant_message ELSE sessions.last_assistant_message END,
+  parent_session_id=excluded.parent_session_id,
   started_at=excluded.started_at,
   updated_at=excluded.updated_at
-`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, startedSQL, sess.UpdatedAt.Format(time.RFC3339Nano))
+`, sess.MachineID, sess.Agent, sess.SessionID, sess.MachineName, sess.DisplayName, string(sess.State), sess.Message, sess.Cwd, sess.LastAssistantMessage, sess.ParentSessionID, startedSQL, sess.UpdatedAt.Format(time.RFC3339Nano))
 		if err != nil {
 			return nil, false
 		}
@@ -879,9 +881,9 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	var rows *sql.Rows
 	var err error
 	if machineID == "" {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(started_at,''), updated_at FROM sessions`)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(parent_session_id,''), COALESCE(started_at,''), updated_at FROM sessions`)
 	} else {
-		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(started_at,''), updated_at FROM sessions WHERE machine_id=?`, machineID)
+		rows, err = s.db.Query(`SELECT machine_id, agent, session_id, machine_name, display_name, state, message, COALESCE(cwd,''), COALESCE(last_assistant_message,''), COALESCE(parent_session_id,''), COALESCE(started_at,''), updated_at FROM sessions WHERE machine_id=?`, machineID)
 	}
 	if err != nil {
 		return nil
@@ -890,11 +892,12 @@ func (s *SQLiteStore) ListSessions(machineID string) []apitypes.Session {
 	var out []apitypes.Session
 	for rows.Next() {
 		var sess apitypes.Session
-		var st, started, updated string
-		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &sess.Cwd, &sess.LastAssistantMessage, &started, &updated); err != nil {
+		var st, parentID, started, updated string
+		if err := rows.Scan(&sess.MachineID, &sess.Agent, &sess.SessionID, &sess.MachineName, &sess.DisplayName, &st, &sess.Message, &sess.Cwd, &sess.LastAssistantMessage, &parentID, &started, &updated); err != nil {
 			continue
 		}
 		sess.State = apitypes.SessionState(st)
+		sess.ParentSessionID = parentID
 		sess.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 		if started != "" {
 			if t, perr := time.Parse(time.RFC3339Nano, started); perr == nil {

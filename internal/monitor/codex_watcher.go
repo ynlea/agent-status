@@ -119,15 +119,22 @@ func (s *CodexFileSource) Changes() <-chan struct{} { return s.changes }
 
 func (s *CodexFileSource) Snapshot() []apitypes.Session {
 	s.mu.RLock()
-	out := make([]apitypes.Session, 0, len(s.files))
+	items := make([]codexSessionItem, 0, len(s.files))
 	for _, file := range s.files {
-		if file.present {
-			session := file.session
-			session.Source = "codex-file-watch"
-			out = append(out, session)
+		if !file.present {
+			continue
 		}
+		// Rebuild from cached state so parent attach always sees thread meta.
+		// session() is pure; file.session may lag only on DisplayName after meta.
+		sess := file.session
+		if sess.SessionID == "" {
+			continue
+		}
+		sess.Source = "codex-file-watch"
+		items = append(items, file.state.toItem(sess))
 	}
 	s.mu.RUnlock()
+	out := finalizeCodexSessions(items)
 	sort.Slice(out, func(i, j int) bool { return out[i].SessionID < out[j].SessionID })
 	return out
 }

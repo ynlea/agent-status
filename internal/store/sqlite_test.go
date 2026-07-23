@@ -177,3 +177,35 @@ func TestSQLiteRenameThenReportUsesLockedName(t *testing.T) {
 		t.Fatalf("history machine_name=%v", hist)
 	}
 }
+
+func TestSQLiteParentSessionID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "parent.db")
+	s, err := NewSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Now().UTC()
+	_, _ = s.ApplyReport(apitypes.ReportRequest{
+		MachineID: "m1", MachineName: "a", Platform: "linux", ReportedAt: now,
+		Sessions: []apitypes.Session{
+			{Agent: "codex", SessionID: "root", DisplayName: "main", State: apitypes.StateWorking, UpdatedAt: now},
+			{Agent: "codex", SessionID: "child", DisplayName: "Raman", State: apitypes.StateWorking, ParentSessionID: "root", UpdatedAt: now},
+		},
+	})
+	list := s.ListSessions("m1")
+	if len(list) != 2 {
+		t.Fatalf("len=%d", len(list))
+	}
+	byID := map[string]apitypes.Session{}
+	for _, sess := range list {
+		byID[sess.SessionID] = sess
+	}
+	if byID["root"].ParentSessionID != "" {
+		t.Fatalf("root parent=%q", byID["root"].ParentSessionID)
+	}
+	if byID["child"].ParentSessionID != "root" {
+		t.Fatalf("child parent=%q", byID["child"].ParentSessionID)
+	}
+}

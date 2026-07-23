@@ -63,6 +63,9 @@ type Session struct {
 	Cwd string `json:"cwd,omitempty"`
 	// LastAssistantMessage is the latest agent-visible text (full, not truncated).
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+	// ParentSessionID links Codex subagent rows to their root session_id.
+	// Empty means this row is a root session (shown in the main list).
+	ParentSessionID string `json:"parent_session_id,omitempty"`
 	// Source is the monitor channel that produced this session:
 	// codex-file-watch | codex-file | claude-hook
 	Source    string    `json:"source,omitempty"`
@@ -131,13 +134,15 @@ const (
 )
 
 type NotificationPayload struct {
-	MachineID   string       `json:"machine_id"`
-	MachineName string       `json:"machine_name,omitempty"`
-	Agent       string       `json:"agent"`
-	SessionID   string       `json:"session_id"`
-	DisplayName string       `json:"display_name,omitempty"`
-	State       SessionState `json:"state"`
-	Color       string       `json:"color"`
-	Message     string       `json:"message,omitempty"`
-	At          time.Time    `json:"at"`
+	MachineID   string `json:"machine_id"`
+	MachineName string `json:"machine_name,omitempty"`
+	Agent       string `json:"agent"`
+	SessionID   string `json:"session_id"`
+	DisplayName string `json:"display_name,omitempty"`
+	// ParentSessionID mirrors Session so clients keep subagent hierarchy on notify path.
+	ParentSessionID string       `json:"parent_session_id,omitempty"`
+	State           SessionState `json:"state"`
+	Color           string       `json:"color"`
+	Message         string       `json:"message,omitempty"`
+	At              time.Time    `json:"at"`
 }

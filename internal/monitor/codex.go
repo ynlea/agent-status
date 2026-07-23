@@ -18,7 +18,7 @@ func ScanCodex(root string) ([]apitypes.Session, error) {
 	if root == "" {
 		return nil, nil
 	}
-	var out []apitypes.Session
+	var items []codexSessionItem
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -30,12 +30,111 @@ func ScanCodex(root string) ([]apitypes.Session, error) {
 		if !strings.HasPrefix(base, "rollout-") || !strings.HasSuffix(base, ".jsonl") {
 			return nil
 		}
-		if sess, ok := parseCodexRollout(path); ok {
-			out = append(out, sess)
+		if item, ok := parseCodexRolloutItem(path); ok {
+			items = append(items, item)
 		}
 		return nil
 	})
-	return out, err
+	return finalizeCodexSessions(items), err
+}
+
+// codexSessionItem is one rollout file's derived session plus thread meta for parent attach.
+type codexSessionItem struct {
+	sess           apitypes.Session
+	threadID       string
+	parentThreadID string
+	isSubagent     bool
+}
+
+// finalizeCodexSessions attaches parent_session_id then folds root states.
+// Scan and file-watch Snapshot share this path so hierarchy does not drift.
+func finalizeCodexSessions(items []codexSessionItem) []apitypes.Session {
+	return foldCodexRootStates(attachCodexParents(items))
+}
+
+// attachCodexParents maps subagent parent_thread_id → root reported SessionID (filename stem).
+func attachCodexParents(items []codexSessionItem) []apitypes.Session {
+	threadToReported := make(map[string]string, len(items))
+	for _, it := range items {
+		if !it.isSubagent && it.threadID != "" {
+			threadToReported[it.threadID] = it.sess.SessionID
+		}
+	}
+	out := make([]apitypes.Session, 0, len(items))
+	for _, it := range items {
+		s := it.sess
+		if it.isSubagent {
+			parentKey := it.parentThreadID
+			if mapped, ok := threadToReported[parentKey]; ok {
+				s.ParentSessionID = mapped
+			} else if parentKey != "" {
+				// Parent rollout missing: still non-root so main list hides orphans.
+				s.ParentSessionID = parentKey
+			} else if it.threadID != "" {
+				s.ParentSessionID = it.threadID
+			} else {
+				s.ParentSessionID = s.SessionID
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// foldCodexRootStates raises root state/updated_at from its children (confirm > working > done > idle).
+// Child rows keep their own state for detail view.
+func foldCodexRootStates(sessions []apitypes.Session) []apitypes.Session {
+	if len(sessions) == 0 {
+		return sessions
+	}
+	childrenByParent := make(map[string][]int)
+	for i, s := range sessions {
+		if s.ParentSessionID == "" {
+			continue
+		}
+		childrenByParent[s.ParentSessionID] = append(childrenByParent[s.ParentSessionID], i)
+	}
+	if len(childrenByParent) == 0 {
+		return sessions
+	}
+	out := make([]apitypes.Session, len(sessions))
+	copy(out, sessions)
+	for i := range out {
+		root := &out[i]
+		if root.ParentSessionID != "" {
+			continue
+		}
+		kids := childrenByParent[root.SessionID]
+		if len(kids) == 0 {
+			continue
+		}
+		best := root.State
+		latest := root.UpdatedAt
+		var childHint string
+		for _, ci := range kids {
+			ch := sessions[ci]
+			if ch.State.Priority() > best.Priority() {
+				best = ch.State
+			}
+			if ch.UpdatedAt.After(latest) {
+				latest = ch.UpdatedAt
+			}
+			if childHint == "" {
+				name := strings.TrimSpace(ch.DisplayName)
+				if name != "" {
+					childHint = name
+				}
+			}
+		}
+		root.State = best
+		if !latest.IsZero() {
+			root.UpdatedAt = latest
+		}
+		if strings.TrimSpace(root.Message) == "" && childHint != "" {
+			root.Message = "子任务: " + childHint
+		}
+	}
+	return out
 }
 
 type codexLine struct {
@@ -45,13 +144,19 @@ type codexLine struct {
 }
 
 type codexRolloutState struct {
-	sessionID      string
-	display        string
-	state          apitypes.SessionState
-	message        string
-	lastAssistant  string
-	lastEvent      time.Time
-	cwd            string
+	sessionID     string
+	display       string
+	state         apitypes.SessionState
+	message       string
+	lastAssistant string
+	lastEvent     time.Time
+	cwd           string
+	// Thread meta from session_meta (parent attach / subagent display).
+	threadID       string
+	parentThreadID string
+	isSubagent     bool
+	agentNickname  string
+	agentPath      string
 }
 
 func newCodexRolloutState(path string) codexRolloutState {
@@ -86,6 +191,12 @@ func (s *codexRolloutState) applyLine(line string, fallback time.Time) {
 		payload = map[string]interface{}{}
 	}
 	pt, _ := payload["type"].(string)
+
+	// session_meta is usually the first line; fields live on the payload itself.
+	if row.Type == "session_meta" || pt == "session_meta" {
+		s.applySessionMeta(payload)
+		return
+	}
 
 	if c, ok := payload["cwd"].(string); ok && c != "" {
 		s.cwd = c
@@ -207,12 +318,78 @@ func stringifyCodexText(v interface{}) string {
 	}
 }
 
+// applySessionMeta extracts thread hierarchy and display hints from Codex session_meta.
+func (s *codexRolloutState) applySessionMeta(payload map[string]interface{}) {
+	if payload == nil {
+		return
+	}
+	if id, ok := payload["id"].(string); ok && strings.TrimSpace(id) != "" {
+		s.threadID = strings.TrimSpace(id)
+	}
+	if cwd, ok := payload["cwd"].(string); ok && cwd != "" {
+		s.cwd = cwd
+	}
+	if nick, ok := payload["agent_nickname"].(string); ok && strings.TrimSpace(nick) != "" {
+		s.agentNickname = strings.TrimSpace(nick)
+	}
+	if path, ok := payload["agent_path"].(string); ok && strings.TrimSpace(path) != "" {
+		s.agentPath = strings.TrimSpace(path)
+	}
+
+	parent := ""
+	if v, ok := payload["parent_thread_id"].(string); ok {
+		parent = strings.TrimSpace(v)
+	}
+	if parent == "" {
+		if v, ok := payload["forked_from_id"].(string); ok {
+			parent = strings.TrimSpace(v)
+		}
+	}
+	// Nested source.subagent.thread_spawn also carries parent / nickname / path.
+	if src, ok := payload["source"].(map[string]interface{}); ok {
+		if sub, ok := src["subagent"].(map[string]interface{}); ok {
+			s.isSubagent = true
+			spawn, _ := sub["thread_spawn"].(map[string]interface{})
+			if spawn == nil {
+				spawn = sub
+			}
+			if parent == "" {
+				if v, ok := spawn["parent_thread_id"].(string); ok {
+					parent = strings.TrimSpace(v)
+				}
+			}
+			if s.agentNickname == "" {
+				if v, ok := spawn["agent_nickname"].(string); ok {
+					s.agentNickname = strings.TrimSpace(v)
+				}
+			}
+			if s.agentPath == "" {
+				if v, ok := spawn["agent_path"].(string); ok {
+					s.agentPath = strings.TrimSpace(v)
+				}
+			}
+		}
+	}
+	if parent != "" {
+		s.parentThreadID = parent
+		s.isSubagent = true
+	}
+	if ts, ok := payload["thread_source"].(string); ok && strings.EqualFold(strings.TrimSpace(ts), "subagent") {
+		s.isSubagent = true
+	}
+}
+
 func (s codexRolloutState) session(fileMod, now time.Time) (apitypes.Session, bool) {
 	if s.sessionID == "" {
 		return apitypes.Session{}, false
 	}
+	// Subagent display prefers nickname, then agent_path base; roots keep cwd base.
 	display := s.display
-	if s.cwd != "" {
+	if s.agentNickname != "" {
+		display = s.agentNickname
+	} else if s.agentPath != "" {
+		display = filepath.Base(s.agentPath)
+	} else if s.cwd != "" {
 		display = filepath.Base(s.cwd)
 	}
 	state := s.state
@@ -262,6 +439,15 @@ func (s codexRolloutState) session(fileMod, now time.Time) (apitypes.Session, bo
 	}, true
 }
 
+func (s codexRolloutState) toItem(sess apitypes.Session) codexSessionItem {
+	return codexSessionItem{
+		sess:           sess,
+		threadID:       s.threadID,
+		parentThreadID: s.parentThreadID,
+		isSubagent:     s.isSubagent,
+	}
+}
+
 // extractCodexAssistantText returns full assistant-visible text from a rollout line.
 func extractCodexAssistantText(rowType, payloadType string, payload map[string]interface{}) string {
 	if payload == nil {
@@ -307,7 +493,10 @@ func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, 
 	}
 	defer f.Close()
 
-	var lines []string
+	// Keep session_meta (usually line 1) plus a trailing event window so large
+	// rollouts still attach parent hierarchy without replaying entire history.
+	var metaLines []string
+	var recent []string
 	reader := bufio.NewReaderSize(f, 64*1024)
 	var offset int64
 	for {
@@ -317,9 +506,13 @@ func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, 
 			line = strings.TrimSuffix(line, "\n")
 			line = strings.TrimSuffix(line, "\r")
 			if line != "" {
-				lines = append(lines, line)
-				if len(lines) > 200 {
-					lines = lines[1:]
+				if strings.Contains(line, `"session_meta"`) {
+					metaLines = append(metaLines, line)
+				} else {
+					recent = append(recent, line)
+					if len(recent) > 200 {
+						recent = recent[1:]
+					}
 				}
 			}
 		}
@@ -330,7 +523,7 @@ func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, 
 			return codexRolloutState{}, 0, apitypes.Session{}, false
 		}
 	}
-	if len(lines) == 0 {
+	if len(metaLines) == 0 && len(recent) == 0 {
 		return newCodexRolloutState(path), offset, apitypes.Session{}, false
 	}
 
@@ -340,7 +533,10 @@ func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, 
 		fileMod = fi.ModTime().UTC()
 	}
 	state := newCodexRolloutState(path)
-	for _, line := range lines {
+	for _, line := range metaLines {
+		state.applyLine(line, fileMod)
+	}
+	for _, line := range recent {
 		state.applyLine(line, fileMod)
 	}
 	session, ok := state.session(fileMod, time.Now().UTC())
@@ -350,6 +546,14 @@ func loadCodexRollout(path string) (codexRolloutState, int64, apitypes.Session, 
 func parseCodexRollout(path string) (apitypes.Session, bool) {
 	_, _, session, ok := loadCodexRollout(path)
 	return session, ok
+}
+
+func parseCodexRolloutItem(path string) (codexSessionItem, bool) {
+	state, _, session, ok := loadCodexRollout(path)
+	if !ok {
+		return codexSessionItem{}, false
+	}
+	return state.toItem(session), true
 }
 
 // shortToolMsg is a privacy-safe label (event type + optional tool name), never prompt text.

@@ -135,15 +135,16 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		s.Hub.Broadcast(apitypes.WSEvent{
 			Type: apitypes.WSNotification,
 			Payload: apitypes.NotificationPayload{
-				MachineID:   sess.MachineID,
-				MachineName: sess.MachineName,
-				Agent:       sess.Agent,
-				SessionID:   sess.SessionID,
-				DisplayName: sess.DisplayName,
-				State:       sess.State,
-				Color:       sess.State.Color(),
-				Message:     sess.Message,
-				At:          sess.UpdatedAt,
+				MachineID:       sess.MachineID,
+				MachineName:     sess.MachineName,
+				Agent:           sess.Agent,
+				SessionID:       sess.SessionID,
+				DisplayName:     sess.DisplayName,
+				ParentSessionID: sess.ParentSessionID,
+				State:           sess.State,
+				Color:           sess.State.Color(),
+				Message:         sess.Message,
+				At:              sess.UpdatedAt,
 			},
 		})
 	}

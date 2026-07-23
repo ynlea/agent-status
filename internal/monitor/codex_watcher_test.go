@@ -157,6 +157,50 @@ func assertWatcherStates(t *testing.T, sessions []apitypes.Session, want map[str
 	}
 }
 
+func TestCodexFileSourceSnapshotFoldsSubagentParent(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	parentThread := "019f8cc0-34a8-7252-b989-90affb71e894"
+	parentStem := "2026-07-23T10-13-54-" + parentThread
+	childStem := "2026-07-23T10-51-52-019f8ce2-f7db-7443-86bc-80ba2b96cbd9"
+	writeWatcherRollout(t, root, "rollout-"+parentStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"`+parentThread+`","session_id":"`+parentThread+`","thread_source":"user","cwd":"/tmp/main"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_complete"}}`+"\n",
+	)
+	writeWatcherRollout(t, root, "rollout-"+childStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"019f8ce2-f7db-7443-86bc-80ba2b96cbd9","session_id":"`+parentThread+`","thread_source":"subagent","parent_thread_id":"`+parentThread+`","agent_nickname":"Raman"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_started"}}`+"\n",
+	)
+	source := NewCodexFileSource(root, nil, CodexFileWatchOptions{RescanInterval: time.Hour})
+	if err := source.rescan(); err != nil {
+		t.Fatal(err)
+	}
+	sessions := source.Snapshot()
+	if len(sessions) != 2 {
+		t.Fatalf("want 2 sessions, got %d: %+v", len(sessions), sessions)
+	}
+	byID := map[string]apitypes.Session{}
+	for _, s := range sessions {
+		byID[s.SessionID] = s
+	}
+	rootSess := byID[parentStem]
+	if rootSess.SessionID == "" {
+		t.Fatalf("missing root %s in %+v", parentStem, sessions)
+	}
+	if rootSess.ParentSessionID != "" {
+		t.Fatalf("root parent=%q", rootSess.ParentSessionID)
+	}
+	if rootSess.State != apitypes.StateWorking {
+		t.Fatalf("folded root state=%s want working", rootSess.State)
+	}
+	child := byID[childStem]
+	if child.ParentSessionID != parentStem {
+		t.Fatalf("child parent=%q want %q", child.ParentSessionID, parentStem)
+	}
+	if child.DisplayName != "Raman" {
+		t.Fatalf("child display=%q", child.DisplayName)
+	}
+}
 
 func TestCodexFileSourceNotifiesOnAssistantDetail(t *testing.T) {
 	root := t.TempDir()

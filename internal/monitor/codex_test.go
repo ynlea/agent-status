@@ -517,3 +517,124 @@ func TestCodexUserMessageSummary(t *testing.T) {
 		t.Fatalf("message=%q want summary kept after complete", sess.Message)
 	}
 }
+
+func TestScanCodexSubagentParentFold(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "2026", "07", "23")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	parentThread := "019f8cc0-34a8-7252-b989-90affb71e894"
+	parentStem := "2026-07-23T10-13-54-" + parentThread
+	childWorkingStem := "2026-07-23T10-51-52-019f8ce2-f7db-7443-86bc-80ba2b96cbd9"
+	childDoneStem := "2026-07-23T10-52-16-019f8ce3-5487-74e1-b744-bafac1fc1a39"
+	orphanStem := "2026-07-23T11-00-00-019f9aaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	// Root: idle-ish complete, parent meta id = parentThread.
+	writeRollout(t, dir, "rollout-"+parentStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"`+parentThread+`","session_id":"`+parentThread+`","thread_source":"user","cwd":"/tmp/main-proj","source":"cli"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"user_message","message":"主任务"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_complete"}}`+"\n",
+	)
+	// Child working + nickname.
+	writeRollout(t, dir, "rollout-"+childWorkingStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"019f8ce2-f7db-7443-86bc-80ba2b96cbd9","session_id":"`+parentThread+`","thread_source":"subagent","parent_thread_id":"`+parentThread+`","forked_from_id":"`+parentThread+`","agent_nickname":"Raman","agent_path":"/root/fix_island_races","source":{"subagent":{"thread_spawn":{"parent_thread_id":"`+parentThread+`","agent_nickname":"Raman","agent_path":"/root/fix_island_races"}}}}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_started"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"response_item","payload":{"type":"custom_tool_call","name":"shell"}}`+"\n",
+	)
+	// Child done.
+	writeRollout(t, dir, "rollout-"+childDoneStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"019f8ce3-5487-74e1-b744-bafac1fc1a39","session_id":"`+parentThread+`","thread_source":"subagent","parent_thread_id":"`+parentThread+`","agent_nickname":"James","agent_path":"/root/fix_window"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_complete"}}`+"\n",
+	)
+	// Orphan subagent: parent file absent — must not appear as root.
+	writeRollout(t, dir, "rollout-"+orphanStem+".jsonl",
+		`{"timestamp":"`+now+`","type":"session_meta","payload":{"id":"019f9aaa-bbbb-cccc-dddd-eeeeeeeeeeee","session_id":"missing-parent","thread_source":"subagent","parent_thread_id":"missing-parent-thread","agent_nickname":"Orphan"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_started"}}`+"\n",
+	)
+
+	sessions, err := ScanCodex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 4 {
+		t.Fatalf("want 4 sessions (1 root + 2 children + 1 orphan), got %d", len(sessions))
+	}
+
+	var roots, children []apitypes.Session
+	for _, s := range sessions {
+		if s.ParentSessionID == "" {
+			roots = append(roots, s)
+		} else {
+			children = append(children, s)
+		}
+	}
+	if len(roots) != 1 {
+		t.Fatalf("want 1 root, got %d: %+v", len(roots), roots)
+	}
+	if roots[0].SessionID != parentStem {
+		t.Fatalf("root id=%s want %s", roots[0].SessionID, parentStem)
+	}
+	if roots[0].State != apitypes.StateWorking {
+		t.Fatalf("folded root state=%s want working (from child)", roots[0].State)
+	}
+	if len(children) != 3 {
+		t.Fatalf("want 3 children, got %d", len(children))
+	}
+
+	byID := map[string]apitypes.Session{}
+	for _, s := range sessions {
+		byID[s.SessionID] = s
+	}
+	cw := byID[childWorkingStem]
+	if cw.ParentSessionID != parentStem {
+		t.Fatalf("working child parent=%q want %q", cw.ParentSessionID, parentStem)
+	}
+	if cw.State != apitypes.StateWorking {
+		t.Fatalf("working child state=%s", cw.State)
+	}
+	if cw.DisplayName != "Raman" {
+		t.Fatalf("working child display=%q want Raman", cw.DisplayName)
+	}
+	cd := byID[childDoneStem]
+	if cd.ParentSessionID != parentStem {
+		t.Fatalf("done child parent=%q want %q", cd.ParentSessionID, parentStem)
+	}
+	if cd.State != apitypes.StateDone {
+		t.Fatalf("done child should keep own state, got %s", cd.State)
+	}
+	orphan := byID[orphanStem]
+	if orphan.ParentSessionID == "" {
+		t.Fatal("orphan subagent must not be root")
+	}
+	if orphan.ParentSessionID != "missing-parent-thread" {
+		t.Fatalf("orphan parent fallback=%q", orphan.ParentSessionID)
+	}
+}
+
+func TestScanCodexLegacyWithoutMetaStaysRoot(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "2026", "07", "18")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	writeRollout(t, dir, "rollout-legacy-no-meta.jsonl",
+		`{"timestamp":"`+now+`","type":"event_msg","payload":{"type":"task_started"}}`+"\n"+
+			`{"timestamp":"`+now+`","type":"turn_context","payload":{"cwd":"/tmp/legacy"}}`+"\n",
+	)
+	sessions, err := ScanCodex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d", len(sessions))
+	}
+	if sessions[0].ParentSessionID != "" {
+		t.Fatalf("legacy session should be root, parent=%q", sessions[0].ParentSessionID)
+	}
+	if sessions[0].State != apitypes.StateWorking {
+		t.Fatalf("state=%s", sessions[0].State)
+	}
+}
