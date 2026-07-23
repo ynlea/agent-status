@@ -16,17 +16,21 @@ class IslandController extends StateNotifier<IslandViewModel> {
   IslandController(this._ref) : super(const IslandViewModel()) {
     if (!isQingyaDesktop) return;
     _ref.listen<StatusSnapshot>(statusRepositoryProvider, (prev, next) {
+      if (_disposed) return;
       _recompute(
         previousSessions: prev?.sessions ?? _lastAllSessions,
         nudge: true,
       );
     });
     _ref.listen<AppSettings>(settingsProvider, (_, __) {
+      if (_disposed) return;
       _recompute(previousSessions: _lastAllSessions, nudge: false);
       unawaited(_refreshTodayTokens());
     });
     _modeSub = QingyaWindowController.instance.modeStream.listen((mode) {
+      if (_disposed) return;
       if (mode == DesktopWindowMode.normal) {
+        _islandEntryBlocked = false;
         // 主窗打开：丢掉排队播报，避免关窗后把积压既有状态一口气上岛
         _suppressAnnouncements(seedBaseline: true);
       }
@@ -54,8 +58,10 @@ class IslandController extends StateNotifier<IslandViewModel> {
   Timer? _usageTimer;
   bool _hovering = false;
   bool _playingAnnouncement = false;
+
   /// 列表刚收起后强制停留在悬停胶囊，保证动画流畅。
   bool _dwellHover = false;
+
   /// 已建立会话基线后才做状态播报，避免首屏既有任务全量上岛。
   bool _hasSessionBaseline = false;
   int? _todayTokens;
@@ -64,10 +70,66 @@ class IslandController extends StateNotifier<IslandViewModel> {
   /// 每次 morph 请求递增，旧 delayed shrink 看到过期值直接丢弃。
   int _morphGen = 0;
 
+  /// 窗口形状请求版本。尺寸同步只提交最后一个版本的结果。
+  int _shapeGen = 0;
+
+  /// 所有窗口 API 调用共用一条尾部，保证 HWND 操作不并发。
+  Future<void> _windowOpTail = Future<void>.value();
+  Future<void>? _shapeSyncRunner;
+  bool _shapeSyncPending = false;
+  bool _islandEntryBlocked = false;
+  bool _disposed = false;
+
+  void _invalidateAsyncWork() {
+    _morphGen++;
+    _shapeGen++;
+    _shapeSyncPending = false;
+    _collapseTimer?.cancel();
+  }
+
+  bool _isMorphCurrent(int generation) {
+    return !_disposed && generation == _morphGen && state.enabled;
+  }
+
+  bool _isShapeCurrent(int generation) {
+    return !_disposed && generation == _shapeGen;
+  }
+
+  bool _isFormCurrent(int morphGeneration, int shapeGeneration) {
+    return _isMorphCurrent(morphGeneration) && _isShapeCurrent(shapeGeneration);
+  }
+
+  /// 将窗口调用串行化，并在排队期间失效时跳过旧操作。
+  Future<bool> _runWindowOperation(
+    Future<void> Function() operation, {
+    required bool Function() isCurrent,
+  }) async {
+    final previous = _windowOpTail;
+    final release = Completer<void>();
+    _windowOpTail = release.future;
+    try {
+      try {
+        await previous;
+      } catch (_) {
+        // 前一个窗口调用失败不应阻塞后续最新请求。
+      }
+      if (_disposed || !isCurrent()) return false;
+      await operation();
+      return true;
+    } catch (_) {
+      // 单次失败由后续最新请求校正，同时避免 unawaited 异常外溢。
+      return false;
+    } finally {
+      if (!release.isCompleted) release.complete();
+    }
+  }
+
   (int, int, int?) _liveStats(StatusSnapshot snapshot) {
     final online = snapshot.machines.where((m) => m.online).length;
-    final working =
-        snapshot.sessions.where((s) => s.state == SessionState.working).length;
+    // 只计 root，避免 Codex subagent 把 working 数抬高。
+    final working = snapshot.sessions
+        .where((s) => s.isRoot && s.state == SessionState.working)
+        .length;
     // 今日用量优先；未拉到前用会话用量总和兜底
     final tokens = _todayTokens ??
         snapshot.sessions.fold<int>(
@@ -111,7 +173,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   Future<void> _refreshTodayTokens() async {
-    if (!isQingyaDesktop) return;
+    if (_disposed || !isQingyaDesktop) return;
     final s = _ref.read(settingsProvider);
     if (!s.isConfigured || s.demoMode) return;
     try {
@@ -119,10 +181,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
       final now = DateTime.now();
       final from = DateTime(now.year, now.month, now.day);
       final summary = await client.fetchUsageSummary(from: from, to: now);
+      if (_disposed) return;
       final next = summary.metrics.realUsage;
       if (_todayTokens == next) return;
       _todayTokens = next;
-      if (state.enabled) {
+      if (!_disposed && state.enabled) {
         _recompute(previousSessions: _lastAllSessions, nudge: false);
       }
     } catch (_) {
@@ -134,6 +197,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
     required List<Session> previousSessions,
     required bool nudge,
   }) {
+    if (_disposed) return;
     final settings = _ref.read(settingsProvider);
     final snapshot = _ref.read(statusRepositoryProvider);
     final enabled = settings.islandEnabled;
@@ -151,7 +215,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
     );
 
     if (!enabled) {
-      _collapseTimer?.cancel();
+      _invalidateAsyncWork();
+      _islandEntryBlocked = false;
       _hovering = false;
       _dwellHover = false;
       _announceQueue.clear();
@@ -184,9 +249,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
           final exists = _announceQueue.any(
             (e) => e.sessionKey == a.sessionKey && e.state == a.state,
           );
-          final samePlaying =
-              state.announcement?.sessionKey == a.sessionKey &&
-                  state.announcement?.state == a.state;
+          final samePlaying = state.announcement?.sessionKey == a.sessionKey &&
+              state.announcement?.state == a.state;
           if (!exists && !samePlaying) _announceQueue.add(a);
         }
       }
@@ -226,6 +290,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void _playNextAnnouncement(List<Session> filtered, bool connected) {
+    if (_disposed || !state.enabled) return;
     if (_announceQueue.isEmpty) {
       _playingAnnouncement = false;
       unawaited(_morphToHover(force: true));
@@ -238,18 +303,22 @@ class IslandController extends StateNotifier<IslandViewModel> {
     _playingAnnouncement = true;
     final ann = _announceQueue.removeFirst();
     _morphGen++; // 取消进行中的 morph
+    _shapeGen++; // 播报尺寸优先于排队中的普通同步
+    _shapeSyncPending = false;
     _collapseTimer?.cancel();
+    final announcementGen = _morphGen;
     unawaited(() async {
       final wc = QingyaWindowController.instance;
       // 等进岛过渡结束，再拉到播报尺寸
       var wait = 0;
-      while (wc.isReady &&
-          wc.mode != DesktopWindowMode.island &&
-          wait < 40) {
+      while (wc.isReady && wc.mode != DesktopWindowMode.island && wait < 40) {
         await Future<void>.delayed(const Duration(milliseconds: 25));
         wait++;
       }
-      if (!state.enabled) return;
+      if (!_isMorphCurrent(announcementGen) ||
+          wc.mode != DesktopWindowMode.island) {
+        return;
+      }
       await _morphWindow(
         targetPhase: IslandPhase.card,
         targetPinned: false,
@@ -267,7 +336,8 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   /// 丢掉播报队列；[seedBaseline] 时把当前会话记为基线。
   void _suppressAnnouncements({required bool seedBaseline}) {
-    _collapseTimer?.cancel();
+    if (_disposed) return;
+    _invalidateAsyncWork();
     _announceQueue.clear();
     _playingAnnouncement = false;
     // 清掉正在展示的播报内容，避免主窗↔岛切换时残留卡片态
@@ -291,7 +361,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void onAnnouncementFinished() {
-    if (!state.enabled) return;
+    if (_disposed || !state.enabled) return;
     final snapshot = _ref.read(statusRepositoryProvider);
     final filtered = _filteredNow();
     if (_announceQueue.isNotEmpty) {
@@ -307,7 +377,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   void _scheduleListCollapse() {
     _collapseTimer?.cancel();
     _collapseTimer = Timer(const Duration(seconds: 10), () {
-      if (!state.enabled) return;
+      if (_disposed || !state.enabled) return;
       if (_playingAnnouncement) return;
       if (state.pinned || state.phase == IslandPhase.card) {
         _collapseListToHover();
@@ -321,7 +391,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }) {
     _collapseTimer?.cancel();
     _collapseTimer = Timer(delay, () {
-      if (!state.enabled) return;
+      if (_disposed || !state.enabled) return;
       if (_hovering || _playingAnnouncement || state.pinned) return;
       if (state.phase != IslandPhase.hover && !_dwellHover) return;
       _goStrip(animateHwnd: true);
@@ -330,6 +400,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   /// 列表 / 通知 → 悬停胶囊（在线摘要），再恢复收条计时。
   void _collapseListToHover() {
+    if (_disposed || !state.enabled) return;
     _collapseTimer?.cancel();
     _playingAnnouncement = false;
     _dwellHover = true;
@@ -342,7 +413,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   /// 先瞬时放大 HWND（锚点固定），再切 UI 做单段尺寸动画。
   Future<void> _morphToHover({bool force = false}) async {
-    if (!state.enabled) return;
+    if (_disposed || !state.enabled) return;
     if (!force && state.pinned) return;
     await _morphWindow(
       targetPhase: IslandPhase.hover,
@@ -353,7 +424,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   Future<void> _morphToCard() async {
-    if (!state.enabled) return;
+    if (_disposed || !state.enabled) return;
     await _morphWindow(
       targetPhase: IslandPhase.card,
       targetPinned: true,
@@ -371,7 +442,10 @@ class IslandController extends StateNotifier<IslandViewModel> {
     bool clearAnnouncement = false,
     IslandAnnouncement? announcement,
   }) async {
+    if (_disposed || !state.enabled) return;
     final gen = ++_morphGen;
+    final shapeGen = ++_shapeGen;
+    _shapeSyncPending = false;
     _collapseTimer?.cancel();
     final wc = QingyaWindowController.instance;
 
@@ -382,47 +456,69 @@ class IslandController extends StateNotifier<IslandViewModel> {
     if (expanding) {
       // 先放大 HWND，再切 phase，避免裁切
       if (wc.isReady && wc.mode == DesktopWindowMode.island) {
-        await wc.resizeIsland(width: targetWinW, height: targetWinH);
+        final applied = await _runWindowOperation(
+          () => wc.resizeIsland(width: targetWinW, height: targetWinH),
+          isCurrent: () =>
+              _isFormCurrent(gen, shapeGen) &&
+              wc.mode == DesktopWindowMode.island,
+        );
+        if (!_isFormCurrent(gen, shapeGen)) return;
+        if (!applied || wc.mode != DesktopWindowMode.island) return;
         _appliedWinW = targetWinW;
         _appliedWinH = targetWinH;
       }
-      if (gen != _morphGen || !state.enabled) return;
+      if (!_isFormCurrent(gen, shapeGen)) return;
       state = _vmFrom(
         _filteredNow(),
         phase: targetPhase,
         pinned: targetPinned,
         connected: state.connected,
-        announcement: clearAnnouncement ? null : (announcement ?? state.announcement),
+        announcement:
+            clearAnnouncement ? null : (announcement ?? state.announcement),
       );
+      if (wc.mode != DesktopWindowMode.island) {
+        unawaited(_syncWindowShape());
+      }
     } else {
       // 先切 phase（UI 开始缩小），动画结束后再收 HWND
       _dwellHover = targetPhase == IslandPhase.hover;
+      if (!_isFormCurrent(gen, shapeGen)) return;
       state = _vmFrom(
         _filteredNow(),
         phase: targetPhase,
         pinned: targetPinned,
         connected: state.connected,
-        announcement: clearAnnouncement ? null : (announcement ?? state.announcement),
+        announcement:
+            clearAnnouncement ? null : (announcement ?? state.announcement),
       );
       // 用 UI 动画时长对齐，而非固定 magic delay
       final ms = targetPhase == IslandPhase.strip
           ? kIslandCollapseMs
           : kIslandCardCollapseMs;
       await Future<void>.delayed(Duration(milliseconds: ms));
-      if (gen != _morphGen || !state.enabled) return;
+      if (!_isFormCurrent(gen, shapeGen)) return;
       if (_hovering || state.pinned || _playingAnnouncement) return;
       if (wc.isReady && wc.mode == DesktopWindowMode.island) {
-        await wc.resizeIsland(width: targetWinW, height: targetWinH);
+        final applied = await _runWindowOperation(
+          () => wc.resizeIsland(width: targetWinW, height: targetWinH),
+          isCurrent: () =>
+              _isFormCurrent(gen, shapeGen) &&
+              wc.mode == DesktopWindowMode.island,
+        );
+        if (!_isFormCurrent(gen, shapeGen)) return;
+        if (!applied || wc.mode != DesktopWindowMode.island) return;
         _appliedWinW = targetWinW;
         _appliedWinH = targetWinH;
+      } else {
+        unawaited(_syncWindowShape());
       }
     }
   }
 
   void _goStrip({required bool animateHwnd}) {
+    if (_disposed || !state.enabled) return;
     _dwellHover = false;
-    _morphGen++; // 取消进行中的 morph / delayed shrink
-    _collapseTimer?.cancel();
+    _invalidateAsyncWork();
     state = _vmFrom(
       _filteredNow(),
       phase: IslandPhase.strip,
@@ -434,11 +530,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
       return;
     }
     // 动画时长与 UI 对齐后缩 HWND
-    final gen = ++_morphGen;
+    final gen = _morphGen;
     Future<void>.delayed(
       Duration(milliseconds: kIslandCollapseMs),
       () {
-        if (gen != _morphGen || !state.enabled) return;
+        if (!_isMorphCurrent(gen)) return;
         if (_hovering || _dwellHover || state.pinned || _playingAnnouncement) {
           return;
         }
@@ -450,6 +546,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
 
   /// 主窗再进岛：清掉展开/钉住/积压播报，避免既有任务全量上岛与错位。
   void _resetIslandPresentation() {
+    if (_disposed) return;
+    _invalidateAsyncWork();
+    _islandEntryBlocked = false;
     _hovering = false;
     _dwellHover = false;
     _appliedWinW = null;
@@ -466,7 +565,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void onHoverEnter() {
-    if (!state.enabled || _playingAnnouncement) return;
+    if (_disposed || !state.enabled || _playingAnnouncement) return;
     _hovering = true;
     _dwellHover = false;
     if (state.pinned) return;
@@ -475,7 +574,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void onHoverExit() {
-    if (!state.enabled || _playingAnnouncement) return;
+    if (_disposed || !state.enabled || _playingAnnouncement) return;
     _hovering = false;
     if (state.pinned) return;
     _dwellHover = true;
@@ -483,7 +582,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void onTap() {
-    if (!state.enabled) return;
+    if (_disposed || !state.enabled) return;
     // 通知播报中：点击 = 手动关闭当前通知
     if (_playingAnnouncement || state.hasAnnouncement) {
       _dismissAnnouncement();
@@ -496,11 +595,16 @@ class IslandController extends StateNotifier<IslandViewModel> {
     }
     _dwellHover = false;
     _collapseTimer?.cancel();
-    unawaited(_morphToCard().then((_) => _scheduleListCollapse()));
+    unawaited(_morphToCard().then((_) {
+      if (!_disposed && state.enabled && state.pinned) {
+        _scheduleListCollapse();
+      }
+    }));
   }
 
   /// 手动关掉当前通知（并清空排队，避免连播）。
   void _dismissAnnouncement() {
+    if (_disposed) return;
     _collapseTimer?.cancel();
     _announceQueue.clear();
     _playingAnnouncement = false;
@@ -508,8 +612,10 @@ class IslandController extends StateNotifier<IslandViewModel> {
   }
 
   void collapse() {
+    if (_disposed) return;
     if (!state.enabled) {
-      _collapseTimer?.cancel();
+      _invalidateAsyncWork();
+      _islandEntryBlocked = false;
       _hovering = false;
       _dwellHover = false;
       _playingAnnouncement = false;
@@ -536,14 +642,18 @@ class IslandController extends StateNotifier<IslandViewModel> {
   void expand() => onTap();
 
   Future<void> onMainCloseRequested() async {
+    if (_disposed) return;
     final settings = _ref.read(settingsProvider);
     final preferIsland = settings.islandEnabled;
     // 从主窗进岛前复位，避免上次展开态导致错位
     if (preferIsland) {
       _resetIslandPresentation();
     }
-    await QingyaWindowController.instance.hideToBackground(
-      preferIsland: preferIsland,
+    await _runWindowOperation(
+      () => QingyaWindowController.instance.hideToBackground(
+        preferIsland: preferIsland,
+      ),
+      isCurrent: () => !_disposed,
     );
   }
 
@@ -570,42 +680,121 @@ class IslandController extends StateNotifier<IslandViewModel> {
     return (kIslandWindowStripWidth, kIslandWindowStripHeight);
   }
 
-  Future<void> _syncWindowShape() async {
+  Future<void> _applyWindowShape(int request) async {
+    if (!_isShapeCurrent(request) || !isQingyaDesktop) return;
     final wc = QingyaWindowController.instance;
-    if (!wc.isReady || !isQingyaDesktop) return;
-    // 主窗打开：不显示岛
+    if (!wc.isReady) return;
+    if (wc.mode == DesktopWindowMode.island) {
+      _islandEntryBlocked = false;
+    }
+
+    // 主窗打开：不显示岛。
     if (wc.mode == DesktopWindowMode.normal) {
-      _appliedWinW = null;
-      _appliedWinH = null;
+      if (_isShapeCurrent(request)) {
+        _appliedWinW = null;
+        _appliedWinH = null;
+      }
       return;
     }
 
     if (!state.isVisible) {
-      await wc.hideCompletely();
-      _appliedWinW = null;
-      _appliedWinH = null;
+      if (wc.mode != DesktopWindowMode.hidden) {
+        final hidden = await _runWindowOperation(
+          wc.hideCompletely,
+          isCurrent: () => _isShapeCurrent(request),
+        );
+        if (!hidden || !_isShapeCurrent(request)) return;
+      }
+      if (_isShapeCurrent(request)) {
+        _appliedWinW = null;
+        _appliedWinH = null;
+      }
       return;
     }
 
     final target = _targetWindowSize();
     final w = target.$1;
     final h = target.$2;
+    bool targetStillCurrent() {
+      return _isShapeCurrent(request) &&
+          state.isVisible &&
+          _targetWindowSize() == (w, h);
+    }
 
     if (wc.mode != DesktopWindowMode.island) {
-      await wc.enterIslandMode(width: w, height: h);
+      if (_islandEntryBlocked) return;
+      final entered = await _runWindowOperation(
+        () => wc.enterIslandMode(width: w, height: h),
+        isCurrent: targetStillCurrent,
+      );
+      if (!entered) return;
+      if (wc.mode != DesktopWindowMode.island) {
+        // 仅实际执行过进岛且最终落到 hidden 时视为失败。旧请求在排队中
+        // 被新请求取消时不能误触发熔断，否则最新请求也无法进岛。
+        if (wc.mode == DesktopWindowMode.hidden && state.isVisible) {
+          _islandEntryBlocked = true;
+        }
+        // 进岛内部失败时停止自动重试，不写回已应用尺寸。
+        if (!state.isVisible) {
+          _appliedWinW = null;
+          _appliedWinH = null;
+        }
+        return;
+      }
+      if (!targetStillCurrent()) return;
+      _islandEntryBlocked = false;
       _appliedWinW = w;
       _appliedWinH = h;
       return;
     }
 
     if (_appliedWinW == w && _appliedWinH == h) return;
-    await wc.resizeIsland(width: w, height: h);
+    final resized = await _runWindowOperation(
+      () => wc.resizeIsland(width: w, height: h),
+      isCurrent: () =>
+          targetStillCurrent() && wc.mode == DesktopWindowMode.island,
+    );
+    if (!resized ||
+        !targetStillCurrent() ||
+        wc.mode != DesktopWindowMode.island) {
+      return;
+    }
     _appliedWinW = w;
     _appliedWinH = h;
   }
 
+  /// 请求一次最新窗口形状；已有执行中的请求会在完成后重新取目标。
+  Future<void> _syncWindowShape() {
+    if (_disposed || !isQingyaDesktop) return Future<void>.value();
+    _shapeGen++;
+    _shapeSyncPending = true;
+    final running = _shapeSyncRunner;
+    if (running != null) return running;
+
+    final runner = _drainWindowShape();
+    _shapeSyncRunner = runner;
+    return runner;
+  }
+
+  Future<void> _drainWindowShape() async {
+    try {
+      while (!_disposed && _shapeSyncPending) {
+        _shapeSyncPending = false;
+        final request = _shapeGen;
+        await _applyWindowShape(request);
+      }
+    } finally {
+      // 循环条件到释放执行器之间没有 await，不会漏掉新请求。
+      _shapeSyncRunner = null;
+    }
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    _invalidateAsyncWork();
+    _announceQueue.clear();
+    _playingAnnouncement = false;
     _collapseTimer?.cancel();
     _usageTimer?.cancel();
     unawaited(_modeSub?.cancel() ?? Future.value());

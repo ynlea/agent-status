@@ -79,17 +79,21 @@ class QingyaWindowController with WindowListener {
   }
 
   Future<void> _rememberMainBounds() async {
+    // 不要让岛形态的尺寸和最大化状态覆盖主窗记忆。
+    if (_mode == DesktopWindowMode.island) return;
     try {
-      _savedMaximized = await windowManager.isMaximized();
       final size = await windowManager.getSize();
       final pos = await windowManager.getPosition();
-      // 岛形态下读到的是小岛尺寸，不要覆盖主窗记忆
       if (_mode == DesktopWindowMode.island) return;
       if (size.width < kDesktopMinWidth * 0.5 ||
           size.height < kDesktopMinHeight * 0.5) {
         return;
       }
-      _savedSize = Size(size.width.roundToDouble(), size.height.roundToDouble());
+      final maximized = await windowManager.isMaximized();
+      if (_mode == DesktopWindowMode.island) return;
+      _savedMaximized = maximized;
+      _savedSize =
+          Size(size.width.roundToDouble(), size.height.roundToDouble());
       _savedPosition = Offset(pos.dx.roundToDouble(), pos.dy.roundToDouble());
     } catch (e) {
       debugPrint('[QingyaWindow] remember bounds: $e');
@@ -109,7 +113,7 @@ class QingyaWindowController with WindowListener {
     try {
       await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
       await _restoreNormalChromeProps();
-      final target = _targetMainRect();
+      final target = await _targetMainRect();
       try {
         await windowManager.setBounds(target);
       } catch (_) {}
@@ -182,6 +186,7 @@ class QingyaWindowController with WindowListener {
       await resizeIsland(width: width, height: height);
       return;
     }
+    final previousMode = _mode;
     _transitioning = true;
     try {
       if (_mode == DesktopWindowMode.normal) {
@@ -209,10 +214,16 @@ class QingyaWindowController with WindowListener {
       await windowManager.show();
     } catch (e, st) {
       debugPrint('[QingyaWindow] enterIslandMode: $e\n$st');
+      // 进岛过程中任一步失败，都不能留下透明、置顶或不可调整大小的主窗。
+      await _restoreNormalChromePropsBestEffort();
       try {
         await windowManager.hide();
         _setMode(DesktopWindowMode.hidden);
       } catch (_) {}
+      if (_mode == DesktopWindowMode.island) {
+        // 隐藏也失败时，保留实际可见性对应的模式，供下一次恢复调用。
+        _setMode(previousMode);
+      }
     } finally {
       _transitioning = false;
     }
@@ -231,32 +242,51 @@ class QingyaWindowController with WindowListener {
     }
     if (_mode != DesktopWindowMode.island) return;
     if (_transitioning) return;
-    final w = width.roundToDouble();
-    final h = height.roundToDouble();
-    // 以当前窗水平中心 + 顶边为锚点缩放，避免「重新居中」导致细条左右跳
-    // 不用系统 animate：Windows 上容易和 Flutter 动画叠成卡断
-    double x;
-    double y;
+    _transitioning = true;
     try {
-      final cur = await windowManager.getBounds();
-      final centerX = cur.left + cur.width / 2;
-      x = (centerX - w / 2).roundToDouble();
-      y = cur.top.roundToDouble();
-    } catch (_) {
-      final pos = await _islandTopCenterOffset(width: w, height: h);
-      x = pos.dx;
-      y = pos.dy;
+      if (_mode != DesktopWindowMode.island) return;
+      final w = width.roundToDouble();
+      final h = height.roundToDouble();
+      // 以当前窗水平中心 + 顶边为锚点缩放，避免「重新居中」导致细条左右跳
+      // 不用系统 animate：Windows 上容易和 Flutter 动画叠成卡断
+      double x;
+      double y;
+      try {
+        final cur = await windowManager.getBounds();
+        final centerX = cur.left + cur.width / 2;
+        x = (centerX - w / 2).roundToDouble();
+        y = cur.top.roundToDouble();
+      } catch (_) {
+        final pos = await _islandTopCenterOffset(width: w, height: h);
+        x = pos.dx;
+        y = pos.dy;
+      }
+      if (_mode != DesktopWindowMode.island) return;
+      await windowManager.setBounds(
+        Rect.fromLTWH(x, y, w, h),
+        animate: false,
+      );
+    } finally {
+      _transitioning = false;
     }
-    await windowManager.setBounds(
-      Rect.fromLTWH(x, y, w, h),
-      animate: false,
-    );
   }
 
   Future<void> hideCompletely() async {
     if (!isQingyaDesktop || !_ready) return;
-    await windowManager.hide();
-    _setMode(DesktopWindowMode.hidden);
+    var wait = 0;
+    while (_transitioning && wait < 40) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      wait++;
+    }
+    if (_transitioning || _mode == DesktopWindowMode.normal) return;
+    _transitioning = true;
+    try {
+      if (_mode == DesktopWindowMode.normal) return;
+      await windowManager.hide();
+      _setMode(DesktopWindowMode.hidden);
+    } finally {
+      _transitioning = false;
+    }
   }
 
   Future<void> quitApp() async {
@@ -287,15 +317,51 @@ class QingyaWindowController with WindowListener {
     await windowManager.setMaximumSize(const Size(10000, 10000));
   }
 
-  Rect _targetMainRect() {
-    final size = _savedSize ??
-        const Size(kDesktopDefaultWidth, kDesktopDefaultHeight);
-    final safeW = size.width < kDesktopMinWidth
-        ? kDesktopDefaultWidth
-        : size.width;
-    final safeH = size.height < kDesktopMinHeight
-        ? kDesktopDefaultHeight
-        : size.height;
+  /// 进岛失败时逐项恢复 chrome（窗口外观与行为属性），避免单个 API
+  /// 失败导致后续属性完全没有机会回滚。
+  Future<void> _restoreNormalChromePropsBestEffort() async {
+    Object? firstError;
+
+    Future<void> attempt(Future<void> Function() action) async {
+      try {
+        await action();
+      } catch (e) {
+        firstError ??= e;
+      }
+    }
+
+    await attempt(() => windowManager.setAlwaysOnTop(false));
+    await attempt(() => windowManager.setResizable(true));
+    await attempt(() => windowManager.setHasShadow(true));
+    await attempt(() => windowManager.setSkipTaskbar(false));
+    await attempt(
+      () => windowManager.setTitleBarStyle(
+        TitleBarStyle.hidden,
+        windowButtonVisibility: false,
+      ),
+    );
+    await attempt(
+      () => windowManager.setBackgroundColor(const Color(0xFFFFF9F5)),
+    );
+    await attempt(
+      () => windowManager.setMinimumSize(
+        const Size(kDesktopMinWidth, kDesktopMinHeight),
+      ),
+    );
+    await attempt(() => windowManager.setMaximumSize(const Size(10000, 10000)));
+
+    if (firstError != null) {
+      debugPrint('[QingyaWindow] chrome rollback partial failure: $firstError');
+    }
+  }
+
+  Future<Rect> _targetMainRect() async {
+    final size =
+        _savedSize ?? const Size(kDesktopDefaultWidth, kDesktopDefaultHeight);
+    final safeW =
+        size.width < kDesktopMinWidth ? kDesktopDefaultWidth : size.width;
+    final safeH =
+        size.height < kDesktopMinHeight ? kDesktopDefaultHeight : size.height;
     final pos = _savedPosition;
     if (pos != null) {
       return Rect.fromLTWH(
@@ -305,10 +371,15 @@ class QingyaWindowController with WindowListener {
         safeH.roundToDouble(),
       );
     }
-    // 无记忆位置时尽量落在主屏中心（同步路径用近似值，异步居中在 restore 里补）
+    // 没有历史位置时按当前光标所在显示器居中，避免固定坐标落到错误屏幕。
+    final display = await _displayForCursorOrPrimary();
+    final visible = display.visiblePosition ?? Offset.zero;
+    final visibleSize = display.visibleSize ?? display.size;
+    final x = visible.dx + (visibleSize.width - safeW) / 2;
+    final y = visible.dy + (visibleSize.height - safeH) / 2;
     return Rect.fromLTWH(
-      120,
-      80,
+      x.roundToDouble(),
+      y.roundToDouble(),
       safeW.roundToDouble(),
       safeH.roundToDouble(),
     );
@@ -323,8 +394,7 @@ class QingyaWindowController with WindowListener {
       final display = await _displayForCursorOrPrimary();
       final visible = display.visiblePosition ?? Offset.zero;
       final visibleSize = display.visibleSize ?? display.size;
-      final x =
-          (visible.dx + (visibleSize.width - width) / 2).roundToDouble();
+      final x = (visible.dx + (visibleSize.width - width) / 2).roundToDouble();
       final y =
           (visible.dy + (visibleSize.height - height) / 2).roundToDouble();
       await windowManager.setPosition(Offset(x, y));
@@ -336,24 +406,35 @@ class QingyaWindowController with WindowListener {
     }
   }
 
-  Future<Display> _displayForCursorOrPrimary() async {
+  Future<Display> _displayForCursorOrPrimary({Rect? preferredBounds}) async {
     final primary = await screenRetriever.getPrimaryDisplay();
     try {
-      final cursor = await screenRetriever.getCursorScreenPoint();
       final all = await screenRetriever.getAllDisplays();
-      for (final d in all) {
-        final origin = d.visiblePosition ?? Offset.zero;
-        // 用 size 作命中区更稳（与 window_manager calcWindowPosition 一致）
-        final rect = Rect.fromLTWH(
-          origin.dx,
-          origin.dy,
-          d.size.width,
-          d.size.height,
-        );
-        if (rect.contains(cursor)) return d;
+      if (preferredBounds != null) {
+        final savedDisplay =
+            _displayContainingPoint(all, preferredBounds.center);
+        if (savedDisplay != null) return savedDisplay;
       }
+      final cursor = await screenRetriever.getCursorScreenPoint();
+      final cursorDisplay = _displayContainingPoint(all, cursor);
+      if (cursorDisplay != null) return cursorDisplay;
     } catch (_) {}
     return primary;
+  }
+
+  Display? _displayContainingPoint(List<Display> displays, Offset point) {
+    for (final display in displays) {
+      final origin = display.visiblePosition ?? Offset.zero;
+      // 用完整 size 作命中区，兼容任务栏缩小后的 visibleSize。
+      final rect = Rect.fromLTWH(
+        origin.dx,
+        origin.dy,
+        display.size.width,
+        display.size.height,
+      );
+      if (rect.contains(point)) return display;
+    }
+    return null;
   }
 
   Future<Offset> _islandTopCenterOffset({
@@ -361,12 +442,22 @@ class QingyaWindowController with WindowListener {
     required double height,
   }) async {
     // Display 坐标已是逻辑像素，勿再除 scale
-    final display = await screenRetriever.getPrimaryDisplay();
+    // 优先使用保存主窗所在的显示器，主窗边界不可用时才看光标和主屏。
+    final display = await _displayForCursorOrPrimary(
+      preferredBounds: _savedMainBounds(),
+    );
     final visible = display.visiblePosition ?? Offset.zero;
     final visibleSize = display.visibleSize ?? display.size;
     final x = (visible.dx + (visibleSize.width - width) / 2).roundToDouble();
     final y = visible.dy.roundToDouble();
     return Offset(x, y);
+  }
+
+  Rect? _savedMainBounds() {
+    final position = _savedPosition;
+    final size = _savedSize;
+    if (position == null || size == null) return null;
+    return Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
   }
 
   void _setMode(DesktopWindowMode next) {

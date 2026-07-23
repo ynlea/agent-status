@@ -1,0 +1,28 @@
+{
+  "id": "desktop-island-instant-form-smooth",
+  "name": "desktop-island-instant-form-smooth",
+  "title": "桌面灵动岛：取消主窗几何动画，稳定形态切换",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "GreenLeo",
+  "assignee": "GreenLeo",
+  "createdAt": "2026-07-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-23-desktop-island-stability-fixes"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
