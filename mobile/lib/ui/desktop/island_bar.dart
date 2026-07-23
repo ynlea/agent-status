@@ -145,9 +145,6 @@ class _IslandSurfaceState extends State<IslandSurface>
     final from = _lastPhase;
     final to = viewModel.phase;
     final duration = _morphDuration(from, to);
-    // 细条↔胶囊：只做尺寸形变 + 内容淡入，不要 Switcher 叠两层缩放
-    final simpleMorph = (from == IslandPhase.strip || from == IslandPhase.hover) &&
-        (to == IslandPhase.strip || to == IslandPhase.hover);
 
     return Align(
       alignment: Alignment.topCenter,
@@ -162,72 +159,33 @@ class _IslandSurfaceState extends State<IslandSurface>
             onTap: widget.onTap,
             child: AnimatedContainer(
               duration: duration,
-              // 统一 easeOutCubic，水平向两侧长、顶边不动
               curve: Curves.easeOutCubic,
               width: widget.fillHost ? double.infinity : size.$1,
               height: size.$2,
               alignment: Alignment.topCenter,
               clipBehavior: Clip.none,
-              child: simpleMorph
-                  ? AnimatedSwitcher(
-                      duration: duration,
-                      switchInCurve: Curves.easeOut,
-                      switchOutCurve: Curves.easeIn,
-                      // 只淡入淡出，不缩放，避免中心漂移感
-                      transitionBuilder: (child, anim) =>
-                          FadeTransition(opacity: anim, child: child),
-                      layoutBuilder: (current, previous) => Stack(
-                        alignment: Alignment.topCenter,
-                        clipBehavior: Clip.none,
-                        children: [
-                          ...previous,
-                          if (current != null) current,
-                        ],
-                      ),
-                      child: KeyedSubtree(
-                        key: ValueKey(viewModel.phase.name),
-                        child: _IslandBody(
-                          viewModel: viewModel,
-                          fillHost: widget.fillHost,
-                          onOpenSession: widget.onOpenSession,
-                          onCollapse: widget.onCollapse,
-                          onAnnouncementFinished:
-                              widget.onAnnouncementFinished,
-                        ),
-                      ),
-                    )
-                  : AnimatedSwitcher(
-                      duration: duration,
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, anim) => FadeTransition(
-                        opacity: anim,
-                        child: child,
-                      ),
-                      layoutBuilder: (current, previous) => Stack(
-                        alignment: Alignment.topCenter,
-                        clipBehavior: Clip.none,
-                        children: [
-                          ...previous,
-                          if (current != null) current,
-                        ],
-                      ),
-                      child: KeyedSubtree(
-                        key: ValueKey(
-                          '${viewModel.phase.name}_'
-                          '${viewModel.hasAnnouncement}_'
-                          '${viewModel.pinned}',
-                        ),
-                        child: _IslandBody(
-                          viewModel: viewModel,
-                          fillHost: widget.fillHost,
-                          onOpenSession: widget.onOpenSession,
-                          onCollapse: widget.onCollapse,
-                          onAnnouncementFinished:
-                              widget.onAnnouncementFinished,
-                        ),
-                      ),
-                    ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                transitionBuilder: (child, anim) =>
+                    FadeTransition(opacity: anim, child: child),
+                child: KeyedSubtree(
+                  key: ValueKey(
+                    '${viewModel.phase.name}_'
+                    '${viewModel.hasAnnouncement}_'
+                    '${viewModel.pinned}',
+                  ),
+                  child: _IslandBody(
+                    viewModel: viewModel,
+                    fillHost: widget.fillHost,
+                    onOpenSession: widget.onOpenSession,
+                    onCollapse: widget.onCollapse,
+                    onAnnouncementFinished:
+                        widget.onAnnouncementFinished,
+                  ),
+                ),
+              ),
             ),
           ),
         ),

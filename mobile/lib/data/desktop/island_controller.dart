@@ -61,6 +61,9 @@ class IslandController extends StateNotifier<IslandViewModel> {
   int? _todayTokens;
   StreamSubscription<DesktopWindowMode>? _modeSub;
 
+  /// 每次 morph 请求递增，旧 delayed shrink 看到过期值直接丢弃。
+  int _morphGen = 0;
+
   (int, int, int?) _liveStats(StatusSnapshot snapshot) {
     final online = snapshot.machines.where((m) => m.online).length;
     final working =
@@ -225,13 +228,7 @@ class IslandController extends StateNotifier<IslandViewModel> {
   void _playNextAnnouncement(List<Session> filtered, bool connected) {
     if (_announceQueue.isEmpty) {
       _playingAnnouncement = false;
-      state = _vmFrom(
-        filtered,
-        phase: (_hovering || _dwellHover) ? IslandPhase.hover : IslandPhase.strip,
-        pinned: false,
-        connected: connected,
-      );
-      unawaited(_syncWindowShape());
+      unawaited(_morphToHover(force: true));
       return;
     }
     // 主窗前台不播，避免关窗后才把积压通知挤扁显示
@@ -240,9 +237,11 @@ class IslandController extends StateNotifier<IslandViewModel> {
     }
     _playingAnnouncement = true;
     final ann = _announceQueue.removeFirst();
+    _morphGen++; // 取消进行中的 morph
+    _collapseTimer?.cancel();
     unawaited(() async {
       final wc = QingyaWindowController.instance;
-      // 等进岛过渡结束，再拉到播报尺寸，避免细条 HWND 把胶囊压扁
+      // 等进岛过渡结束，再拉到播报尺寸
       var wait = 0;
       while (wc.isReady &&
           wc.mode != DesktopWindowMode.island &&
@@ -250,31 +249,14 @@ class IslandController extends StateNotifier<IslandViewModel> {
         await Future<void>.delayed(const Duration(milliseconds: 25));
         wait++;
       }
-      wait = 0;
-      while (wc.isReady && wait < 20) {
-        // enterIslandMode 的 _transitioning 会挡 resize，稍等
-        try {
-          await wc.resizeIsland(
-            width: kIslandWindowAnnounceWidth,
-            height: kIslandWindowAnnounceHeight,
-          );
-          _appliedWinW = kIslandWindowAnnounceWidth;
-          _appliedWinH = kIslandWindowAnnounceHeight;
-          break;
-        } catch (_) {}
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-        wait++;
-      }
       if (!state.enabled) return;
-      state = _vmFrom(
-        filtered,
-        phase: IslandPhase.card,
-        pinned: false,
-        connected: connected,
+      await _morphWindow(
+        targetPhase: IslandPhase.card,
+        targetPinned: false,
+        targetWinW: kIslandWindowAnnounceWidth,
+        targetWinH: kIslandWindowAnnounceHeight,
         announcement: ann,
       );
-      // 再同步一次，防止状态与 HWND 不一致
-      unawaited(_syncWindowShape());
     }());
     _collapseTimer?.cancel();
     _collapseTimer = Timer(
@@ -362,49 +344,85 @@ class IslandController extends StateNotifier<IslandViewModel> {
   Future<void> _morphToHover({bool force = false}) async {
     if (!state.enabled) return;
     if (!force && state.pinned) return;
-    final wc = QingyaWindowController.instance;
-    if (wc.isReady && wc.mode == DesktopWindowMode.island) {
-      // 瞬时 setBounds，不 await 额外帧，减少「停一下再长」的卡断
-      await wc.resizeIsland(
-        width: kIslandWindowHoverWidth,
-        height: kIslandWindowHoverHeight,
-      );
-      _appliedWinW = kIslandWindowHoverWidth;
-      _appliedWinH = kIslandWindowHoverHeight;
-    }
-    if (!state.enabled) return;
-    if (!force && state.pinned) return;
-    // 同一帧内切 phase，AnimatedContainer 立刻开跑
-    state = _vmFrom(
-      _filteredNow(),
-      phase: IslandPhase.hover,
-      pinned: false,
-      connected: state.connected,
+    await _morphWindow(
+      targetPhase: IslandPhase.hover,
+      targetPinned: false,
+      targetWinW: kIslandWindowHoverWidth,
+      targetWinH: kIslandWindowHoverHeight,
     );
   }
 
   Future<void> _morphToCard() async {
     if (!state.enabled) return;
-    final wc = QingyaWindowController.instance;
-    if (wc.isReady && wc.mode == DesktopWindowMode.island) {
-      await wc.resizeIsland(
-        width: kIslandWindowCardWidth,
-        height: kIslandWindowCardHeight,
-      );
-      _appliedWinW = kIslandWindowCardWidth;
-      _appliedWinH = kIslandWindowCardHeight;
-    }
-    if (!state.enabled) return;
-    state = _vmFrom(
-      _filteredNow(),
-      phase: IslandPhase.card,
-      pinned: true,
-      connected: state.connected,
+    await _morphWindow(
+      targetPhase: IslandPhase.card,
+      targetPinned: true,
+      targetWinW: kIslandWindowCardWidth,
+      targetWinH: kIslandWindowCardHeight,
     );
+  }
+
+  /// 统一 morph：展开先 HWND 再 phase，收缩先 phase 再 HWND。
+  Future<void> _morphWindow({
+    required IslandPhase targetPhase,
+    required bool targetPinned,
+    required double targetWinW,
+    required double targetWinH,
+    bool clearAnnouncement = false,
+    IslandAnnouncement? announcement,
+  }) async {
+    final gen = ++_morphGen;
+    _collapseTimer?.cancel();
+    final wc = QingyaWindowController.instance;
+
+    final curArea = (_appliedWinW ?? 0) * (_appliedWinH ?? 0);
+    final targetArea = targetWinW * targetWinH;
+    final expanding = targetArea >= curArea;
+
+    if (expanding) {
+      // 先放大 HWND，再切 phase，避免裁切
+      if (wc.isReady && wc.mode == DesktopWindowMode.island) {
+        await wc.resizeIsland(width: targetWinW, height: targetWinH);
+        _appliedWinW = targetWinW;
+        _appliedWinH = targetWinH;
+      }
+      if (gen != _morphGen || !state.enabled) return;
+      state = _vmFrom(
+        _filteredNow(),
+        phase: targetPhase,
+        pinned: targetPinned,
+        connected: state.connected,
+        announcement: clearAnnouncement ? null : (announcement ?? state.announcement),
+      );
+    } else {
+      // 先切 phase（UI 开始缩小），动画结束后再收 HWND
+      _dwellHover = targetPhase == IslandPhase.hover;
+      state = _vmFrom(
+        _filteredNow(),
+        phase: targetPhase,
+        pinned: targetPinned,
+        connected: state.connected,
+        announcement: clearAnnouncement ? null : (announcement ?? state.announcement),
+      );
+      // 用 UI 动画时长对齐，而非固定 magic delay
+      final ms = targetPhase == IslandPhase.strip
+          ? kIslandCollapseMs
+          : kIslandCardCollapseMs;
+      await Future<void>.delayed(Duration(milliseconds: ms));
+      if (gen != _morphGen || !state.enabled) return;
+      if (_hovering || state.pinned || _playingAnnouncement) return;
+      if (wc.isReady && wc.mode == DesktopWindowMode.island) {
+        await wc.resizeIsland(width: targetWinW, height: targetWinH);
+        _appliedWinW = targetWinW;
+        _appliedWinH = targetWinH;
+      }
+    }
   }
 
   void _goStrip({required bool animateHwnd}) {
     _dwellHover = false;
+    _morphGen++; // 取消进行中的 morph / delayed shrink
+    _collapseTimer?.cancel();
     state = _vmFrom(
       _filteredNow(),
       phase: IslandPhase.strip,
@@ -415,10 +433,12 @@ class IslandController extends StateNotifier<IslandViewModel> {
       unawaited(_syncWindowShape());
       return;
     }
+    // 动画时长与 UI 对齐后缩 HWND
+    final gen = ++_morphGen;
     Future<void>.delayed(
-      const Duration(milliseconds: kIslandHwndShrinkDelayMs),
+      Duration(milliseconds: kIslandCollapseMs),
       () {
-        if (!state.enabled) return;
+        if (gen != _morphGen || !state.enabled) return;
         if (_hovering || _dwellHover || state.pinned || _playingAnnouncement) {
           return;
         }

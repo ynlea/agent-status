@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -97,8 +96,7 @@ class QingyaWindowController with WindowListener {
     }
   }
 
-  /// 从托盘/岛恢复主窗。
-  /// 岛→主窗：先恢复边框与实色，再插值放大到记忆位置，最后切主布局。
+  /// 从托盘/岛恢复主窗（瞬时切换，无几何动画）。
   Future<void> showMain() async {
     if (!isQingyaDesktop || !_ready) return;
     var wait = 0;
@@ -109,49 +107,22 @@ class QingyaWindowController with WindowListener {
     if (_transitioning) return;
     _transitioning = true;
     try {
-      final wasIsland = _mode == DesktopWindowMode.island;
-      final wasHidden = _mode == DesktopWindowMode.hidden;
-
-      if (wasIsland) {
-        Rect? from;
+      await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
+      await _restoreNormalChromeProps();
+      final target = _targetMainRect();
+      try {
+        await windowManager.setBounds(target);
+      } catch (_) {}
+      if (_savedMaximized) {
         try {
-          from = await windowManager.getBounds();
+          await windowManager.maximize();
         } catch (_) {}
-        await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
-        // 先在小岛尺寸上恢复边框/阴影，再平滑放大
-        await _restoreNormalChromeProps();
-        final target = _targetMainRect();
-        if (from != null) {
-          await _lerpBounds(from, target, ms: 320);
-        } else {
-          await windowManager.setBounds(target);
-        }
-        if (_savedMaximized) {
-          try {
-            await windowManager.maximize();
-          } catch (_) {}
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 24));
-        _setMode(DesktopWindowMode.normal);
-        await Future<void>.delayed(const Duration(milliseconds: 40));
-      } else {
-        _setMode(DesktopWindowMode.normal);
-        if (wasHidden || _savedSize != null) {
-          await _restoreNormalChrome(fromIsland: false);
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 16));
       }
-
+      _setMode(DesktopWindowMode.normal);
       await windowManager.setSkipTaskbar(false);
       await windowManager.setBackgroundColor(const Color(0xFFFFF9F5));
       await windowManager.show();
       await windowManager.focus();
-
-      await Future<void>.delayed(const Duration(milliseconds: 48));
-      try {
-        await windowManager.show();
-        await windowManager.focus();
-      } catch (_) {}
     } catch (e, st) {
       debugPrint('[QingyaWindow] showMain failed: $e\n$st');
       _setMode(DesktopWindowMode.normal);
@@ -218,18 +189,13 @@ class QingyaWindowController with WindowListener {
       }
       final w = width.roundToDouble();
       final h = height.roundToDouble();
-      Rect? from;
-      try {
-        from = await windowManager.getBounds();
-      } catch (_) {}
-      await windowManager.setMinimumSize(const Size(80, 24));
-      await windowManager.setMaximumSize(const Size(10000, 10000));
       try {
         if (await windowManager.isMaximized()) {
           await windowManager.unmaximize();
-          from = await windowManager.getBounds();
         }
       } catch (_) {}
+      await windowManager.setMinimumSize(const Size(80, 24));
+      await windowManager.setMaximumSize(const Size(10000, 10000));
       await windowManager.setAsFrameless();
       await windowManager.setHasShadow(false);
       await windowManager.setBackgroundColor(const Color(0x00000000));
@@ -238,14 +204,8 @@ class QingyaWindowController with WindowListener {
       await windowManager.setResizable(false);
       final pos = await _islandTopCenterOffset(width: w, height: h);
       final to = Rect.fromLTWH(pos.dx, pos.dy, w, h);
-      // 先切岛 UI，再缩 HWND，避免主界面被压扁一截的割裂感
       _setMode(DesktopWindowMode.island);
-      if (from != null && from.width > w * 1.5) {
-        // 从当前大窗顶居中收到小岛；内容已是岛，透明底收缩更自然
-        await _lerpBounds(from, to, ms: 260);
-      } else {
-        await windowManager.setBounds(to);
-      }
+      await windowManager.setBounds(to);
       await windowManager.show();
     } catch (e, st) {
       debugPrint('[QingyaWindow] enterIslandMode: $e\n$st');
@@ -310,7 +270,7 @@ class QingyaWindowController with WindowListener {
     }
   }
 
-  /// 仅恢复边框/阴影/最小尺寸，不改几何（用于插值动画前）。
+  /// 恢复边框/阴影/最小尺寸，用于从岛/背景返回主窗。
   Future<void> _restoreNormalChromeProps() async {
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setResizable(true);
@@ -352,53 +312,6 @@ class QingyaWindowController with WindowListener {
       safeW.roundToDouble(),
       safeH.roundToDouble(),
     );
-  }
-
-  /// 窗口几何插值：缓入缓出，接近 macOS 缩放手感（纯 window_manager，无第三方库）。
-  Future<void> _lerpBounds(Rect from, Rect to, {int ms = 300}) async {
-    const steps = 8;
-    final stepMs = (ms / steps).round().clamp(16, 36);
-    for (var i = 1; i <= steps; i++) {
-      // easeInOutCubic
-      final p = i / steps;
-      final t = p < 0.5
-          ? 4 * p * p * p
-          : 1 - math.pow(-2 * p + 2, 3) / 2;
-      final r = Rect.lerp(from, to, t.toDouble())!;
-      await windowManager.setBounds(
-        Rect.fromLTWH(
-          r.left.roundToDouble(),
-          r.top.roundToDouble(),
-          r.width.roundToDouble().clamp(80, 10000),
-          r.height.roundToDouble().clamp(24, 10000),
-        ),
-      );
-      if (i < steps) {
-        await Future<void>.delayed(Duration(milliseconds: stepMs));
-      }
-    }
-  }
-
-  Future<void> _restoreNormalChrome({required bool fromIsland}) async {
-    await _restoreNormalChromeProps();
-
-    final target = _targetMainRect();
-    await windowManager.setSize(Size(target.width, target.height));
-
-    final pos = _savedPosition;
-    if (pos != null) {
-      await windowManager.setPosition(
-        Offset(pos.dx.roundToDouble(), pos.dy.roundToDouble()),
-      );
-    } else {
-      await _centerOnActiveDisplay(width: target.width, height: target.height);
-    }
-
-    if (_savedMaximized) {
-      try {
-        await windowManager.maximize();
-      } catch (_) {}
-    }
   }
 
   /// 主窗居中到光标所在显示器（找不到则主屏），避免跨双屏对半分。
