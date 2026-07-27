@@ -1736,6 +1736,7 @@ parse_args() {
       --force-config) FORCE_CONFIG=1; shift ;;
       --install-cc-switch) INSTALL_CC_SWITCH=1; shift ;;
       --purge) PURGE=1; shift ;;
+      --confirm-rebuild-usage) CONFIRM_REBUILD_USAGE=1; shift ;;
       --force) FORCE_UPDATE=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *=*)
