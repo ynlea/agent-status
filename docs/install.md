@@ -44,6 +44,9 @@ chmod +x scripts/install.sh scripts/release-build.sh
 ./scripts/install.sh init-agents
 ./scripts/install.sh uninstall --role monitor          # 保留文件
 ./scripts/install.sh uninstall --role all --purge      # 删除安装目录
+./scripts/install.sh rebuild-usage --role all          # 交互二次确认后重建用量
+# 非交互（必须同时带确认开关，防止误删）：
+./scripts/install.sh rebuild-usage --role all --yes --confirm-rebuild-usage
 ```
 
 非交互安装：
@@ -77,9 +80,27 @@ irm https://raw.githubusercontent.com/ynlea/agent-status/main/scripts/install.ps
 .\scripts\install.ps1 config get -Role monitor
 .\scripts\install.ps1 init-agents
 .\scripts\install.ps1 uninstall -Role all
+.\scripts\install.ps1 rebuild-usage -Role all
+# 非交互（必须同时带确认开关）：
+.\scripts\install.ps1 rebuild-usage -Role all -Yes -ConfirmRebuildUsage
+.\scripts\install.ps1 enable -Role monitor   # 重新注册无窗开机任务
 ```
 
-Windows 常驻：进程 + 可选「登录时」计划任务（`AgentStatusServer` / `AgentStatusMonitor`），**不是** Windows Service。
+Windows 常驻：进程 + 可选「登录时」计划任务（`AgentStatusServer` / `AgentStatusMonitor`），**不是** Windows Service。  
+计划任务通过 **隐藏 PowerShell** 拉起进程（无前台黑窗）；日志在安装目录 `logs/`。若旧任务仍弹窗，执行一次 `enable` 覆盖。
+
+### 重建用量
+
+用量解析算法变更或历史数字虚高时，可用 `rebuild-usage`：
+
+| 本机角色 | 动作 |
+|----------|------|
+| server | `DELETE FROM usage_events`（保留价表与其它表） |
+| monitor | 删除用量游标文件，并重启监测端触发全盘重扫 |
+| 两端都有 | 上述两步都做 |
+
+依赖：清理服务端表需要本机 `sqlite3` 或 `python`/`python3`。  
+交互会二次确认（第二次输入 `YES`）；非交互必须同时带 `--yes`/`-Yes` 与 `--confirm-rebuild-usage`/`-ConfirmRebuildUsage`。
 
 ## 监测端与 Agent 初始化
 

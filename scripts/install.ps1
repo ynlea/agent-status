@@ -5,10 +5,11 @@
 #   .\install.ps1 update  -Role all -Version v0.1.1 -Yes
 #   .\install.ps1 status  -Role all
 #   .\install.ps1 uninstall -Purge -Yes
+#   .\install.ps1 rebuild-usage -Role all -Yes -ConfirmRebuildUsage
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'config', 'init-agents', 'uninstall', '')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'config', 'init-agents', 'uninstall', 'rebuild-usage', '')]
     [string]$Command = 'install',
 
     [Parameter(Position = 1)]
@@ -29,6 +30,7 @@ param(
     [switch]$ForceConfig,
     [switch]$InstallCcSwitch,
     [switch]$Purge,
+    [switch]$ConfirmRebuildUsage,
     [string[]]$Set = @()
 )
 
@@ -91,7 +93,7 @@ function Write-Done([string]$Message = '完成', [string]$Dir = '') {
     Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor Green
     Write-Host "  │  ✦  $Message" -ForegroundColor Green
     if ($Dir) { Write-Host "  │  目录  $Dir" -ForegroundColor DarkGray }
-    Write-Host '  │  提示  install.ps1 status | update | restart' -ForegroundColor DarkGray
+    Write-Host '  │  提示  install.ps1 status | update | rebuild-usage' -ForegroundColor DarkGray
     Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Green
     Write-Host ""
 }
@@ -586,15 +588,78 @@ function Stop-Role([string]$RoleName) {
     Write-Log "已停止 $RoleName"
 }
 
+function Write-HiddenRoleLauncher {
+    $path = Join-Path $BinDir 'run-role-hidden.ps1'
+    $content = @'
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('server', 'monitor')]
+    [string]$Role,
+
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+)
+$ErrorActionPreference = 'Stop'
+$BinDir = Join-Path $InstallRoot 'bin'
+$ConfigDir = Join-Path $InstallRoot 'config'
+$LogDir = Join-Path $InstallRoot 'logs'
+$StateDir = Join-Path $InstallRoot 'state'
+New-Item -ItemType Directory -Force -Path $LogDir, $StateDir | Out-Null
+
+function Get-PidPath([string]$RoleName) { Join-Path $StateDir ("$RoleName.pid") }
+
+$pidPath = Get-PidPath $Role
+if (Test-Path $pidPath) {
+    $old = Get-Content $pidPath -ErrorAction SilentlyContinue
+    if ($old) {
+        $existing = Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue
+        if ($existing) { exit 0 }
+    }
+}
+
+if ($Role -eq 'server') {
+    $exe = Join-Path $BinDir 'agent-status-server.exe'
+    $envFile = Join-Path $ConfigDir 'server.env'
+    if (Test-Path $envFile) {
+        Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+            $k, $v = $_ -split '=', 2
+            Set-Item -Path "Env:$k" -Value $v
+        }
+    }
+    $argsList = @()
+    $logOut = Join-Path $LogDir 'server.log'
+} else {
+    $exe = Join-Path $BinDir 'agent-status-monitor.exe'
+    $cfg = Join-Path $ConfigDir 'monitor.json'
+    $argsList = @('-config', $cfg)
+    $logOut = Join-Path $LogDir 'monitor.log'
+}
+if (-not (Test-Path $exe)) { exit 1 }
+$logErr = [System.IO.Path]::ChangeExtension($logOut, '.err.log')
+if ($logOut -eq $logErr) { $logErr = "$logOut.err" }
+$p = Start-Process -FilePath $exe -ArgumentList $argsList -WorkingDirectory $InstallRoot `
+    -WindowStyle Hidden -PassThru -RedirectStandardOutput $logOut -RedirectStandardError $logErr
+Set-Content -Path $pidPath -Value $p.Id -Encoding ascii
+'@
+    Write-Utf8NoBom $path $content
+    return $path
+}
+
 function Enable-Role([string]$RoleName) {
     $task = Get-TaskName $RoleName
-    $info = Get-StartInfo $RoleName
-    $arg = ($info.ArgumentList -join ' ')
-    $action = New-ScheduledTaskAction -Execute $info.FilePath -Argument $arg -WorkingDirectory $InstallRoot
+    $launcher = Write-HiddenRoleLauncher
+    $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path $psExe)) { $psExe = 'powershell.exe' }
+    # 通过隐藏 PowerShell 拉起 console 子系统 exe，避免登录时弹黑窗、关窗杀进程
+    $arg = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Role {1} -InstallRoot "{2}"' -f $launcher, $RoleName, $InstallRoot
+    $action = New-ScheduledTaskAction -Execute $psExe -Argument $arg -WorkingDirectory $InstallRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Write-Log "已启用开机任务 $task"
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+    try { $settings.Hidden = $true } catch {}
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    Write-Log "已启用开机任务 $task（无窗后台）"
 }
 
 function Disable-Role([string]$RoleName) {
@@ -1018,6 +1083,147 @@ function Remove-ClaudeHooks {
     Write-Ok "已移除 $changed 条 agent-status hooks"
 }
 
+
+function Resolve-ServerDbPath {
+    $envFile = Join-Path $ConfigDir 'server.env'
+    $db = Join-Path $DataDir 'agent-status.db'
+    if (Test-Path $envFile) {
+        Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^AGENT_STATUS_DB=(.*)$') { $db = $Matches[1].Trim() }
+        }
+    }
+    return $db
+}
+
+function Resolve-UsageCursorPath {
+    $cfg = Join-Path $ConfigDir 'monitor.json'
+    $default = Join-Path $env:USERPROFILE '.agent-status\usage-cursors.json'
+    if (-not (Test-Path $cfg)) { return $default }
+    try {
+        $obj = Get-Content $cfg -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($obj.usage_state_file -and [string]$obj.usage_state_file.Trim()) {
+            return [string]$obj.usage_state_file.Trim()
+        }
+    } catch {}
+    return $default
+}
+
+function Clear-UsageEventsDb([string]$DbPath) {
+    if (-not (Test-Path $DbPath)) {
+        Write-Info "服务端数据库不存在，跳过: $(Format-PrettyPath $DbPath)"
+        return
+    }
+    $sqlite = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if (-not $sqlite) { $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue }
+    if ($sqlite) {
+        & $sqlite.Source $DbPath 'DELETE FROM usage_events;'
+        if ($LASTEXITCODE -ne 0) { Die "sqlite3 清理 usage_events 失败" }
+        Write-Ok '已清空 usage_events（sqlite3）'
+        return
+    }
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+    if ($py) {
+        $code = "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('DELETE FROM usage_events'); c.commit(); c.close()"
+        & $py.Source -c $code $DbPath
+        if ($LASTEXITCODE -ne 0) { Die "python 清理 usage_events 失败" }
+        Write-Ok '已清空 usage_events（python）'
+        return
+    }
+    Die '清理服务端用量需要 sqlite3 或 python'
+}
+
+function Invoke-RebuildUsage {
+    Write-Banner '重建用量'
+    $wantServer = $false
+    $wantMonitor = $false
+    if ([string]::IsNullOrWhiteSpace($Role) -or $Role -eq 'all') {
+        if ((Test-Path (Join-Path $BinDir 'agent-status-server.exe')) -or (Test-Path (Join-Path $ConfigDir 'server.env'))) { $wantServer = $true }
+        if ((Test-Path (Join-Path $BinDir 'agent-status-monitor.exe')) -or (Test-Path (Join-Path $ConfigDir 'monitor.json'))) { $wantMonitor = $true }
+    } elseif ($Role -eq 'server') {
+        $wantServer = $true
+    } elseif ($Role -eq 'monitor') {
+        $wantMonitor = $true
+    } else {
+        Die 'rebuild-usage 的 -Role 只能是 server|monitor|all'
+    }
+    if (-not $wantServer -and -not $wantMonitor) {
+        Die '本机未检测到 server/monitor，无法重建用量'
+    }
+
+    $db = Resolve-ServerDbPath
+    $cursor = Resolve-UsageCursorPath
+
+    Write-Host '  ╭──────────────────────────────────────────────────────╮' -ForegroundColor Yellow
+    Write-Host '  │  将执行（不可恢复）：                                 │' -ForegroundColor Yellow
+    if ($wantServer) {
+        Write-Host '  │  · 服务端 DELETE usage_events                        │' -ForegroundColor Yellow
+        Write-Host ("  │    DB  {0}" -f (Format-PrettyPath $db)) -ForegroundColor Yellow
+    }
+    if ($wantMonitor) {
+        Write-Host '  │  · 删除监测端用量游标并重启 monitor                  │' -ForegroundColor Yellow
+        Write-Host ("  │    游标  {0}" -f (Format-PrettyPath $cursor)) -ForegroundColor Yellow
+    }
+    Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor Yellow
+
+    if ($Yes) {
+        if (-not $ConfirmRebuildUsage) {
+            Die '非交互重建用量请同时指定 -Yes 与 -ConfirmRebuildUsage'
+        }
+    } else {
+        $ans = Read-Host '  确认删除用量数据并触发全盘重扫? [y/N]'
+        if ($ans -notmatch '^(y|yes|Y)$') {
+            Write-Info '已取消'
+            return
+        }
+        $ans2 = Read-Host '  二次确认请输入 YES'
+        if ($ans2 -ne 'YES') {
+            Write-Info '已取消（未输入 YES）'
+            return
+        }
+    }
+
+    $script:UiStepCur = 0
+    $script:UiStepTotal = 0
+    if ($wantMonitor) { $script:UiStepTotal += 2 }
+    if ($wantServer) { $script:UiStepTotal += 1 }
+    if ($wantMonitor) { $script:UiStepTotal += 1 }
+
+    if ($wantMonitor) {
+        Write-Step '停止监测端'
+        Stop-RoleProcesses 'monitor'
+        Stop-Role 'monitor'
+        Write-Ok '监测端已停止'
+    }
+    if ($wantServer) {
+        Write-Step '清空服务端 usage_events'
+        Clear-UsageEventsDb $db
+    }
+    if ($wantMonitor) {
+        Write-Step '删除用量游标'
+        if (Test-Path $cursor) {
+            Remove-Item -Force $cursor -ErrorAction SilentlyContinue
+            Write-PathLine '已删除' $cursor
+            Write-Ok '游标已删除'
+        } else {
+            Write-Info ("游标不存在，跳过: {0}" -f (Format-PrettyPath $cursor))
+        }
+        $legacy = Join-Path $env:USERPROFILE '.agent-status\usage-cursors.json'
+        if (($cursor -ne $legacy) -and (Test-Path $legacy)) {
+            Remove-Item -Force $legacy -ErrorAction SilentlyContinue
+        }
+        Write-Step '重启监测端以全盘重扫'
+        if (Test-Path (Join-Path $BinDir 'agent-status-monitor.exe')) {
+            Start-Role 'monitor'
+            Write-Ok '监测端已启动'
+        } else {
+            Write-Warn '监测端二进制不存在，跳过启动'
+        }
+    }
+    Write-Done '用量重建完成'
+    Write-Info '新用量将按当前解析算法重新上报；请稍后在用量页查看'
+}
+
 function Invoke-Uninstall {
     Write-Banner '卸载'
     $roles = @()
@@ -1159,6 +1365,7 @@ function Read-ActionMenu {
     Write-Host '  │  6  重启服务     restart                              │' -ForegroundColor DarkGray
     Write-Host '  │  7  卸载         uninstall                            │' -ForegroundColor DarkGray
     Write-Host '  │  8  彻底清理     uninstall -Purge                     │' -ForegroundColor DarkGray
+    Write-Host '  │  9  重建用量     rebuild-usage                        │' -ForegroundColor DarkGray
     Write-Host '  ╰──────────────────────────────────────────────────────╯' -ForegroundColor DarkGray
     $c = Read-Prompt '请输入序号' '1'
     switch ($c) {
@@ -1170,6 +1377,7 @@ function Read-ActionMenu {
         '6' { return @{ Command = 'restart'; Purge = $false } }
         '7' { return @{ Command = 'uninstall'; Purge = $false } }
         '8' { return @{ Command = 'uninstall'; Purge = $true } }
+        '9' { return @{ Command = 'rebuild-usage'; Purge = $false } }
         default { Die "无效选项: $c" }
     }
 }
@@ -1184,7 +1392,7 @@ if ((Test-Interactive) -and $autoCommand -and -not $Yes) {
     $pick = Read-ActionMenu
     $Command = $pick.Command
     if ($pick.Purge) { $Purge = $true }
-    if ($Command -in @('update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'uninstall') -and [string]::IsNullOrWhiteSpace($Role)) {
+    if ($Command -in @('update', 'status', 'start', 'stop', 'restart', 'enable', 'disable', 'uninstall', 'rebuild-usage') -and [string]::IsNullOrWhiteSpace($Role)) {
         $Role = 'all'
     }
 }
@@ -1201,5 +1409,6 @@ switch ($Command) {
     'config' { Invoke-Config }
     'init-agents' { Init-Agents }
     'uninstall' { Invoke-Uninstall }
+    'rebuild-usage' { Invoke-RebuildUsage }
     default { Die "未知命令: $Command" }
 }

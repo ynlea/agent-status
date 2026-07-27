@@ -13,10 +13,11 @@ import (
 )
 
 type fileCursor struct {
-	Offset    int64  `json:"offset"`
-	Size      int64  `json:"size"`
-	Kind      string `json:"kind,omitempty"` // claude|codex
-	LastModel string `json:"last_model,omitempty"`
+	Offset    int64              `json:"offset"`
+	Size      int64              `json:"size"`
+	Kind      string             `json:"kind,omitempty"` // claude|codex
+	LastModel string             `json:"last_model,omitempty"`
+	LastTotal codexTotalBaseline `json:"last_total,omitempty"`
 }
 
 type usageState struct {
@@ -247,17 +248,18 @@ func (u *UsageSyncer) SyncOnce() error {
 		var events []apitypes.UsageEvent
 		var newOff int64
 		lastModel := cur.LastModel
+		lastTotal := cur.LastTotal
 		switch kind {
 		case "claude":
 			events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
 		default:
-			events, newOff, lastModel, err = ParseCodexUsageFile(path, cur.Offset, cur.LastModel)
+			events, newOff, lastModel, lastTotal, err = ParseCodexUsageFile(path, cur.Offset, cur.LastModel, cur.LastTotal)
 		}
 		if err != nil {
 			u.Logger.Warn("解析用量日志失败", "路径", path, "错误", err)
 			continue
 		}
-		next := fileCursor{Offset: newOff, Size: info.Size(), Kind: kind, LastModel: lastModel}
+		next := fileCursor{Offset: newOff, Size: info.Size(), Kind: kind, LastModel: lastModel, LastTotal: lastTotal}
 		if len(events) > 0 {
 			batch = append(batch, events...)
 			pending = append(pending, pendingAdvance{path: path, cur: next})

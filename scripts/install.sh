@@ -6,6 +6,7 @@
 #   ./install.sh install --role monitor --server-url URL --key KEY --yes
 #   ./install.sh status|start|stop|restart --role all
 #   ./install.sh uninstall --purge -y
+#   ./install.sh rebuild-usage --role all --yes --confirm-rebuild-usage
 set -euo pipefail
 
 REPO="${AGENT_STATUS_REPO:-ynlea/agent-status}"
@@ -33,6 +34,7 @@ LOCAL_BIN_SRC=""
 FORCE_CONFIG=0
 INSTALL_CC_SWITCH=0
 PURGE=0
+CONFIRM_REBUILD_USAGE=0
 FORCE_UPDATE=0
 CONFIG_ACTION=""
 CONFIG_KV=()
@@ -53,6 +55,7 @@ agent-status 安装与管理工具（Linux）
   config get|set      查看或更新配置
   init-agents         探测本机 Agent 并初始化 Claude hooks
   uninstall           卸载服务；加 --purge 清理全部相关文件
+  rebuild-usage       重建用量（清服务端事件 + 清监测游标并重扫）
 
 选项：
   --role server|monitor|all
@@ -66,6 +69,8 @@ agent-status 安装与管理工具（Linux）
   --local-bin DIR     使用本地二进制，跳过下载
   --force-config      安装时覆盖已有配置
   --purge             彻底清理：安装目录、命令入口、用量游标、Claude hooks
+  --confirm-rebuild-usage
+                      与 --yes 联用，确认执行 rebuild-usage（防误触）
   --force             更新时即使版本相同也强制重装
   -h, --help
 EOF
@@ -1068,6 +1073,163 @@ PY
   done
 }
 
+
+resolve_server_db() {
+  local envf="$CONFIG_DIR/server.env" db="$DATA_DIR/agent-status.db"
+  if [[ -f "$envf" ]]; then
+    local line
+    line="$(grep -E '^AGENT_STATUS_DB=' "$envf" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+    [[ -n "$line" ]] && db="$line"
+  fi
+  printf '%s' "$db"
+}
+
+resolve_usage_cursor() {
+  local cfg="$CONFIG_DIR/monitor.json"
+  local default="${HOME}/.agent-status/usage-cursors.json"
+  if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+cfg,default=sys.argv[1],sys.argv[2]
+try:
+  d=json.load(open(cfg))
+  p=(d.get("usage_state_file") or "").strip()
+  print(p if p else default)
+except Exception:
+  print(default)
+' "$cfg" "$default"
+  else
+    printf '%s' "$default"
+  fi
+}
+
+delete_usage_events_db() {
+  local db="$1"
+  if [[ ! -f "$db" ]]; then
+    info "服务端数据库不存在，跳过: $(pretty_path "$db")"
+    return 0
+  fi
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$db" "DELETE FROM usage_events;"
+    ok "已清空 usage_events（sqlite3）"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sqlite3,sys
+db=sys.argv[1]
+c=sqlite3.connect(db)
+try:
+  c.execute("DELETE FROM usage_events")
+  c.commit()
+finally:
+  c.close()
+' "$db"
+    ok "已清空 usage_events（python3）"
+    return 0
+  fi
+  die "清理服务端用量需要 sqlite3 或 python3"
+}
+
+cmd_rebuild_usage() {
+  print_banner "重建用量"
+  local W=52
+  local want_server=0 want_monitor=0
+  local r
+  if [[ -z "$ROLE" || "$ROLE" == "all" ]]; then
+    [[ -x "$BIN_DIR/agent-status-server" || -f "$CONFIG_DIR/server.env" ]] && want_server=1
+    [[ -x "$BIN_DIR/agent-status-monitor" || -f "$CONFIG_DIR/monitor.json" ]] && want_monitor=1
+  else
+    case "$ROLE" in
+      server) want_server=1 ;;
+      monitor) want_monitor=1 ;;
+      *) die "rebuild-usage 的 --role 只能是 server|monitor|all" ;;
+    esac
+  fi
+  if [[ "$want_server" -eq 0 && "$want_monitor" -eq 0 ]]; then
+    die "本机未检测到 server/monitor，无法重建用量"
+  fi
+
+  local db cursor
+  db="$(resolve_server_db)"
+  cursor="$(resolve_usage_cursor)"
+
+  box_top "$C_YELLOW" "$W"
+  box_row "$C_YELLOW" "  将执行（不可恢复）：" "$W"
+  if [[ "$want_server" -eq 1 ]]; then
+    box_row "$C_YELLOW" "  · 服务端 DELETE usage_events" "$W"
+    box_row "$C_YELLOW" "    DB  $(pretty_path "$db")" "$W"
+  fi
+  if [[ "$want_monitor" -eq 1 ]]; then
+    box_row "$C_YELLOW" "  · 删除监测端用量游标并重启 monitor" "$W"
+    box_row "$C_YELLOW" "    游标  $(pretty_path "$cursor")" "$W"
+  fi
+  box_bot "$C_YELLOW" "$W"
+
+  if [[ "$YES" -eq 1 ]]; then
+    if [[ "$CONFIRM_REBUILD_USAGE" -ne 1 ]]; then
+      die "非交互重建用量请同时指定 --yes 与 --confirm-rebuild-usage"
+    fi
+  else
+    have_tty || die "非交互重建用量请加 --yes --confirm-rebuild-usage"
+    if ! confirm "确认删除用量数据并触发全盘重扫"; then
+      info "已取消"
+      return 0
+    fi
+    local ans
+    printf '  %s?%s  二次确认请输入 %sYES%s: ' "${C_YELLOW}${C_BOLD}" "${C_RESET}" "${C_BOLD}" "${C_RESET}" >&2
+    read_tty ans
+    if [[ "$ans" != "YES" ]]; then
+      info "已取消（未输入 YES）"
+      return 0
+    fi
+  fi
+
+  UI_STEP_CUR=0
+  UI_STEP_TOTAL=0
+  [[ "$want_monitor" -eq 1 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 2))
+  [[ "$want_server" -eq 1 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 1))
+  [[ "$want_monitor" -eq 1 ]] && UI_STEP_TOTAL=$((UI_STEP_TOTAL + 1))
+
+  if [[ "$want_monitor" -eq 1 ]]; then
+    step "停止监测端（便于清游标）"
+    systemctl --user stop agent-status-monitor.service 2>/dev/null || true
+    pkill -f "$BIN_DIR/agent-status-monitor" 2>/dev/null || true
+    ok "监测端已停止"
+  fi
+
+  if [[ "$want_server" -eq 1 ]]; then
+    step "清空服务端 usage_events"
+    delete_usage_events_db "$db"
+  fi
+
+  if [[ "$want_monitor" -eq 1 ]]; then
+    step "删除用量游标"
+    if [[ -f "$cursor" ]]; then
+      rm -f "$cursor"
+      path_line "已删除" "$cursor"
+      ok "游标已删除"
+    else
+      info "游标不存在，跳过: $(pretty_path "$cursor")"
+    fi
+    # 兼容旧默认目录下残留
+    if [[ -f "${HOME}/.agent-status/usage-cursors.json" && "$cursor" != "${HOME}/.agent-status/usage-cursors.json" ]]; then
+      rm -f "${HOME}/.agent-status/usage-cursors.json" || true
+    fi
+
+    step "重启监测端以全盘重扫"
+    if [[ -f "$SYSTEMD_USER_DIR/agent-status-monitor.service" ]]; then
+      systemctl --user start agent-status-monitor.service || systemctl --user restart agent-status-monitor.service
+      ok "监测端已启动"
+    elif [[ -x "$BIN_DIR/agent-status-monitor" ]]; then
+      warn "未找到 systemd 单元，请手动 start monitor"
+    else
+      warn "监测端二进制不存在，跳过启动"
+    fi
+  fi
+
+  print_done "用量重建完成"
+  info "新用量将按当前解析算法重新上报；请稍后在用量页查看"
+}
+
 cmd_uninstall() {
   print_banner "卸载"
   local W=52
@@ -1319,6 +1481,7 @@ interactive_pick_command() {
   box_row "$C_DIM" "  6  重启服务     restart" "$W"
   box_row "$C_DIM" "  7  卸载         uninstall" "$W"
   box_row "$C_DIM" "  8  彻底清理     uninstall --purge" "$W"
+  box_row "$C_DIM" "  9  重建用量     rebuild-usage" "$W"
   box_bot "$C_DIM" "$W"
   c="$(prompt "请输入序号" "1")"
   case "$c" in
@@ -1333,11 +1496,12 @@ interactive_pick_command() {
       CMD="uninstall"
       PURGE=1
       ;;
+    9) CMD="rebuild-usage" ;;
     *) die "无效选项: $c" ;;
   esac
   # 需要角色的命令：未指定时默认 all（安装仍会再问）
   case "$CMD" in
-    update|status|start|stop|restart|enable|disable)
+    update|status|start|stop|restart|enable|disable|rebuild-usage)
       [[ -z "$ROLE" ]] && ROLE="all"
       ;;
     uninstall)
@@ -1535,7 +1699,7 @@ parse_args() {
     return
   fi
   case "$1" in
-    install|update|status|start|stop|restart|enable|disable|config|init-agents|uninstall)
+    install|update|status|start|stop|restart|enable|disable|config|init-agents|uninstall|rebuild-usage)
       CMD="$1"; shift
       ;;
     -h|--help)
@@ -1605,6 +1769,7 @@ main() {
       ;;
     init-agents) init_agents ;;
     uninstall) cmd_uninstall ;;
+    rebuild-usage) cmd_rebuild_usage ;;
     *) usage; exit 2 ;;
   esac
 }

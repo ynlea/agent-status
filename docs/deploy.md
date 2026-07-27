@@ -101,7 +101,7 @@ go build -o bin/agent-status-monitor ./cmd/monitor
 | `usage_interval_sec` | 用量对账周期；未变文件只 `Stat` | 60 |
 | `usage_discover_sec` | 全量发现新用量日志的周期 | 600 |
 
-用量扫描为双频：`usage_interval_sec` 可设 1 分钟，只对已知文件做轻量对账；`usage_discover_sec` 控制多久遍历一次目录找新文件。游标有变化才落盘。
+用量扫描为双频：`usage_interval_sec` 可设 1 分钟，只对已知文件做轻量对账；`usage_discover_sec` 控制多久遍历一次目录找新文件。游标有变化才落盘。Codex 用量按会话 `total_token_usage` 差分（与 cc-switch 一致）；若历史因旧算法虚高，可清空本机 `usage-cursors` 后重扫（服务端事件需自行清理或接受幂等覆盖策略）。
 
 日志字段 `source`：`codex-file-watch` / `codex-file` / `claude-hook`。
 

@@ -133,44 +133,99 @@ func parseClaudeLine(line, path string) (apitypes.UsageEvent, bool) {
 	}, true
 }
 
+// codexTotalBaseline is the last seen total_token_usage counters for a rollout.
+// Used so mid-file incremental reads can delta against the pre-cursor cumulative.
+type codexTotalBaseline struct {
+	Input     int64 `json:"input,omitempty"`
+	Cached    int64 `json:"cached,omitempty"`
+	Output    int64 `json:"output,omitempty"`
+	Reasoning int64 `json:"reasoning,omitempty"`
+	Valid     bool  `json:"valid,omitempty"`
+}
+
+func (b codexTotalBaseline) toPrevMap() map[string]int64 {
+	if !b.Valid {
+		return nil
+	}
+	// Only canonical cache key — dual-writing cache_read would make
+	// deltaUsageFromPrev see a missing total field as a negative jump.
+	return map[string]int64{
+		"input_tokens":            b.Input,
+		"cached_input_tokens":     b.Cached,
+		"output_tokens":           b.Output,
+		"reasoning_output_tokens": b.Reasoning,
+	}
+}
+
+func baselineFromTotalMap(m map[string]interface{}) codexTotalBaseline {
+	if m == nil {
+		return codexTotalBaseline{}
+	}
+	cached := int64Field(m, "cached_input_tokens")
+	if cached == 0 {
+		cached = int64Field(m, "cache_read_input_tokens")
+	}
+	return codexTotalBaseline{
+		Input:     int64Field(m, "input_tokens"),
+		Cached:    cached,
+		Output:    int64Field(m, "output_tokens"),
+		Reasoning: int64Field(m, "reasoning_output_tokens"),
+		Valid:     true,
+	}
+}
+
 // ParseCodexUsageFile reads token_count events from a Codex rollout JSONL.
-// startModel is the last known model from a previous cursor (empty → "unknown").
-// When fromOffset > 0 and startModel is empty/unknown, the file prefix is scanned
-// for the latest turn_context model so mid-file ticks do not emit "unknown".
-func ParseCodexUsageFile(path string, fromOffset int64, startModel string) (events []apitypes.UsageEvent, newOffset int64, lastModel string, err error) {
+// Aligned with cc-switch: prefer total_token_usage session deltas; fall back to
+// last_token_usage only when total is absent. Unchanged totals emit nothing.
+// startModel / startTotal come from the usage cursor (empty → recover from prefix
+// when fromOffset > 0).
+func ParseCodexUsageFile(path string, fromOffset int64, startModel string, startTotal codexTotalBaseline) (events []apitypes.UsageEvent, newOffset int64, lastModel string, lastTotal codexTotalBaseline, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fromOffset, startModel, err
+		return nil, fromOffset, startModel, startTotal, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fromOffset, startModel, err
+		return nil, fromOffset, startModel, startTotal, err
 	}
 	size := info.Size()
 	if fromOffset > size {
+		// Truncated/replaced file: restart from 0 and drop stale total baseline.
 		fromOffset = 0
+		startTotal = codexTotalBaseline{}
 	}
 
 	model := strings.TrimSpace(startModel)
 	if model == "" {
 		model = "unknown"
 	}
-	// Incremental reads start mid-file; recover model from prefix if needed.
-	if fromOffset > 0 && isUnknownModel(model) {
-		if m, ok := recoverCodexModelPrefix(f, fromOffset); ok {
-			model = m
+	prevTotal := startTotal.toPrevMap()
+	lastTotal = startTotal
+
+	needModel := fromOffset > 0 && isUnknownModel(model)
+	needTotal := fromOffset > 0 && prevTotal == nil
+	if needModel || needTotal {
+		if needModel {
+			if m, ok := recoverCodexModelPrefix(f, fromOffset); ok {
+				model = m
+			}
+		}
+		if needTotal {
+			if t, ok := recoverCodexTotalPrefix(f, fromOffset); ok {
+				prevTotal = t.toPrevMap()
+				lastTotal = t
+			}
 		}
 		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
-			return nil, fromOffset, model, err
+			return nil, fromOffset, model, lastTotal, err
 		}
 	} else if fromOffset > 0 {
 		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
-			return nil, fromOffset, model, err
+			return nil, fromOffset, model, lastTotal, err
 		}
 	}
 
-	var prevTotal map[string]int64
 	r := bufio.NewReader(f)
 	var pos = fromOffset
 	for {
@@ -204,12 +259,16 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string) (even
 				}
 				last := mapField(infoM, "last_token_usage")
 				total := mapField(infoM, "total_token_usage")
-				usage := last
-				if usage == nil && total != nil {
-					usage = deltaUsageFromPrev(total, prevTotal)
-				}
+				var usage map[string]interface{}
+				// Prefer cumulative total deltas (cc-switch); last only if no total.
 				if total != nil {
+					usage = deltaUsageFromPrev(total, prevTotal)
 					prevTotal = intMap(total)
+					lastTotal = baselineFromTotalMap(total)
+				} else if last != nil {
+					usage = last
+				} else {
+					break
 				}
 				if usage == nil {
 					break
@@ -226,6 +285,9 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string) (even
 				reason := int64Field(usage, "reasoning_output_tokens")
 				if rawIn < 0 || out < 0 || cached < 0 || reason < 0 {
 					break
+				}
+				if cached > rawIn {
+					cached = rawIn
 				}
 				billed := rawIn - cached
 				if billed < 0 {
@@ -267,10 +329,10 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string) (even
 			break
 		}
 		if err != nil {
-			return events, pos, model, err
+			return events, pos, model, lastTotal, err
 		}
 	}
-	return events, pos, model, nil
+	return events, pos, model, lastTotal, nil
 }
 
 func isUnknownModel(m string) bool {
@@ -354,6 +416,58 @@ func recoverCodexModelPrefix(f *os.File, until int64) (string, bool) {
 	return model, true
 }
 
+// recoverCodexTotalPrefix scans [0, until) for the last total_token_usage baseline.
+func recoverCodexTotalPrefix(f *os.File, until int64) (codexTotalBaseline, bool) {
+	if until <= 0 {
+		return codexTotalBaseline{}, false
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return codexTotalBaseline{}, false
+	}
+	r := bufio.NewReader(f)
+	var pos int64
+	var found codexTotalBaseline
+	for pos < until {
+		line, err := r.ReadString('\n')
+		if len(line) == 0 && err != nil {
+			break
+		}
+		pos += int64(len(line))
+		if pos > until {
+			break
+		}
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			if err != nil {
+				break
+			}
+			continue
+		}
+		var rec map[string]interface{}
+		if json.Unmarshal([]byte(trim), &rec) != nil {
+			if err != nil {
+				break
+			}
+			continue
+		}
+		if typ, _ := rec["type"].(string); typ == "event_msg" {
+			payload := mapField(rec, "payload")
+			if strField(payload, "type") == "token_count" {
+				if total := mapField(mapField(payload, "info"), "total_token_usage"); total != nil {
+					found = baselineFromTotalMap(total)
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	if !found.Valid {
+		return codexTotalBaseline{}, false
+	}
+	return found, true
+}
+
 func intMap(m map[string]interface{}) map[string]int64 {
 	out := map[string]int64{}
 	for k := range m {
@@ -366,8 +480,17 @@ func deltaUsageFromPrev(total map[string]interface{}, prev map[string]int64) map
 	if prev == nil {
 		return total
 	}
+	// Normalize cache aliases so prev/total compare the same dimension.
+	prevCached := prev["cached_input_tokens"]
+	if prevCached == 0 {
+		prevCached = prev["cache_read_input_tokens"]
+	}
+	curCached := int64Field(total, "cached_input_tokens")
+	if curCached == 0 {
+		curCached = int64Field(total, "cache_read_input_tokens")
+	}
 	out := map[string]interface{}{}
-	for _, k := range []string{"input_tokens", "output_tokens", "cached_input_tokens", "cache_read_input_tokens", "reasoning_output_tokens", "total_tokens"} {
+	for _, k := range []string{"input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"} {
 		t := int64Field(total, k)
 		d := t - prev[k]
 		if d < 0 {
@@ -375,6 +498,11 @@ func deltaUsageFromPrev(total map[string]interface{}, prev map[string]int64) map
 		}
 		out[k] = d
 	}
+	dCache := curCached - prevCached
+	if dCache < 0 {
+		return total
+	}
+	out["cached_input_tokens"] = dCache
 	return out
 }
 
