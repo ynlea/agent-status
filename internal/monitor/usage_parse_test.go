@@ -282,3 +282,46 @@ func TestMatchingCodexReplayPrefix(t *testing.T) {
 		t.Fatalf("empty parent n=%d", n)
 	}
 }
+
+
+
+func TestParseCodexUsageFileDecreasingTotalNoReemit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-dip.jsonl")
+	content := "" +
+		`{"timestamp":"2026-07-28T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5.2"}}` + "\n" +
+		`{"timestamp":"2026-07-28T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0}}}}` + "\n" +
+		`{"timestamp":"2026-07-28T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":800,"cached_input_tokens":50,"output_tokens":5,"reasoning_output_tokens":0}}}}` + "\n" +
+		`{"timestamp":"2026-07-28T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"cached_input_tokens":150,"output_tokens":15,"reasoning_output_tokens":0}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, _, lastModel, _, err := ParseCodexUsageFile(path, 0, "", codexTotalBaseline{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastModel != "gpt-5.2" {
+		t.Fatalf("model=%s", lastModel)
+	}
+	var sumIn, sumOut, sumCache int64
+	for _, e := range ev {
+		sumIn += e.InputTokens
+		sumOut += e.OutputTokens
+		sumCache += e.CacheHitTokens
+		if e.Model != "gpt-5.2" {
+			t.Fatalf("wrong model: %+v", e)
+		}
+	}
+	if sumIn > 2000 {
+		t.Fatalf("sumIn=%d looks like full re-emit on dip; events=%+v", sumIn, ev)
+	}
+	if sumIn != 1200 {
+		t.Fatalf("sumIn=%d want 1200 events=%+v", sumIn, ev)
+	}
+	if sumCache != 200 {
+		t.Fatalf("sumCache=%d want 200", sumCache)
+	}
+	if sumOut != 20 {
+		t.Fatalf("sumOut=%d want 20", sumOut)
+	}
+}

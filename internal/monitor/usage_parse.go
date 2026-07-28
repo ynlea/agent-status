@@ -289,6 +289,8 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string, start
 				if m := strField(infoM, "model"); m != "" {
 					model = m
 				}
+				// Last resort: some rollouts put model only later; if still
+				// unknown, keep prior model (may be recovered at start).
 				rawIn := int64Field(usage, "input_tokens")
 				cached := int64Field(usage, "cached_input_tokens")
 				if cached == 0 {
@@ -503,17 +505,19 @@ func deltaUsageFromPrev(total map[string]interface{}, prev map[string]int64) map
 		curCached = int64Field(total, "cache_read_input_tokens")
 	}
 	out := map[string]interface{}{}
+	// Saturating sub (cc-switch style). Never re-emit the full cumulative on a
+	// temporary total dip — that was double-counting whole sessions.
 	for _, k := range []string{"input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"} {
 		t := int64Field(total, k)
 		d := t - prev[k]
 		if d < 0 {
-			return total
+			d = 0
 		}
 		out[k] = d
 	}
 	dCache := curCached - prevCached
 	if dCache < 0 {
-		return total
+		dCache = 0
 	}
 	out["cached_input_tokens"] = dCache
 	return out
