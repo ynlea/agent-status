@@ -179,7 +179,9 @@ func baselineFromTotalMap(m map[string]interface{}) codexTotalBaseline {
 // last_token_usage only when total is absent. Unchanged totals emit nothing.
 // startModel / startTotal come from the usage cursor (empty → recover from prefix
 // when fromOffset > 0).
-func ParseCodexUsageFile(path string, fromOffset int64, startModel string, startTotal codexTotalBaseline) (events []apitypes.UsageEvent, newOffset int64, lastModel string, lastTotal codexTotalBaseline, err error) {
+// skipTokenEvents skips the first N token_count rows for emission only (still
+// advances total baseline) — used to drop subagent parent-replay prefixes.
+func ParseCodexUsageFile(path string, fromOffset int64, startModel string, startTotal codexTotalBaseline, skipTokenEvents int) (events []apitypes.UsageEvent, newOffset int64, lastModel string, lastTotal codexTotalBaseline, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fromOffset, startModel, startTotal, err
@@ -228,6 +230,11 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string, start
 
 	r := bufio.NewReader(f)
 	var pos = fromOffset
+	tokenOrdinal := 0
+	// skip only applies to full-file reads; mid-file cursors are already past replay.
+	if fromOffset > 0 {
+		skipTokenEvents = 0
+	}
 	for {
 		line, err := r.ReadString('\n')
 		if len(line) > 0 {
@@ -259,6 +266,11 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string, start
 				}
 				last := mapField(infoM, "last_token_usage")
 				total := mapField(infoM, "total_token_usage")
+				if total == nil && last == nil {
+					break
+				}
+				tokenOrdinal++
+				inReplayPrefix := tokenOrdinal <= skipTokenEvents
 				var usage map[string]interface{}
 				// Prefer cumulative total deltas (cc-switch); last only if no total.
 				if total != nil {
@@ -270,7 +282,8 @@ func ParseCodexUsageFile(path string, fromOffset int64, startModel string, start
 				} else {
 					break
 				}
-				if usage == nil {
+				if usage == nil || inReplayPrefix {
+					// Replay prefix: keep baseline, do not emit (cc-switch skip insert).
 					break
 				}
 				if m := strField(infoM, "model"); m != "" {

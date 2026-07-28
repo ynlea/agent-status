@@ -133,9 +133,9 @@ func TestSQLiteStartedAtStableAndRealUsage(t *testing.T) {
 		t.Fatalf("accepted=%d", acc)
 	}
 	list = s.ListSessions("m1")
-	// 100+50+10+20+5 + 15 = 200
-	if list[0].RealUsage != 200 {
-		t.Fatalf("real_usage=%d want 200", list[0].RealUsage)
+	// 100+50+20+5 + 15 = 190 (reasoning excluded from real_usage)
+	if list[0].RealUsage != 190 {
+		t.Fatalf("real_usage=%d want 190", list[0].RealUsage)
 	}
 }
 

@@ -41,6 +41,8 @@ type UsageSyncer struct {
 	mu    sync.Mutex
 	state usageState
 	path  string
+	// codexRootIndex maps root thread id → rollout path; rebuilt each SyncOnce tick.
+	codexRootIndex map[string]string
 }
 
 func NewUsageSyncer(cfg *Config, rep *Reporter, logger *slog.Logger) *UsageSyncer {
@@ -161,6 +163,7 @@ func (u *UsageSyncer) SyncOnce() error {
 	defer u.mu.Unlock()
 
 	u.rebindServerIfNeeded()
+	u.codexRootIndex = nil // rebuild lazily for this tick
 
 	now := time.Now().UTC()
 	dirty := false
@@ -253,7 +256,16 @@ func (u *UsageSyncer) SyncOnce() error {
 		case "claude":
 			events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
 		default:
-			events, newOff, lastModel, lastTotal, err = ParseCodexUsageFile(path, cur.Offset, cur.LastModel, cur.LastTotal)
+			skip := 0
+			if cur.Offset == 0 {
+				// Build root index lazily once per tick for replay dedupe.
+				if u.codexRootIndex == nil {
+					files, _ := CollectCodexUsageFiles(u.Cfg.CodexSessionsDir)
+					u.codexRootIndex = buildCodexRootRolloutIndex(files)
+				}
+				skip = codexReplaySkipCount(path, u.codexRootIndex)
+			}
+			events, newOff, lastModel, lastTotal, err = ParseCodexUsageFile(path, cur.Offset, cur.LastModel, cur.LastTotal, skip)
 		}
 		if err != nil {
 			u.Logger.Warn("解析用量日志失败", "路径", path, "错误", err)

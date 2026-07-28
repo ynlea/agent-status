@@ -46,8 +46,8 @@ func TestUsageIdempotentAndSummary(t *testing.T) {
 	if sum.InputTokens != 300 || sum.OutputTokens != 70 || sum.ReasoningTokens != 10 || sum.CacheHitTokens != 1500 {
 		t.Fatalf("metrics=%+v", sum.UsageMetrics)
 	}
-	// real = in + out+reason + cache_write + cache_hit = 300 + 80 + 0 + 1500
-	if sum.RealUsage != 1880 {
+	// real = in + out + cache_write + cache_hit = 300 + 70 + 0 + 1500 (reasoning not in real)
+	if sum.RealUsage != 1870 {
 		t.Fatalf("real_usage=%d", sum.RealUsage)
 	}
 	if sum.CacheHitRate == nil || *sum.CacheHitRate <= 0 {

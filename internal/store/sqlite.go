@@ -925,7 +925,7 @@ type sessionRealUsageKey struct {
 func (s *SQLiteStore) loadRealUsageMap() map[sessionRealUsageKey]int64 {
 	rows, err := s.db.Query(`
 SELECT machine_id, agent, session_id,
-  SUM(input_tokens + output_tokens + reasoning_tokens + cache_write_tokens + cache_hit_tokens)
+  SUM(input_tokens + output_tokens + cache_write_tokens + cache_hit_tokens)
 FROM usage_events
 WHERE session_id IS NOT NULL AND session_id != ''
 GROUP BY machine_id, agent, session_id

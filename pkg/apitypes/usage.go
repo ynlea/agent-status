@@ -80,9 +80,10 @@ type UsageQuery struct {
 }
 
 // FillDerived sets real_usage and cache_hit_rate from component counters.
+// RealUsage aligns with cc-switch: fresh/billed input + output + cache write/read.
+// Reasoning is kept as a separate counter and is not folded into real_usage volume.
 func (m *UsageMetrics) FillDerived() {
-	out := m.OutputTokens + m.ReasoningTokens
-	m.RealUsage = m.InputTokens + out + m.CacheWriteTokens + m.CacheHitTokens
+	m.RealUsage = m.InputTokens + m.OutputTokens + m.CacheWriteTokens + m.CacheHitTokens
 	den := m.CacheHitTokens + m.CacheWriteTokens + m.InputTokens
 	if den > 0 {
 		rate := float64(m.CacheHitTokens) / float64(den)

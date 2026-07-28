@@ -116,7 +116,8 @@ Query:
 
 Response metrics: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_write_tokens`, `cache_hit_tokens`, `real_usage`, `cache_hit_rate`, `estimated_cost_usd`, `event_count`, `priced`.
 
-- `real_usage` = input + output + reasoning + cache_write + cache_hit (volume, not invoice)
+- `real_usage` = input + output + cache_write + cache_hit (volume, not invoice; aligns with cc-switch — reasoning is a separate counter)
+- Codex subagent rollouts skip parent-replay token prefixes when the parent rollout is available
 - `estimated_cost_usd` is an estimate from `model_prices` (local override + OpenRouter sync + bundled seed), not a vendor invoice
 
 ### `GET /api/v1/usage/breakdown`

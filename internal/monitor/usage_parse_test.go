@@ -1,8 +1,10 @@
 package monitor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,7 +48,7 @@ func TestParseCodexUsageFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, off, lastModel, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{})
+	ev, off, lastModel, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestParseCodexUsageFile(t *testing.T) {
 	}
 	_ = f.Close()
 
-	ev2, _, last2, lastTotal2, err := ParseCodexUsageFile(p, off, lastModel, lastTotal)
+	ev2, _, last2, lastTotal2, err := ParseCodexUsageFile(p, off, lastModel, lastTotal, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestParseCodexUsageFile(t *testing.T) {
 	}
 
 	// Without startModel/startTotal, mid-file parse should recover both from prefix.
-	ev3, _, last3, _, err := ParseCodexUsageFile(p, off, "", codexTotalBaseline{})
+	ev3, _, last3, _, err := ParseCodexUsageFile(p, off, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,7 @@ func TestParseCodexUsageFileSkipsUnchangedTotal(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, _, _, _, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{})
+	ev, _, _, _, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +142,7 @@ func TestParseCodexUsageFileLastOnlyFallback(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, _, _, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{})
+	ev, _, _, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +165,7 @@ func TestParseCodexUsageFileClampsCached(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, _, _, _, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{})
+	ev, _, _, _, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +190,7 @@ func TestParseCodexUsageFileMultiSegmentDeltas(t *testing.T) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev, _, _, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{})
+	ev, _, _, lastTotal, err := ParseCodexUsageFile(p, 0, "", codexTotalBaseline{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +211,74 @@ func TestParseCodexUsageFileMultiSegmentDeltas(t *testing.T) {
 	}
 	if !lastTotal.Valid || lastTotal.Input != 400 || lastTotal.Cached != 50 || lastTotal.Output != 20 || lastTotal.Reasoning != 4 {
 		t.Fatalf("lastTotal=%+v", lastTotal)
+	}
+}
+
+
+
+func TestCodexReplayPrefixSkip(t *testing.T) {
+	dir := t.TempDir()
+	parentID := "019f0000-0000-0000-0000-000000000001"
+	childID := "019f0000-0000-0000-0000-000000000002"
+	parent := filepath.Join(dir, "rollout-2026-07-28T10-00-00-"+parentID+".jsonl")
+	child := filepath.Join(dir, "rollout-2026-07-28T10-01-00-"+childID+".jsonl")
+	parentBody := strings.Join([]string{
+		fmt.Sprintf(`{"timestamp":"2026-07-28T10:00:00Z","type":"session_meta","payload":{"id":"%s","session_id":"%s"}}`, parentID, parentID),
+		`{"timestamp":"2026-07-28T10:00:01Z","type":"turn_context","payload":{"model":"gpt-5.2"}}`,
+		`{"timestamp":"2026-07-28T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":800,"output_tokens":10,"reasoning_output_tokens":0}}}}`,
+		`{"timestamp":"2026-07-28T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500,"cached_input_tokens":1000,"output_tokens":20,"reasoning_output_tokens":0}}}}`,
+	}, "\n") + "\n"
+	childBody := strings.Join([]string{
+		fmt.Sprintf(`{"timestamp":"2026-07-28T10:01:00Z","type":"session_meta","payload":{"id":"%s","session_id":"%s","thread_source":"subagent","parent_thread_id":"%s","forked_from_id":"%s"}}`, childID, parentID, parentID, parentID),
+		`{"timestamp":"2026-07-28T10:01:01Z","type":"turn_context","payload":{"model":"gpt-5.2"}}`,
+		`{"timestamp":"2026-07-28T10:01:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":800,"output_tokens":10,"reasoning_output_tokens":0}}}}`,
+		`{"timestamp":"2026-07-28T10:01:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500,"cached_input_tokens":1000,"output_tokens":20,"reasoning_output_tokens":0}}}}`,
+		`{"timestamp":"2026-07-28T10:01:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1200,"output_tokens":30,"reasoning_output_tokens":0}}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(parent, []byte(parentBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte(childBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idx := buildCodexRootRolloutIndex([]string{parent, child})
+	if idx[parentID] != parent {
+		t.Fatalf("root index=%v", idx)
+	}
+	skip := codexReplaySkipCount(child, idx)
+	if skip != 2 {
+		t.Fatalf("skip=%d want 2", skip)
+	}
+	evAll, _, _, _, err := ParseCodexUsageFile(child, 0, "", codexTotalBaseline{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sumIn int64
+	for _, e := range evAll {
+		sumIn += e.InputTokens
+	}
+	ev, _, _, _, err := ParseCodexUsageFile(child, 0, "", codexTotalBaseline{}, skip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev) != 1 {
+		t.Fatalf("want 1 event after replay skip, got %d (%+v)", len(ev), ev)
+	}
+	if ev[0].InputTokens != 100 || ev[0].CacheHitTokens != 200 || ev[0].OutputTokens != 10 {
+		t.Fatalf("ev=%+v", ev[0])
+	}
+	if sumIn <= ev[0].InputTokens {
+		t.Fatalf("unskipped sum should be larger: all=%d skipped=%d", sumIn, ev[0].InputTokens)
+	}
+}
+
+func TestMatchingCodexReplayPrefix(t *testing.T) {
+	parent := []codexTokenSig{{In: 1, HasTotal: true}, {In: 2, HasTotal: true}, {In: 3, HasTotal: true}}
+	child := []codexTokenSig{{In: 1, HasTotal: true}, {In: 2, HasTotal: true}, {In: 9, HasTotal: true}}
+	if n := matchingCodexReplayPrefix(child, parent); n != 2 {
+		t.Fatalf("n=%d", n)
+	}
+	if n := matchingCodexReplayPrefix(child, nil); n != 0 {
+		t.Fatalf("empty parent n=%d", n)
 	}
 }

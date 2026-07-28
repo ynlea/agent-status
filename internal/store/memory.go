@@ -213,7 +213,7 @@ func (m *Memory) realUsageLocked(machineID, agent, sessionID string) int64 {
 		if e.MachineID != machineID || e.Agent != agent || e.SessionID != sessionID {
 			continue
 		}
-		sum += e.InputTokens + e.OutputTokens + e.ReasoningTokens + e.CacheWriteTokens + e.CacheHitTokens
+		sum += e.InputTokens + e.OutputTokens + e.CacheWriteTokens + e.CacheHitTokens
 	}
 	return sum
 }
