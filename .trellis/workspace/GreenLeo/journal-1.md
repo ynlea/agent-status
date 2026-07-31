@@ -98,3 +98,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: trellis 工作流迁移到 pi-subagents + 全链路测试
+
+**Date**: 2026-07-31
+**Task**: trellis 工作流迁移到 pi-subagents + 全链路测试
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7330d42` | (see git log) |
+| `d4b4b8a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

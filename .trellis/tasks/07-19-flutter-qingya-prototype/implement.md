@@ -6,8 +6,7 @@
 
 - [ ] 你确认 Open questions（目录 `mobile/`、M3 Theme、Android 优先、旧 android 暂留）
 - [ ] `task.py start` 本任务
-- [ ] 本机 `flutter doctor` 可用
-
+- [x] 本机 `flutter doctor` 可用（Android toolchain ✓ / 设备 ✓，Chrome/Linux 缺失不影响）
 ### 1. 工程脚手架
 
 - [x] `flutter create mobile --org com.qingya --project-name qingya`
