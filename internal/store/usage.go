@@ -25,7 +25,7 @@ func sanitizeUsageEvent(machineID string, e apitypes.UsageEvent) (apitypes.Usage
 	}
 	e.MachineID = machineID
 	e.Agent = strings.ToLower(strings.TrimSpace(e.Agent))
-	if e.Agent != "claude" && e.Agent != "codex" {
+	if e.Agent != "pi" && e.Agent != "claude" && e.Agent != "codex" {
 		return e, false
 	}
 	if e.OccurredAt.IsZero() {

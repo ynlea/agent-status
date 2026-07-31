@@ -240,3 +240,29 @@ func TestWorkingStartedAtResets(t *testing.T) {
 		t.Fatalf("reenter working started=%v want %v", list[0].StartedAt, t3)
 	}
 }
+
+func TestSanitizeUsageEventPi(t *testing.T) {
+	// agent=pi is now whitelisted; the event must survive sanitize.
+	ev, ok := sanitizeUsageEvent("m1", apitypes.UsageEvent{
+		DedupeKey:   "pi:file.jsonl:a1b2c3d4",
+		Agent:       "pi",
+		Model:       "deepseek-v4-flash",
+		SessionID:   "s1",
+		OccurredAt:  time.Now().UTC(),
+		InputTokens: 10,
+	})
+	if !ok {
+		t.Fatal("agent=pi event should be accepted")
+	}
+	if ev.MachineID != "m1" {
+		t.Fatalf("machineID=%s", ev.MachineID)
+	}
+	// Unknown agents stay rejected.
+	if _, ok := sanitizeUsageEvent("m1", apitypes.UsageEvent{
+		DedupeKey:  "x:y",
+		Agent:      "foo",
+		OccurredAt: time.Now().UTC(),
+	}); ok {
+		t.Fatal("unknown agent should be rejected")
+	}
+}
