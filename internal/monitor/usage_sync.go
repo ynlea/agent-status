@@ -58,6 +58,10 @@ func NewUsageSyncer(cfg *Config, rep *Reporter, logger *slog.Logger) *UsageSynce
 	u.state.Files = map[string]fileCursor{}
 	_ = u.load()
 	u.rebindServerIfNeeded()
+	// Force a directory discovery on the first tick after startup so new
+	// agent sources (e.g. a freshly added pi sessions dir) are picked up
+	// immediately instead of waiting out the periodic discover interval.
+	u.state.LastDiscoverUnix = 0
 	return u
 }
 

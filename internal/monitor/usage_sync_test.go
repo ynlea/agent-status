@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"encoding/json"
+	"github.com/ynlea/agent-status/pkg/apitypes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -240,5 +241,87 @@ func TestUsageSyncerReportFailureKeepsBackfillOpen(t *testing.T) {
 	}
 	if offset != 0 {
 		t.Fatalf("failed report must not advance file cursor, offset=%d", offset)
+	}
+}
+
+// TestUsageSyncerStartupDiscoversNewAgentDir ensures a fresh agent source
+// (e.g. pi sessions) is discovered on the first tick after startup even when
+// the persisted cursor state is fully caught up and the periodic discover
+// interval has not elapsed yet.
+func TestUsageSyncerStartupDiscoversNewAgentDir(t *testing.T) {
+	root := t.TempDir()
+	claudeDir := filepath.Join(root, "claude", "p1")
+	piDir := filepath.Join(root, "pi")
+	for _, d := range []string{claudeDir, piDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	known := filepath.Join(claudeDir, "known.jsonl")
+	knownLine := `{"type":"assistant","timestamp":"2026-07-19T10:00:01Z","sessionId":"s1","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":5}}}` + "\n"
+	if err := os.WriteFile(known, []byte(knownLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pi session file unknown to the persisted cursor state.
+	piFile := filepath.Join(piDir, "2026-07-31T10-00-00-000Z_019f0000-0000-0000-0000-000000000000.jsonl")
+	piContent := `{"type":"session","id":"019f0000-0000-0000-0000-000000000000","cwd":"/tmp","timestamp":"2026-07-31T10:00:00.000Z"}` + "\n" +
+		`{"type":"message","id":"a1b2c3d4","timestamp":"2026-07-31T10:00:01.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","usage":{"input":100,"output":20}}}` + "\n"
+	if err := os.WriteFile(piFile, []byte(piContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var piEvents atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/usage/report" {
+			var req apitypes.UsageReportRequest
+			if json.NewDecoder(r.Body).Decode(&req) == nil {
+				for _, ev := range req.Events {
+					if ev.Agent == "pi" {
+						piEvents.Add(1)
+					}
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// Persisted cursor: fully caught up, discover ran 1 minute ago (well
+	// inside the 600s interval), no pi files tracked.
+	state := usageState{
+		ServerURL:        ts.URL,
+		BackfillDone:     true,
+		LastDiscoverUnix: time.Now().Add(-time.Minute).Unix(),
+		Files: map[string]fileCursor{
+			known: {Offset: int64(len(knownLine)), Size: int64(len(knownLine)), Kind: "claude"},
+		},
+	}
+	statePath := filepath.Join(root, "cursors.json")
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		ServerURL:         ts.URL,
+		Key:               "k",
+		MachineID:         "m",
+		MachineName:       "m",
+		ClaudeProjectsDir: filepath.Join(root, "claude"),
+		CodexSessionsDir:  filepath.Join(root, "codex-empty"),
+		PiSessionsDir:     piDir,
+		UsageStateFile:    statePath,
+		UsageIntervalSec:  60,
+		UsageDiscoverSec:  600,
+	}
+	us := NewUsageSyncer(cfg, NewReporter(cfg), nil)
+	if err := us.SyncOnce(); err != nil {
+		t.Fatal(err)
+	}
+	if piEvents.Load() == 0 {
+		t.Fatal("expected startup tick to discover the new pi dir and report usage")
 	}
 }
