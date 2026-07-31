@@ -634,3 +634,162 @@ func CollectCodexUsageFiles(sessionsDir string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// ParsePiUsageFile reads assistant / toolResult / compaction usage lines from a
+// pi session JSONL. fromOffset is a byte offset; returns newly found events, the
+// end offset, and the last assistant model seen (startModel seeds mid-file reads
+// so a toolResult-first cursor still attributes usage to the right model).
+func ParsePiUsageFile(path string, fromOffset int64, startModel string) (events []apitypes.UsageEvent, newOffset int64, lastModel string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fromOffset, startModel, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fromOffset, startModel, err
+	}
+	size := info.Size()
+	if fromOffset > size {
+		// Truncated / replaced file: restart from 0 and drop stale model.
+		fromOffset = 0
+		startModel = ""
+	}
+	if fromOffset > 0 {
+		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
+			return nil, fromOffset, startModel, err
+		}
+	}
+	lastModel = startModel
+	seen := map[string]struct{}{}
+	r := bufio.NewReader(f)
+	var pos = fromOffset
+	for {
+		line, err := r.ReadString('\n')
+		if len(line) > 0 {
+			pos += int64(len(line))
+			trim := strings.TrimSpace(line)
+			if trim != "" {
+				if ev, ok := parsePiLine(trim, path, &lastModel); ok {
+					if _, dup := seen[ev.DedupeKey]; !dup {
+						seen[ev.DedupeKey] = struct{}{}
+						events = append(events, ev)
+					}
+				}
+			}
+		}
+		if err == io.EOF {
+			// incomplete trailing line without newline: do not advance past it
+			if !strings.HasSuffix(line, "\n") && len(line) > 0 {
+				pos -= int64(len(line))
+			}
+			break
+		}
+		if err != nil {
+			return events, pos, lastModel, err
+		}
+	}
+	return events, pos, lastModel, nil
+}
+
+// parsePiLine extracts a usage event from one pi session entry.
+// assistant messages carry usage; toolResult messages may carry nested usage
+// (tool-internal LLM work, included in pi's own totals); compaction entries may
+// carry top-level usage for summary generation. All other entry types are skipped.
+func parsePiLine(line, path string, lastModel *string) (apitypes.UsageEvent, bool) {
+	var rec map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		return apitypes.UsageEvent{}, false
+	}
+	typ, _ := rec["type"].(string)
+	var usage map[string]interface{}
+	model := ""
+	switch typ {
+	case "message":
+		msg := mapField(rec, "message")
+		if msg == nil {
+			return apitypes.UsageEvent{}, false
+		}
+		role := strField(msg, "role")
+		if role != "assistant" && role != "toolResult" {
+			return apitypes.UsageEvent{}, false
+		}
+		model = strField(msg, "model")
+		usage = mapField(msg, "usage")
+	case "compaction":
+		usage = mapField(rec, "usage")
+	default:
+		return apitypes.UsageEvent{}, false
+	}
+	if usage == nil {
+		return apitypes.UsageEvent{}, false
+	}
+	in := int64Field(usage, "input")
+	out := int64Field(usage, "output")
+	cw := int64Field(usage, "cacheWrite")
+	ch := int64Field(usage, "cacheRead")
+	if in == 0 && out == 0 && cw == 0 && ch == 0 {
+		return apitypes.UsageEvent{}, false
+	}
+	if model == "" {
+		// toolResult / compaction carry no model: inherit the last assistant model.
+		model = *lastModel
+	} else {
+		*lastModel = model
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	entryID := strField(rec, "id")
+	if entryID == "" {
+		entryID = strField(rec, "timestamp")
+	}
+	at := parseTimeField(rec, "timestamp")
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	return apitypes.UsageEvent{
+		DedupeKey:        "pi:" + filepath.Base(path) + ":" + entryID,
+		Agent:            "pi",
+		Model:            model,
+		SessionID:        piSessionIDFromPath(path),
+		OccurredAt:       at,
+		InputTokens:      in,
+		OutputTokens:     out,
+		CacheWriteTokens: cw,
+		CacheHitTokens:   ch,
+	}, true
+}
+
+// piSessionIDFromPath extracts the session uuid from a pi session file name
+// (<timestamp>_<uuid>.jsonl). This is offset-independent so incremental cursor
+// reads keep the same SessionID as the initial full scan.
+func piSessionIDFromPath(path string) string {
+	stem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if i := strings.LastIndex(stem, "_"); i >= 0 && i < len(stem)-1 {
+		return stem[i+1:]
+	}
+	return stem
+}
+
+// CollectPiUsageFiles lists session jsonl under the pi sessions root (recursive:
+// per-working-directory folders are nested as --<path>--).
+func CollectPiUsageFiles(sessionsDir string) ([]string, error) {
+	var out []string
+	if sessionsDir == "" {
+		return out, nil
+	}
+	err := filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), ".jsonl") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out, err
+}

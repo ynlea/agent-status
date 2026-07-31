@@ -249,6 +249,17 @@ func collect(cfg *monitor.Config, fileSrc *monitor.CodexFileSource) ([]apitypes.
 		}
 		sessions = append(sessions, s)
 	}
+	// pi sessions: non-invasive file scan of ~/.pi/agent/sessions.
+	piSessions, err := monitor.ScanPi(cfg.PiSessionsDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range piSessions {
+		if s.Source == "" {
+			s.Source = "pi-file"
+		}
+		sessions = append(sessions, s)
+	}
 	return sessions, nil
 }
 

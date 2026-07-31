@@ -9,6 +9,7 @@ projects.lnk
 .agents/
 .claude/
 .codex/
+.pi/
 
 # --- runtime data ---
 *.db

@@ -254,8 +254,10 @@ func (u *UsageSyncer) SyncOnce() error {
 		lastTotal := cur.LastTotal
 		switch kind {
 		case "claude":
-			events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
-		default:
+		events, newOff, err = ParseClaudeUsageFile(path, cur.Offset)
+	case "pi":
+		events, newOff, lastModel, err = ParsePiUsageFile(path, cur.Offset, cur.LastModel)
+	default:
 			skip := 0
 			if cur.Offset == 0 {
 				// Build root index lazily once per tick for replay dedupe.
@@ -370,6 +372,10 @@ func (u *UsageSyncer) discoverFiles() bool {
 	for _, p := range codexFiles {
 		add(p, "codex")
 	}
+	piFiles, _ := CollectPiUsageFiles(u.Cfg.PiSessionsDir)
+	for _, p := range piFiles {
+		add(p, "pi")
+	}
 
 	// Drop files that disappeared (only when we have a full inventory).
 	for path := range u.state.Files {
@@ -420,7 +426,7 @@ func inferUsageKind(path string) string {
 }
 
 func usageKindOrInfer(kind, path string) string {
-	if kind == "claude" || kind == "codex" {
+	if kind == "claude" || kind == "codex" || kind == "pi" {
 		return kind
 	}
 	return inferUsageKind(path)

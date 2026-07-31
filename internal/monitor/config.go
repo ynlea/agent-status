@@ -16,7 +16,8 @@ type Config struct {
 	Platform    string `json:"platform"` // linux|windows; auto if empty
 	// CodexSessionsDir overrides default ~/.codex/sessions
 	CodexSessionsDir string `json:"codex_sessions_dir,omitempty"`
-	// StateFile stores Claude hook session map
+	// PiSessionsDir overrides default ~/.pi/agent/sessions
+	PiSessionsDir string `json:"pi_sessions_dir,omitempty"`
 	StateFile string `json:"state_file,omitempty"`
 	// ReportIntervalSec heartbeat when no changes
 	ReportIntervalSec int `json:"report_interval_sec,omitempty"`
@@ -95,6 +96,10 @@ func LoadConfig(path string) (*Config, error) {
 	if c.CodexSessionsDir == "" {
 		home, _ := os.UserHomeDir()
 		c.CodexSessionsDir = filepath.Join(home, ".codex", "sessions")
+	}
+	if c.PiSessionsDir == "" {
+		home, _ := os.UserHomeDir()
+		c.PiSessionsDir = filepath.Join(home, ".pi", "agent", "sessions")
 	}
 	if c.ClaudeProjectsDir == "" {
 		home, _ := os.UserHomeDir()

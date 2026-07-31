@@ -325,3 +325,84 @@ func TestParseCodexUsageFileDecreasingTotalNoReemit(t *testing.T) {
 		t.Fatalf("sumOut=%d want 20", sumOut)
 	}
 }
+
+func TestParsePiUsageFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "2026-07-31T10-00-00-000Z_019fb7a3-1931-736f-95d7-36ae8e298e4a.jsonl")
+	content := `{"type":"session","version":3,"id":"019fb7a3-1931-736f-95d7-36ae8e298e4a","timestamp":"2026-07-31T10:00:00.000Z","cwd":"/tmp/demo"}
+{"type":"message","id":"a1b2c3d4","parentId":null,"timestamp":"2026-07-31T10:00:01.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","usage":{"input":100,"output":20,"cacheRead":50,"cacheWrite":0,"totalTokens":170}}}
+{"type":"message","id":"b2c3d4e5","parentId":"a1b2c3d4","timestamp":"2026-07-31T10:00:02.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","usage":{"input":5,"output":3,"cacheRead":0,"cacheWrite":0,"totalTokens":8}}}
+{"type":"compaction","id":"c3d4e5f6","parentId":"b2c3d4e5","timestamp":"2026-07-31T10:00:03.000Z","summary":"...","usage":{"input":30,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":40}}
+{"type":"message","id":"d4e5f6g7","parentId":"c3d4e5f6","timestamp":"2026-07-31T10:00:04.000Z","message":{"role":"user","content":"next"}}
+{"type":"message","id":"e5f6g7h8","parentId":"d4e5f6g7","timestamp":"2026-07-31T10:00:05.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0}}}
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, off, lastModel, err := ParsePiUsageFile(p, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// assistant + toolResult + compaction = 3; zero-usage and user lines skipped.
+	if len(ev) != 3 {
+		t.Fatalf("want 3 events, got %d: %+v", len(ev), ev)
+	}
+	if ev[0].Agent != "pi" || ev[0].Model != "deepseek-v4-flash" || ev[0].InputTokens != 100 || ev[0].OutputTokens != 20 || ev[0].CacheHitTokens != 50 {
+		t.Fatalf("ev[0]=%+v", ev[0])
+	}
+	// toolResult inherits model from the previous assistant.
+	if ev[1].Model != "deepseek-v4-flash" || ev[1].InputTokens != 5 {
+		t.Fatalf("ev[1]=%+v", ev[1])
+	}
+	if ev[2].InputTokens != 30 || ev[2].OutputTokens != 10 {
+		t.Fatalf("ev[2]=%+v", ev[2])
+	}
+	// SessionID from the file-name uuid (offset-independent).
+	if ev[0].SessionID != "019fb7a3-1931-736f-95d7-36ae8e298e4a" {
+		t.Fatalf("sessionID=%s", ev[0].SessionID)
+	}
+	wantKey := "pi:" + filepath.Base(p) + ":a1b2c3d4"
+	if ev[0].DedupeKey != wantKey {
+		t.Fatalf("dedupeKey=%s want %s", ev[0].DedupeKey, wantKey)
+	}
+	if lastModel != "deepseek-v4-flash" {
+		t.Fatalf("lastModel=%s", lastModel)
+	}
+
+	// Incremental read at the same offset emits nothing.
+	ev2, _, _, err := ParsePiUsageFile(p, off, lastModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev2) != 0 {
+		t.Fatalf("want 0 incremental events, got %d", len(ev2))
+	}
+
+	// Append a new assistant line: incremental read picks it up only.
+	extra := `{"type":"message","id":"f6g7h8i9","parentId":"e5f6g7h8","timestamp":"2026-07-31T10:00:06.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","usage":{"input":7,"output":2,"cacheRead":0,"cacheWrite":0,"totalTokens":9}}}
+`
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(extra); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	ev3, _, _, err := ParsePiUsageFile(p, off, lastModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev3) != 1 || ev3[0].InputTokens != 7 {
+		t.Fatalf("want 1 appended event, got %d: %+v", len(ev3), ev3)
+	}
+
+	// Oversized offset restarts from 0 (truncated/replaced file recovery).
+	ev4, off4, _, err := ParsePiUsageFile(p, off+100000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off4 == 0 || len(ev4) != 4 {
+		t.Fatalf("oversized offset should restart from 0: off=%d events=%d", off4, len(ev4))
+	}
+}
