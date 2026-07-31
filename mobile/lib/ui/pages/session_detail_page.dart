@@ -516,6 +516,7 @@ String _agentLabel(String agent) => switch (agent.toLowerCase()) {
       'claude' => 'Claude',
       'codex' => 'Codex',
       'opencode' => 'OpenCode',
+      'pi' => 'Pi',
       _ => agent.isEmpty ? 'Agent' : agent,
     };
 
@@ -523,6 +524,7 @@ Color _agentColor(QingyaPalette c, String agent) => switch (agent.toLowerCase())
       'claude' => c.agentClaude,
       'codex' => c.agentCodex,
       'opencode' => c.agentOpencode,
+      'pi' => c.agentPi,
       _ => c.device,
     };
 
@@ -530,6 +532,7 @@ Color _agentSoft(QingyaPalette c, String agent) => switch (agent.toLowerCase()) 
       'claude' => c.agentClaudeSoft,
       'codex' => c.agentCodexSoft,
       'opencode' => c.agentOpencodeSoft,
+      'pi' => c.agentPiSoft,
       _ => c.deviceSoft,
     };
 

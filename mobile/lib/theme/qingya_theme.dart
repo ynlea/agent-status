@@ -63,6 +63,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
     required this.agentCodexSoft,
     required this.agentOpencode,
     required this.agentOpencodeSoft,
+    required this.agentPi,
+    required this.agentPiSoft,
   });
 
   final Color scaffold;
@@ -96,6 +98,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
   final Color agentCodexSoft;
   final Color agentOpencode;
   final Color agentOpencodeSoft;
+  final Color agentPi;
+  final Color agentPiSoft;
 
   static const light = QingyaPalette(
     scaffold: QingyaColors.scaffold,
@@ -129,6 +133,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
     agentCodexSoft: Color(0xFFE6F7F2),
     agentOpencode: Color(0xFF6078FF),
     agentOpencodeSoft: Color(0xFFEEF1FF),
+    agentPi: Color(0xFF8B5CF6),
+    agentPiSoft: Color(0xFFF3EEFF),
   );
 
   /// 在现有浅色品牌感上推导的深色 token。
@@ -164,6 +170,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
     agentCodexSoft: Color(0xFF1E332C),
     agentOpencode: Color(0xFF7B8FFF),
     agentOpencodeSoft: Color(0xFF2A3048),
+    agentPi: Color(0xFFA78BFA),
+    agentPiSoft: Color(0xFF2D2740),
   );
 
   @override
@@ -199,6 +207,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
     Color? agentCodexSoft,
     Color? agentOpencode,
     Color? agentOpencodeSoft,
+    Color? agentPi,
+    Color? agentPiSoft,
   }) {
     return QingyaPalette(
       scaffold: scaffold ?? this.scaffold,
@@ -232,6 +242,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
       agentCodexSoft: agentCodexSoft ?? this.agentCodexSoft,
       agentOpencode: agentOpencode ?? this.agentOpencode,
       agentOpencodeSoft: agentOpencodeSoft ?? this.agentOpencodeSoft,
+      agentPi: agentPi ?? this.agentPi,
+      agentPiSoft: agentPiSoft ?? this.agentPiSoft,
     );
   }
 
@@ -271,6 +283,8 @@ class QingyaPalette extends ThemeExtension<QingyaPalette> {
       agentCodexSoft: mix(agentCodexSoft, other.agentCodexSoft),
       agentOpencode: mix(agentOpencode, other.agentOpencode),
       agentOpencodeSoft: mix(agentOpencodeSoft, other.agentOpencodeSoft),
+      agentPi: mix(agentPi, other.agentPi),
+      agentPiSoft: mix(agentPiSoft, other.agentPiSoft),
     );
   }
 }

@@ -83,6 +83,8 @@ class QingyaAssets {
         return 'assets/images/agent/agent_claude.png';
       case 'codex':
         return 'assets/images/agent/agent_codex.png';
+      case 'pi':
+        return 'assets/images/agent/agent_pi.png';
       default:
         return 'assets/images/agent/agent_unknown.png';
     }
@@ -95,6 +97,8 @@ class QingyaAssets {
         return 'assets/images/agent/agent_claude_glyph.png';
       case 'codex':
         return 'assets/images/agent/agent_codex_glyph.png';
+      case 'pi':
+        return 'assets/images/agent/agent_pi_glyph.png';
       default:
         return 'assets/images/agent/agent_unknown.png';
     }

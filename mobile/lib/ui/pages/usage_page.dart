@@ -155,6 +155,7 @@ class _UsagePageState extends ConsumerState<UsagePage> {
                   DropdownMenuItem(value: '', child: Text('全部渠道')),
                   DropdownMenuItem(value: 'claude', child: Text('Claude')),
                   DropdownMenuItem(value: 'codex', child: Text('Codex')),
+                  DropdownMenuItem(value: 'pi', child: Text('Pi')),
                 ],
                 onChanged: (v) async {
                   if (v == null) return;

@@ -52,6 +52,12 @@ class SessionCard extends StatelessWidget {
           color: c.agentOpencode,
           soft: c.agentOpencodeSoft,
         );
+      case 'pi':
+        return _AgentStyle(
+          label: 'Pi',
+          color: c.agentPi,
+          soft: c.agentPiSoft,
+        );
       default:
         return _AgentStyle(
           label: session.agent.isEmpty ? 'Agent' : session.agent,

@@ -99,6 +99,8 @@ class IslandAnnouncement {
         return 'Codex';
       case 'opencode':
         return 'OpenCode';
+      case 'pi':
+        return 'Pi';
       case '':
       case 'unknown':
         return '未知渠道';
