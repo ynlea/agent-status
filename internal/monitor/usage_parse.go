@@ -703,13 +703,11 @@ func parsePiLine(line, path string, lastModel *string) (apitypes.UsageEvent, boo
 	}
 	typ, _ := rec["type"].(string)
 	var usage map[string]interface{}
+	var msg map[string]interface{}
 	model := ""
 	switch typ {
 	case "message":
-		msg := mapField(rec, "message")
-		if msg == nil {
-			return apitypes.UsageEvent{}, false
-		}
+		msg = mapField(rec, "message")
 		role := strField(msg, "role")
 		if role != "assistant" && role != "toolResult" {
 			return apitypes.UsageEvent{}, false
@@ -728,7 +726,8 @@ func parsePiLine(line, path string, lastModel *string) (apitypes.UsageEvent, boo
 	out := int64Field(usage, "output")
 	cw := int64Field(usage, "cacheWrite")
 	ch := int64Field(usage, "cacheRead")
-	if in == 0 && out == 0 && cw == 0 && ch == 0 {
+	re := int64Field(usage, "reasoning")
+	if in == 0 && out == 0 && cw == 0 && ch == 0 && re == 0 {
 		return apitypes.UsageEvent{}, false
 	}
 	if model == "" {
@@ -740,22 +739,36 @@ func parsePiLine(line, path string, lastModel *string) (apitypes.UsageEvent, boo
 	if model == "" {
 		model = "unknown"
 	}
-	entryID := strField(rec, "id")
-	if entryID == "" {
-		entryID = strField(rec, "timestamp")
+	// Dedupe key must match what the realtime pi extension reports so the
+	// server-side dedupe collapses file-scan and extension events into one
+	// row. Message entries use the message-level timestamp (Unix ms: present
+	// in both the JSONL and message_end extension events); compaction falls
+	// back to its top-level entry id, then the entry timestamp.
+	id := ""
+	if typ == "message" {
+		if ts, ok := msg["timestamp"].(float64); ok && ts > 0 {
+			id = strconv.FormatInt(int64(ts), 10)
+		}
+	}
+	if id == "" {
+		id = strField(rec, "id")
+	}
+	if id == "" {
+		id = strField(rec, "timestamp")
 	}
 	at := parseTimeField(rec, "timestamp")
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
 	return apitypes.UsageEvent{
-		DedupeKey:        "pi:" + filepath.Base(path) + ":" + entryID,
+		DedupeKey:        "pi:" + filepath.Base(path) + ":" + id,
 		Agent:            "pi",
 		Model:            model,
 		SessionID:        piSessionIDFromPath(path),
 		OccurredAt:       at,
 		InputTokens:      in,
 		OutputTokens:     out,
+		ReasoningTokens:  re,
 		CacheWriteTokens: cw,
 		CacheHitTokens:   ch,
 	}, true

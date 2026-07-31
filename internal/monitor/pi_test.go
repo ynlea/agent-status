@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,5 +187,109 @@ func TestScanPiIdleRevive(t *testing.T) {
 	}
 	if s := sessions[0]; s.State != apitypes.StateWorking {
 		t.Fatalf("freshly touched session state=%s want working", s.State)
+	}
+}
+
+func writePiExtState(t *testing.T, sessions map[string]*piExtSessionState) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".agent-status"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(struct {
+		Sessions map[string]*piExtSessionState `json:"sessions"`
+	}{Sessions: sessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(piExtStatePath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestScanPiExtStateOverridesIdle: an ext-reported idle (session ended) must
+// win over the file scan's working inference inside the staleness window.
+func TestScanPiExtStateOverridesIdle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	p := writePiSessionFile(t, dir, "s.jsonl",
+		piSessionContent("/tmp/demo", "ext-session", "", "task", "done", now.Add(-time.Minute)))
+	past := now.Add(-time.Minute)
+	if err := os.Chtimes(p, past, past); err != nil {
+		t.Fatal(err)
+	}
+	writePiExtState(t, map[string]*piExtSessionState{
+		"ext-session": {
+			State:     apitypes.StateIdle,
+			UpdatedAt: now.Add(-30 * time.Second),
+			Cwd:       "/tmp/demo",
+			Message:   "",
+		},
+	})
+
+	sessions, err := ScanPi(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(sessions))
+	}
+	if s := sessions[0]; s.State != apitypes.StateIdle {
+		t.Fatalf("ext idle must override scan working, got %s", s.State)
+	}
+}
+
+// TestScanPiExtStateExpired: an ext state older than the trust window falls
+// back to file inference.
+func TestScanPiExtStateExpired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	writePiSessionFile(t, dir, "s.jsonl",
+		piSessionContent("/tmp/demo", "exp-session", "", "task", "done", now.Add(-time.Minute)))
+	writePiExtState(t, map[string]*piExtSessionState{
+		"exp-session": {
+			State:     apitypes.StateIdle,
+			UpdatedAt: now.Add(-10 * time.Minute),
+		},
+	})
+
+	sessions, err := ScanPi(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(sessions))
+	}
+	if s := sessions[0]; s.State != apitypes.StateWorking {
+		t.Fatalf("expired ext state must not override, got %s", s.State)
+	}
+}
+
+// TestScanPiExtStatePreventsIdleDrop: an ext-managed session is exempt from
+// the 24h idle drop even when its file looks ancient.
+func TestScanPiExtStatePreventsIdleDrop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	p := writePiSessionFile(t, dir, "s.jsonl",
+		piSessionContent("/tmp/demo", "keep-session", "", "task", "done", now.Add(-25*time.Hour)))
+	past := now.Add(-25 * time.Hour)
+	if err := os.Chtimes(p, past, past); err != nil {
+		t.Fatal(err)
+	}
+	writePiExtState(t, map[string]*piExtSessionState{
+		"keep-session": {
+			State:     apitypes.StateIdle,
+			UpdatedAt: now.Add(-time.Minute),
+		},
+	})
+
+	sessions, err := ScanPi(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("ext-managed session must survive idle drop, got %d", len(sessions))
 	}
 }

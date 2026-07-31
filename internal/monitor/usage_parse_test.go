@@ -330,7 +330,7 @@ func TestParsePiUsageFile(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "2026-07-31T10-00-00-000Z_019fb7a3-1931-736f-95d7-36ae8e298e4a.jsonl")
 	content := `{"type":"session","version":3,"id":"019fb7a3-1931-736f-95d7-36ae8e298e4a","timestamp":"2026-07-31T10:00:00.000Z","cwd":"/tmp/demo"}
-{"type":"message","id":"a1b2c3d4","parentId":null,"timestamp":"2026-07-31T10:00:01.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","usage":{"input":100,"output":20,"cacheRead":50,"cacheWrite":0,"totalTokens":170}}}
+{"type":"message","id":"a1b2c3d4","parentId":null,"timestamp":"2026-07-31T10:00:01.000Z","message":{"role":"assistant","model":"deepseek-v4-flash","timestamp":1785510812068,"usage":{"input":100,"output":20,"cacheRead":50,"cacheWrite":0,"reasoning":7,"totalTokens":170}}}
 {"type":"message","id":"b2c3d4e5","parentId":"a1b2c3d4","timestamp":"2026-07-31T10:00:02.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","usage":{"input":5,"output":3,"cacheRead":0,"cacheWrite":0,"totalTokens":8}}}
 {"type":"compaction","id":"c3d4e5f6","parentId":"b2c3d4e5","timestamp":"2026-07-31T10:00:03.000Z","summary":"...","usage":{"input":30,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":40}}
 {"type":"message","id":"d4e5f6g7","parentId":"c3d4e5f6","timestamp":"2026-07-31T10:00:04.000Z","message":{"role":"user","content":"next"}}
@@ -347,7 +347,7 @@ func TestParsePiUsageFile(t *testing.T) {
 	if len(ev) != 3 {
 		t.Fatalf("want 3 events, got %d: %+v", len(ev), ev)
 	}
-	if ev[0].Agent != "pi" || ev[0].Model != "deepseek-v4-flash" || ev[0].InputTokens != 100 || ev[0].OutputTokens != 20 || ev[0].CacheHitTokens != 50 {
+	if ev[0].Agent != "pi" || ev[0].Model != "deepseek-v4-flash" || ev[0].InputTokens != 100 || ev[0].OutputTokens != 20 || ev[0].CacheHitTokens != 50 || ev[0].ReasoningTokens != 7 {
 		t.Fatalf("ev[0]=%+v", ev[0])
 	}
 	// toolResult inherits model from the previous assistant.
@@ -361,7 +361,7 @@ func TestParsePiUsageFile(t *testing.T) {
 	if ev[0].SessionID != "019fb7a3-1931-736f-95d7-36ae8e298e4a" {
 		t.Fatalf("sessionID=%s", ev[0].SessionID)
 	}
-	wantKey := "pi:" + filepath.Base(p) + ":a1b2c3d4"
+	wantKey := "pi:" + filepath.Base(p) + ":1785510812068" // message-level timestamp (matches the realtime extension)
 	if ev[0].DedupeKey != wantKey {
 		t.Fatalf("dedupeKey=%s want %s", ev[0].DedupeKey, wantKey)
 	}

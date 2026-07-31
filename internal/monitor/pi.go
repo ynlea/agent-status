@@ -18,6 +18,10 @@ const (
 	piWorkingStale = 2 * time.Minute
 	piIdleDrop     = 24 * time.Hour
 	piIdleRevive   = 45 * time.Second
+	// piExtTrustWindow bounds how long the realtime extension state is honored
+	// after its last event; past it the scan falls back to local inference
+	// (the extension may be gone / pi not running).
+	piExtTrustWindow = 3 * time.Minute
 )
 
 // ScanPi walks the pi sessions root (~/.pi/agent/sessions) and derives one
@@ -29,6 +33,7 @@ func ScanPi(root string) ([]apitypes.Session, error) {
 	}
 	var sessions []apitypes.Session
 	now := time.Now().UTC()
+	ext := loadPiExtState()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -39,7 +44,7 @@ func ScanPi(root string) ([]apitypes.Session, error) {
 		if !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
-		if s, ok := loadPiSession(path, now); ok {
+		if s, ok := loadPiSession(path, now, ext); ok {
 			sessions = append(sessions, s)
 		}
 		return nil
@@ -130,7 +135,7 @@ func piTextContent(content interface{}) string {
 
 // loadPiSession streams one pi session file, keeping only the state ScanPi
 // needs; a 600KB+ file is read line-by-line and discarded, not held in memory.
-func loadPiSession(path string, now time.Time) (apitypes.Session, bool) {
+func loadPiSession(path string, now time.Time, ext map[string]*piExtSessionState) (apitypes.Session, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return apitypes.Session{}, false
@@ -155,10 +160,12 @@ func loadPiSession(path string, now time.Time) (apitypes.Session, bool) {
 			return apitypes.Session{}, false
 		}
 	}
-	return st.session(path, fileMod, now)
+	// Look the extension state up by the header session id (authoritative),
+	// not the file name, so header/file-name mismatches still coordinate.
+	return st.session(path, fileMod, now, ext[st.sessionID])
 }
 
-func (s piSessionState) session(path string, fileMod, now time.Time) (apitypes.Session, bool) {
+func (s piSessionState) session(path string, fileMod, now time.Time, ext *piExtSessionState) (apitypes.Session, bool) {
 	if s.sessionID == "" {
 		return apitypes.Session{}, false
 	}
@@ -176,10 +183,6 @@ func (s piSessionState) session(path string, fileMod, now time.Time) (apitypes.S
 	if state == apitypes.StateIdle && now.Sub(fileMod) <= piIdleRevive {
 		state = apitypes.StateWorking
 	}
-	// Stale idle sessions are dropped entirely (same policy as codex scan).
-	if state == apitypes.StateIdle && now.Sub(anchor) > piIdleDrop {
-		return apitypes.Session{}, false
-	}
 	display := s.name
 	if display == "" {
 		if s.firstUser != "" {
@@ -196,6 +199,28 @@ func (s piSessionState) session(path string, fileMod, now time.Time) (apitypes.S
 			message = ShortSummary(s.lastAssistant, defaultSummaryRunes)
 		}
 	}
+	// A fresh realtime extension state overrides the inference: when the
+	// extension reported idle (agent_settled / session_shutdown) the scan
+	// must not flip the session back to working within the staleness window.
+	if ext != nil && !ext.UpdatedAt.IsZero() && now.Sub(ext.UpdatedAt) <= piExtTrustWindow {
+		state = ext.State
+		if ext.Message != "" {
+			message = ext.Message
+		}
+		if ext.DisplayName != "" {
+			display = ext.DisplayName
+		}
+		if ext.Cwd != "" {
+			s.cwd = ext.Cwd
+		}
+		anchor = ext.UpdatedAt
+	} else {
+		// Stale idle sessions are dropped entirely (same policy as codex scan);
+		// ext-managed sessions are exempt (the extension keeps them alive).
+		if state == apitypes.StateIdle && now.Sub(anchor) > piIdleDrop {
+			return apitypes.Session{}, false
+		}
+	}
 	return apitypes.Session{
 		Agent:                "pi",
 		SessionID:            s.sessionID,
@@ -207,4 +232,38 @@ func (s piSessionState) session(path string, fileMod, now time.Time) (apitypes.S
 		Source:               "pi-file",
 		UpdatedAt:            anchor.UTC(),
 	}, true
+}
+
+// piExtSessionState is one session's realtime state written by the pi
+// extension (~/.agent-status/pi-ext-state.json). It is the coordination
+// channel between the live extension and the file scan.
+type piExtSessionState struct {
+	State       apitypes.SessionState `json:"state"`
+	UpdatedAt   time.Time             `json:"updated_at"`
+	DisplayName string                `json:"display_name,omitempty"`
+	Cwd         string                `json:"cwd,omitempty"`
+	Message     string                `json:"message,omitempty"`
+}
+
+func piExtStatePath() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".agent-status", "pi-ext-state.json")
+	}
+	return "pi-ext-state.json"
+}
+
+// loadPiExtState reads the extension state file. Returns nil when absent or
+// malformed, so the scan degrades gracefully to pure file inference.
+func loadPiExtState() map[string]*piExtSessionState {
+	raw, err := os.ReadFile(piExtStatePath())
+	if err != nil {
+		return nil
+	}
+	var st struct {
+		Sessions map[string]*piExtSessionState `json:"sessions"`
+	}
+	if json.Unmarshal(raw, &st) != nil || len(st.Sessions) == 0 {
+		return nil
+	}
+	return st.Sessions
 }
