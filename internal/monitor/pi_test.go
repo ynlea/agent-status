@@ -47,11 +47,11 @@ func TestScanPiTitlePriorityAndMeta(t *testing.T) {
 	// session_info.name wins over the first-user summary.
 	writePiSessionFile(t, dir, "2026-07-31T10-00-00-000Z_aaa11111-0000-0000-0000-000000000001.jsonl",
 		piSessionContent("/tmp/demo", "aaa11111-0000-0000-0000-000000000001", "重构登录模块",
-			"帮我重构登录模块", "好的,开始重构。", now.Add(-2*time.Minute)))
+			"帮我重构登录模块", "好的,开始重构。", now.Add(-time.Minute)))
 	// No name: falls back to first-user summary.
 	writePiSessionFile(t, dir, "2026-07-31T10-00-00-000Z_bbb22222-0000-0000-0000-000000000002.jsonl",
 		piSessionContent("/tmp/other", "bbb22222-0000-0000-0000-000000000002", "",
-			"这个任务怎么做的", "第一步……", now.Add(-2*time.Minute)))
+			"这个任务怎么做的", "第一步……", now.Add(-time.Minute)))
 
 	sessions, err := ScanPi(dir)
 	if err != nil {
@@ -93,8 +93,13 @@ func TestScanPiStateThresholds(t *testing.T) {
 	// 1 minute ago → working; 10 minutes ago → idle.
 	writePiSessionFile(t, dir, "w.jsonl",
 		piSessionContent("/tmp/a", "w-session", "", "task a", "done a", now.Add(-time.Minute)))
-	writePiSessionFile(t, dir, "i.jsonl",
+	ip := writePiSessionFile(t, dir, "i.jsonl",
 		piSessionContent("/tmp/b", "i-session", "", "task b", "done b", now.Add(-10*time.Minute)))
+	// Real pi files keep mtime in sync with the last entry timestamp.
+	past := now.Add(-10 * time.Minute)
+	if err := os.Chtimes(ip, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	sessions, err := ScanPi(dir)
 	if err != nil {
@@ -123,8 +128,12 @@ func TestScanPiIdleDrop(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Idle for >24h: session is dropped entirely (matches codex policy).
-	writePiSessionFile(t, dir, "old.jsonl",
+	op := writePiSessionFile(t, dir, "old.jsonl",
 		piSessionContent("/tmp/old", "old-session", "", "old task", "done", now.Add(-25*time.Hour)))
+	past := now.Add(-25 * time.Hour)
+	if err := os.Chtimes(op, past, past); err != nil {
+		t.Fatal(err)
+	}
 
 	sessions, err := ScanPi(dir)
 	if err != nil {
@@ -150,5 +159,32 @@ func TestScanPiSkipsNonSessionFiles(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].SessionID != "active-session" {
 		t.Fatalf("want only the real session, got %d: %+v", len(sessions), sessions)
+	}
+}
+
+// TestScanPiIdleRevive ensures a session whose file was just written again
+// (activity burst after a stale last message) flips back to working.
+func TestScanPiIdleRevive(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+
+	// Last message 10 minutes ago → idle by staleness, but the file was
+	// touched 30s ago: the revive window must flip it back to working.
+	p := writePiSessionFile(t, dir, "revive.jsonl",
+		piSessionContent("/tmp/r", "revive-session", "", "old task", "done", now.Add(-10*time.Minute)))
+	past := now.Add(-30 * time.Second)
+	if err := os.Chtimes(p, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := ScanPi(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(sessions))
+	}
+	if s := sessions[0]; s.State != apitypes.StateWorking {
+		t.Fatalf("freshly touched session state=%s want working", s.State)
 	}
 }

@@ -12,10 +12,12 @@ import (
 	"github.com/ynlea/agent-status/pkg/apitypes"
 )
 
-// pi working/idle thresholds (mirror the codex file scan).
+// pi working/idle thresholds (mirror the codex file scan, with a shorter
+// working staleness so an ended session flips to idle faster).
 const (
-	piWorkingStale = 5 * time.Minute
+	piWorkingStale = 2 * time.Minute
 	piIdleDrop     = 24 * time.Hour
+	piIdleRevive   = 45 * time.Second
 )
 
 // ScanPi walks the pi sessions root (~/.pi/agent/sessions) and derives one
@@ -166,6 +168,12 @@ func (s piSessionState) session(path string, fileMod, now time.Time) (apitypes.S
 	}
 	state := apitypes.StateIdle
 	if now.Sub(anchor) <= piWorkingStale {
+		state = apitypes.StateWorking
+	}
+	// Idle session whose file was just written again flips back to working
+	// immediately (mirrors the codex scan) so a brief activity gap between
+	// ticks does not leave a stale idle state.
+	if state == apitypes.StateIdle && now.Sub(fileMod) <= piIdleRevive {
 		state = apitypes.StateWorking
 	}
 	// Stale idle sessions are dropped entirely (same policy as codex scan).
