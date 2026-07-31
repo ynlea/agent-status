@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend 层 Quality Check 入口"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门槛核对(复杂度、嵌套、并发语义)"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "核对错误处理是否符合规范"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend 层质量核对入口"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "mobile 组件规范(图标映射/agent 显示)"}

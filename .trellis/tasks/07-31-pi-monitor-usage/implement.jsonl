@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend 层 Pre-Development Checklist + Quality Check 入口"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Go 错误处理规范(解析函数需遵守:显式错误返回,不静默吞错)"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门槛:复杂度、嵌套、命名、并发语义文档"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend(mobile)层入口规范"}
