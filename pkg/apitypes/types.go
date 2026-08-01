@@ -83,6 +83,11 @@ type ReportRequest struct {
 	Version     string    `json:"version,omitempty"` // monitor binary version
 	Sessions    []Session `json:"sessions"`
 	ReportedAt  time.Time `json:"reported_at"`
+	// FullSnapshot marks this report as the machine's complete session set:
+	// sessions absent from it are pruned. Realtime/partial reporters (e.g. the
+	// pi extension) send false so they upsert their session without deleting
+	// others. Absent (nil) means true, keeping older monitors' behavior.
+	FullSnapshot *bool `json:"full_snapshot,omitempty"`
 }
 
 type Machine struct {

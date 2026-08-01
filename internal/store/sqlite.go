@@ -761,53 +761,57 @@ ON CONFLICT(machine_id, agent, session_id) DO UPDATE SET
 		}
 	}
 
-	// Remove sessions no longer reported by this machine (prevents forever-zombies).
-	rows, err := tx.Query(`
+	// Partial reporters (e.g. the pi extension) upsert without pruning: only a
+	// true full snapshot may drop sessions absent from the report.
+	if req.FullSnapshot == nil || *req.FullSnapshot {
+		// Remove sessions no longer reported by this machine (prevents forever-zombies).
+		rows, err := tx.Query(`
 SELECT agent, session_id, display_name, state, message FROM sessions WHERE machine_id=?
 `, req.MachineID)
-	if err != nil {
-		return nil, false
-	}
-	type staleRow struct {
-		agent, sid, display, state, message string
-	}
-	var stale []staleRow
-	for rows.Next() {
-		var r staleRow
-		if err := rows.Scan(&r.agent, &r.sid, &r.display, &r.state, &r.message); err != nil {
-			rows.Close()
+		if err != nil {
 			return nil, false
 		}
-		if _, ok := keep[r.agent+"\x00"+r.sid]; !ok {
-			stale = append(stale, r)
+		type staleRow struct {
+			agent, sid, display, state, message string
 		}
-	}
-	rows.Close()
-	for _, r := range stale {
-		if r.state != string(apitypes.StateIdle) {
-			gone := apitypes.Session{
-				MachineID:   req.MachineID,
-				MachineName: effectiveName,
-				Agent:       r.agent,
-				SessionID:   r.sid,
-				DisplayName: r.display,
-				State:       apitypes.StateIdle,
-				Message:     r.message,
-				UpdatedAt:   now,
+		var stale []staleRow
+		for rows.Next() {
+			var r staleRow
+			if err := rows.Scan(&r.agent, &r.sid, &r.display, &r.state, &r.message); err != nil {
+				rows.Close()
+				return nil, false
 			}
-			_, err = tx.Exec(`
+			if _, ok := keep[r.agent+"\x00"+r.sid]; !ok {
+				stale = append(stale, r)
+			}
+		}
+		rows.Close()
+		for _, r := range stale {
+			if r.state != string(apitypes.StateIdle) {
+				gone := apitypes.Session{
+					MachineID:   req.MachineID,
+					MachineName: effectiveName,
+					Agent:       r.agent,
+					SessionID:   r.sid,
+					DisplayName: r.display,
+					State:       apitypes.StateIdle,
+					Message:     r.message,
+					UpdatedAt:   now,
+				}
+				_, err = tx.Exec(`
 INSERT INTO history(machine_id, machine_name, agent, session_id, display_name, from_state, to_state, message, at)
 VALUES(?,?,?,?,?,?,?,?,?)
 `, req.MachineID, effectiveName, r.agent, r.sid, r.display, r.state, string(apitypes.StateIdle), r.message, now.Format(time.RFC3339Nano))
-			if err != nil {
-				return nil, false
+				if err != nil {
+					return nil, false
+				}
+				changed = append(changed, gone)
 			}
-			changed = append(changed, gone)
-		}
-		if _, err = tx.Exec(`
+			if _, err = tx.Exec(`
 DELETE FROM sessions WHERE machine_id=? AND agent=? AND session_id=?
 `, req.MachineID, r.agent, r.sid); err != nil {
-			return nil, false
+				return nil, false
+			}
 		}
 	}
 

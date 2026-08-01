@@ -176,33 +176,37 @@ func (m *Memory) ApplyReport(req apitypes.ReportRequest) (changed []apitypes.Ses
 			m.sessionProjects[key] = prev
 		}
 	}
-	// Drop sessions for this machine that were not in the snapshot.
-	for key, old := range m.sessions {
-		if key.MachineID != req.MachineID {
-			continue
+	// Partial reporters (e.g. the pi extension) upsert without pruning: only a
+	// true full snapshot may drop sessions absent from the report.
+	if req.FullSnapshot == nil || *req.FullSnapshot {
+		// Drop sessions for this machine that were not in the snapshot.
+		for key, old := range m.sessions {
+			if key.MachineID != req.MachineID {
+				continue
+			}
+			if _, ok := keep[key]; ok {
+				continue
+			}
+			if old.State != apitypes.StateIdle {
+				gone := old
+				gone.State = apitypes.StateIdle
+				gone.UpdatedAt = now
+				gone.MachineName = name
+				m.appendHistoryLocked(apitypes.HistoryEntry{
+					MachineID:   old.MachineID,
+					MachineName: name,
+					Agent:       old.Agent,
+					SessionID:   old.SessionID,
+					DisplayName: old.DisplayName,
+					FromState:   old.State,
+					ToState:     apitypes.StateIdle,
+					Message:     old.Message,
+					At:          now,
+				})
+				changed = append(changed, gone)
+			}
+			delete(m.sessions, key)
 		}
-		if _, ok := keep[key]; ok {
-			continue
-		}
-		if old.State != apitypes.StateIdle {
-			gone := old
-			gone.State = apitypes.StateIdle
-			gone.UpdatedAt = now
-			gone.MachineName = name
-			m.appendHistoryLocked(apitypes.HistoryEntry{
-				MachineID:   old.MachineID,
-				MachineName: name,
-				Agent:       old.Agent,
-				SessionID:   old.SessionID,
-				DisplayName: old.DisplayName,
-				FromState:   old.State,
-				ToState:     apitypes.StateIdle,
-				Message:     old.Message,
-				At:          now,
-			})
-			changed = append(changed, gone)
-		}
-		delete(m.sessions, key)
 	}
 	return changed, wasOnline
 }

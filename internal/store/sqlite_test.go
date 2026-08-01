@@ -82,6 +82,38 @@ func TestSQLiteReportDropsMissingSessions(t *testing.T) {
 	}
 }
 
+// A partial report (full_snapshot=false, e.g. the pi extension's realtime
+// single-session upsert) must not prune sessions absent from it.
+func TestSQLitePartialReportDoesNotDrop(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "partial.db")
+	s, err := NewSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	_, _ = s.ApplyReport(apitypes.ReportRequest{
+		MachineID: "m1", MachineName: "a", Platform: "linux", ReportedAt: now,
+		Sessions: []apitypes.Session{
+			{Agent: "claude", SessionID: "c1", DisplayName: "c", State: apitypes.StateWorking, UpdatedAt: now},
+			{Agent: "pi", SessionID: "p1", DisplayName: "p", State: apitypes.StateWorking, UpdatedAt: now},
+		},
+	})
+	// Extension-style upsert: only the pi session, marked partial.
+	full := false
+	_, _ = s.ApplyReport(apitypes.ReportRequest{
+		MachineID: "m1", MachineName: "a", Platform: "linux", ReportedAt: now.Add(time.Second),
+		FullSnapshot: &full,
+		Sessions: []apitypes.Session{
+			{Agent: "pi", SessionID: "p1", DisplayName: "p", State: apitypes.StateIdle, UpdatedAt: now.Add(time.Second)},
+		},
+	})
+	list := s.ListSessions("m1")
+	if len(list) != 2 {
+		t.Fatalf("partial report dropped sessions: want 2, got %d", len(list))
+	}
+}
+
 func TestSQLiteStartedAtStableAndRealUsage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metrics.db")
 	s, err := NewSQLite(path)

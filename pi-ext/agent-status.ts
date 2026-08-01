@@ -173,6 +173,8 @@ function reportState(ctx: ExtCtx, state: string, message = ""): void {
     machine_name: machineName,
     platform,
     reported_at: now,
+    // Partial upsert: only this session may change; never prune others.
+    full_snapshot: false,
     sessions: [
       {
         machine_id: machineId,

@@ -81,13 +81,15 @@ func (r *Reporter) postJSON(path string, payload interface{}) error {
 }
 
 func (r *Reporter) Report(sessions []apitypes.Session) error {
+	full := true
 	reqBody := apitypes.ReportRequest{
-		MachineID:   r.Cfg.MachineID,
-		MachineName: r.Cfg.MachineName,
-		Platform:    r.platform(),
-		Version:     buildinfo.Version,
-		Sessions:    sessions,
-		ReportedAt:  time.Now().UTC(),
+		MachineID:    r.Cfg.MachineID,
+		MachineName:  r.Cfg.MachineName,
+		Platform:     r.platform(),
+		Version:      buildinfo.Version,
+		Sessions:     sessions,
+		ReportedAt:   time.Now().UTC(),
+		FullSnapshot: &full,
 	}
 	return r.postJSON("/api/v1/report", reqBody)
 }

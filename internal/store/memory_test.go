@@ -104,3 +104,27 @@ func TestMemoryStartedAtRealUsageAndRename(t *testing.T) {
 		t.Fatalf("rename notify name=%+v", changed)
 	}
 }
+
+// A partial report (full_snapshot=false) must not prune absent sessions.
+func TestMemoryPartialReportDoesNotDrop(t *testing.T) {
+	m := NewMemory(10)
+	now := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	_, _ = m.ApplyReport(apitypes.ReportRequest{
+		MachineID: "m1", MachineName: "a", Platform: "linux", ReportedAt: now,
+		Sessions: []apitypes.Session{
+			{Agent: "claude", SessionID: "c1", DisplayName: "c", State: apitypes.StateWorking, UpdatedAt: now},
+			{Agent: "pi", SessionID: "p1", DisplayName: "p", State: apitypes.StateWorking, UpdatedAt: now},
+		},
+	})
+	full := false
+	_, _ = m.ApplyReport(apitypes.ReportRequest{
+		MachineID: "m1", MachineName: "a", Platform: "linux", ReportedAt: now.Add(time.Second),
+		FullSnapshot: &full,
+		Sessions: []apitypes.Session{
+			{Agent: "pi", SessionID: "p1", DisplayName: "p", State: apitypes.StateIdle, UpdatedAt: now.Add(time.Second)},
+		},
+	})
+	if got := len(m.ListSessions("m1")); got != 2 {
+		t.Fatalf("partial report dropped sessions: want 2, got %d", got)
+	}
+}
