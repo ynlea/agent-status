@@ -287,7 +287,11 @@ class StatusRepository extends StateNotifier<StatusSnapshot> {
                       ? existing!.displayName
                       : sessionId),
               state: sessionStateFrom('${payload['state'] ?? ''}'),
-              message: '${payload['message'] ?? ''}',
+              // 状态通知可能不带 message（如 pi 的 done）；保留已有提示词，
+              // 避免播报/卡片把 working 的提示词冲成空。
+              message: '${payload['message'] ?? ''}'.isNotEmpty
+                  ? '${payload['message'] ?? ''}'
+                  : (existing?.message ?? ''),
               updatedAt: at ?? existing?.updatedAt ?? DateTime.now(),
               startedAt: existing?.startedAt,
               realUsage: existing?.realUsage,

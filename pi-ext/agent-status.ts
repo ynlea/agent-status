@@ -160,12 +160,16 @@ function reportState(ctx: ExtCtx, state: string, message = ""): void {
   if (!sid) return;
   const now = new Date().toISOString();
   const st = loadExtState();
+  // Keep the previous prompt when reporting a state without one (e.g. done):
+  // an empty message would wipe the working prompt from the server and the
+  // app notification, which claude/codex keep via their file scans.
+  const prevMessage = st.sessions[sid]?.message ?? "";
   st.sessions[sid] = {
     state,
     updated_at: now,
     display_name: st.sessions[sid]?.display_name,
     cwd: st.sessions[sid]?.cwd,
-    message,
+    message: message || prevMessage,
   };
   saveExtState(st);
   void post("/api/v1/report", {
