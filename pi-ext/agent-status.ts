@@ -3,8 +3,8 @@
 // Reports pi session state and token usage to the agent-status server the
 // moment they happen, instead of waiting for the monitor's periodic file scan:
 //   - before_agent_start -> working (user submitted a prompt)
-//   - agent_settled      -> idle   (agent will not continue automatically)
-//   - session_shutdown   -> idle   (session closed)
+//   - agent_settled      -> done    (turn finished; notify like claude/codex)
+//   - session_shutdown   -> done    (session closed)
 //   - message_end        -> usage  (assistant / toolResult messages)
 //
 // The extension also writes ~/.agent-status/pi-ext-state.json as the
@@ -199,14 +199,15 @@ export default function (pi: ExtensionAPI): void {
     reportState(ctx, "working", prompt.slice(0, 120));
   });
 
-  // Agent run finished and pi will not continue automatically.
+  // Agent run finished and pi will not continue automatically. Reports
+  // "done" so the app notifies like claude/codex turn completions.
   pi.on("agent_settled", (_event, ctx) => {
-    reportState(ctx, "idle");
+    reportState(ctx, "done");
   });
 
   // Session closed / switched away.
   pi.on("session_shutdown", (_event, ctx) => {
-    reportState(ctx, "idle");
+    reportState(ctx, "done");
   });
 
   // Report usage the moment a message lands; dedupe_key matches the monitor's
