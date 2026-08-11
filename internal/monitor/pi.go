@@ -32,6 +32,7 @@ func ScanPi(root string) ([]apitypes.Session, error) {
 		return nil, nil
 	}
 	var sessions []apitypes.Session
+	seen := make(map[string]struct{})
 	now := time.Now().UTC()
 	ext := loadPiExtState()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -46,10 +47,35 @@ func ScanPi(root string) ([]apitypes.Session, error) {
 		}
 		if s, ok := loadPiSession(path, now, ext); ok {
 			sessions = append(sessions, s)
+			seen[s.SessionID] = struct{}{}
 		}
 		return nil
 	})
-	return sessions, err
+	if err != nil {
+		return nil, err
+	}
+	// The extension reports working before pi has flushed the session file.
+	// Keep that partial state in the next full monitor snapshot so the server
+	// does not prune it between the extension report and file creation.
+	for sid, state := range ext {
+		if _, exists := seen[sid]; exists || state == nil || state.UpdatedAt.IsZero() {
+			continue
+		}
+		if now.Sub(state.UpdatedAt) > piExtTrustWindow {
+			continue
+		}
+		sessions = append(sessions, apitypes.Session{
+			Agent:       "pi",
+			SessionID:   sid,
+			DisplayName: state.DisplayName,
+			State:       state.State,
+			Message:     state.Message,
+			Cwd:         state.Cwd,
+			Source:      "pi-ext",
+			UpdatedAt:   state.UpdatedAt.UTC(),
+		})
+	}
+	return sessions, nil
 }
 
 // piSessionState accumulates the minimal per-file state during a stream read

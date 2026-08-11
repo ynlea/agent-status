@@ -42,6 +42,7 @@ func writePiSessionFile(t *testing.T, dir, name, content string) string {
 }
 
 func TestScanPiTitlePriorityAndMeta(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate real ~/.agent-status ext state
 	dir := t.TempDir()
 	now := time.Now().UTC()
 
@@ -88,6 +89,7 @@ func TestScanPiTitlePriorityAndMeta(t *testing.T) {
 }
 
 func TestScanPiStateThresholds(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate real ~/.agent-status ext state
 	dir := t.TempDir()
 	now := time.Now().UTC()
 
@@ -125,6 +127,7 @@ func TestScanPiStateThresholds(t *testing.T) {
 }
 
 func TestScanPiIdleDrop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate real ~/.agent-status ext state
 	dir := t.TempDir()
 	now := time.Now().UTC()
 
@@ -146,6 +149,7 @@ func TestScanPiIdleDrop(t *testing.T) {
 }
 
 func TestScanPiSkipsNonSessionFiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate real ~/.agent-status ext state
 	dir := t.TempDir()
 	now := time.Now().UTC()
 	writePiSessionFile(t, dir, "active.jsonl",
@@ -166,6 +170,7 @@ func TestScanPiSkipsNonSessionFiles(t *testing.T) {
 // TestScanPiIdleRevive ensures a session whose file was just written again
 // (activity burst after a stale last message) flips back to working.
 func TestScanPiIdleRevive(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate real ~/.agent-status ext state
 	dir := t.TempDir()
 	now := time.Now().UTC()
 
@@ -187,6 +192,33 @@ func TestScanPiIdleRevive(t *testing.T) {
 	}
 	if s := sessions[0]; s.State != apitypes.StateWorking {
 		t.Fatalf("freshly touched session state=%s want working", s.State)
+	}
+}
+
+func TestScanPiExtStateKeepsUnflushedSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	writePiExtState(t, map[string]*piExtSessionState{
+		"pending-session": {
+			State:       apitypes.StateWorking,
+			UpdatedAt:   now.Add(-time.Second),
+			DisplayName: "正在执行",
+			Cwd:         "/tmp/pending",
+			Message:     "等待 pi 写入会话文件",
+		},
+	})
+
+	sessions, err := ScanPi(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want extension-only session, got %d: %+v", len(sessions), sessions)
+	}
+	got := sessions[0]
+	if got.SessionID != "pending-session" || got.State != apitypes.StateWorking || got.Source != "pi-ext" {
+		t.Fatalf("unexpected extension-only session: %+v", got)
 	}
 }
 
